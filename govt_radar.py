@@ -115,11 +115,18 @@ def _clean_body(text, max_len=200):
     return cleaned[:max_len].rstrip() + "…"
 
 
-def _format_announcement_block(s, include_body=False):
-    """공고 한 건의 텔레그램 표시 블록 생성"""
+def _format_announcement_block(s, include_body=False, number=None):
+    """공고 한 건의 텔레그램 표시 블록 생성
+
+    Args:
+        s: scored item
+        include_body: 본문·자격·분류 포함 여부 (S/A에만 True)
+        number: 카테고리 내 순서 (예: "S1", "A3"). None이면 표시 안 함
+    """
     lines = []
     tag_str = " ".join(f"[{t}]" for t in s.get("tags", []))
-    lines.append(f"• [{s['score']}] {s['title'][:70]} {tag_str}".strip())
+    num_prefix = f"#{number} " if number else ""
+    lines.append(f"{num_prefix}[{s['score']}] {s['title'][:70]} {tag_str}".strip())
     lines.append(f"  📊 {_fmt_score_breakdown(s)} ({s.get('region_label','?')})")
 
     # 마감일 + D-Day
@@ -175,7 +182,15 @@ def build_telegram_messages(scored_items, stats_l1, count_l2, today_str):
     B 등급: 제목+점수만
     C 등급: 카운트만
     """
-    notify = [s for s in scored_items if s["score"] >= 3]
+    # 점수 ≥3 + tier가 진짜 적합한 것만 (강등된 자격미달·검증불가·비공고·메뉴 제외)
+    EXCLUDE_TIER_PREFIX = (
+        "타지역", "제외", "비공고", "메뉴", "자격미달", "검증불가",
+    )
+    notify = [
+        s for s in scored_items
+        if s["score"] >= 3
+        and not (s.get("tier") or "").startswith(EXCLUDE_TIER_PREFIX)
+    ]
     s_tier = [s for s in notify if s["score"] >= 9]
     a_tier = [s for s in notify if 7 <= s["score"] < 9]
     b_tier = [s for s in notify if 5 <= s["score"] < 7]
@@ -192,8 +207,8 @@ def build_telegram_messages(scored_items, stats_l1, count_l2, today_str):
 
     if s_tier:
         current.append(f"🚨 S - 긴급 계획서 즉시 검토 ({len(s_tier)}건)")
-        for s in s_tier:
-            block = _format_announcement_block(s, include_body=True)
+        for idx, s in enumerate(s_tier, 1):
+            block = _format_announcement_block(s, include_body=True, number=f"S{idx}")
             # 현재 메시지 누적 길이 체크 (3500자 = 안전 한도)
             if sum(len(l) + 1 for l in current) + len(block) > 3500:
                 messages.append("\n".join(current))
@@ -207,8 +222,8 @@ def build_telegram_messages(scored_items, stats_l1, count_l2, today_str):
             messages.append("\n".join(current))
             current = []
         current.append(f"⭐ A - 사업계획서 후보 ({len(a_tier)}건)")
-        for s in a_tier:
-            block = _format_announcement_block(s, include_body=True)
+        for idx, s in enumerate(a_tier, 1):
+            block = _format_announcement_block(s, include_body=True, number=f"A{idx}")
             if sum(len(l) + 1 for l in current) + len(block) > 3500:
                 messages.append("\n".join(current))
                 current = [f"⭐ A 등급 (계속)"]
@@ -220,8 +235,8 @@ def build_telegram_messages(scored_items, stats_l1, count_l2, today_str):
             messages.append("\n".join(current))
             current = []
         current.append(f"📋 B - 검토 ({len(b_tier)}건, 상위 15건)")
-        for s in b_tier[:15]:
-            current.append(f"• [{s['score']}] {s['title'][:60]} ({s.get('region_label','?')})")
+        for idx, s in enumerate(b_tier[:15], 1):
+            current.append(f"#B{idx} [{s['score']}] {s['title'][:60]} ({s.get('region_label','?')})")
             if sum(len(l) + 1 for l in current) > 3500:
                 messages.append("\n".join(current))
                 current = ["📋 B 등급 (계속)"]
