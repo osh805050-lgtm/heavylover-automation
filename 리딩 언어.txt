@@ -1,0 +1,1 @@
+cd "C:\Users\osh80\OneDrive\바탕 화면\heavylover-automation"

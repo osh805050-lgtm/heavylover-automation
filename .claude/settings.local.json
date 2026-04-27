@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "PowerShell(*)",
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "WebSearch",
+      "WebFetch(*)",
+      "Skill(*)",
+      "mcp__claude_ai_Google_Drive__read_file_content"
+    ]
+  }
+}
