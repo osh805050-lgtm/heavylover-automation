@@ -260,9 +260,12 @@
 - Apps Script 19개 분석 탭은 시간 트리거 미설정 → 승현님이 가끔 수동 ▶ 실행 (또는 시트 → 확장 프로그램 → Apps Script → 트리거 추가로 자동화 가능)
 - 카페24 + SS 통합 분석 시 같은 사람이 두 채널에서 산 건 다른 사람으로 잡힘 (식별 체계 다름)
 
-### 엑셀 생성 로직
-- 카페24: `fetch_orders(days_back=7)` → `order_status=N20`만 포함
-- 스마트스토어: `orders_by_status(PAYED, hours_back=24)` → `placeOrderStatus=OK`만 포함
+### 엑셀 생성 로직 (상태 기반 전수 — 누락 0건 보장)
+- **카페24**: `fetch_orders(days_back=7)` → `order_status=N20`만 포함
+- **스마트스토어**: `orders_pending_dispatch(days_back=14)` — PAYED 상태 전수 조회
+  - 14일 1일 분할 N회 호출 + productOrderId dedupe (24h 윈도우 한계 우회)
+  - 상세 후 `productOrderStatus=='PAYED'`만 (이미 발송된 건 자동 배제)
+  - 며칠 전 결제분·발송기한 초과(`shippingDueDate < now`)분 모두 포함 → 텔레그램에 별도 카운트 노출
 - 템플릿 복제 (`shutil.copy2`) → 서식·열너비·숨김컬럼 보존
 - 파일명: `더다냉동물류 발주양식 YY.M.D.xlsx`
 
@@ -499,6 +502,7 @@ heavylover-automation/
 ```
 
 ### 로그
+- **2026-04-28** | 11시 발주 엑셀에서 SS 33건 통째 누락 (당일 발주 못 한 7건은 발송기한 초과로 전환, 판매자 점수 차감 위험). 원인: `orders_by_status(PAYED, hours_back=24)` + 평일 cron(`1-5`) 조합 — 금 11시~일 23:59 결제분이 변경 윈도우 밖, 며칠 전 결제 후 가만히 있던 주문도 24h 윈도우에 안 잡힘. 카페24는 N20 상태 기반이라 안전. 해결: `orders_pending_dispatch(days_back=14)` 신설 — sheets_sync 패턴(1일 분할 N회 + dedupe) 재사용, 상세 후 `productOrderStatus=='PAYED'`만 반환. `shippingDueDate < now` = 발송기한 초과 별도 카운트. | **하지 말 것**: 시간 윈도우 방식은 cron 갭과 만나면 누락 영구화. 채널이 상태 기반 조회를 지원하면 그걸 우선. 변경 윈도우 강제면 cron 주기보다 충분히 넓게(14일+) + dedupe + 상세 응답 상태 재필터 3중 안전망.
 - **2026-04-28** | SS sync 코드가 `productOrder.paymentDate`를 보고 있었는데 실제 결제일은 `order.paymentDate`에 있어서, 4월 신규 행 전체가 결제일 컬럼 비어있는 채로 들어감. 시트 진단 전엔 발견 못 함. | **하지 말 것**: 외부 API 응답 매핑 코드는 작성 직후 raw JSON 1건 출력해서 키 경로 검증. 한 달 가동된 자동화도 실제 시트 데이터가 비어있는지 점검할 것.
 - **2026-04-28** | SS sync가 PURCHASE_DECIDED만 시트에 넣어, 결제됐지만 자동확정(7일) 안 된 PAYED·DISPATCHED·DELIVERING·DELIVERED 주문이 시트에서 누락. 4월 후반 데이터 빈 것처럼 보였음. | **하지 말 것**: "구매확정만"이라는 분석 정책과 "데이터 이전 범위"는 분리. 시트엔 5상태 모두 보관 + 분석 시 주문상태 컬럼으로 필터.
 - **2026-04-28** | sync_cafe24가 매 실행마다 9건씩 누적 중복. 원인은 cutoff='YYYY-MM-DD' vs 결제일시 'YYYY-MM-DD HH:MM:SS' 문자열 비교에서 cutoff 당일 시간대 행이 keep에 남고 새 행이 또 추가. | **하지 말 것**: 시간 포함 컬럼 cutoff 비교 시 cutoff에 ` 00:00` 명시. 시트 dedupe는 자연 키(주문번호+결제일시+...) 기반으로 1회 더 적용.
@@ -510,6 +514,7 @@ heavylover-automation/
 - **2026-04-27** | govt-radar 1차 데이터 진단 시 "100건 샘플"만 보고 "소진공 직접 발주는 기업마당 API에 안 옴"이라고 결론. 500건 펼쳐보니 8건 들어있었음. | **하지 말 것**: API 커버리지 판단할 때 첫 페이지만 보고 결정하지 말 것. 페이지네이션 끝까지 또는 키워드 직접 검색으로 확인.
 - **2026-04-27** | CLAUDE.md §5에 "08:30 sync, 09:00 report cron 가동 중"이라고 적혀 있어 사실로 전제하고 마트 플랜을 짰으나 실제 Vultr `crontab -l`엔 11시·13시 자동화만 있었음 (재구매 cron 미배포). | **하지 말 것**: 자동화 가동 여부는 문서가 아니라 `crontab -l` + 서버 파일 존재로 1차 검증한 뒤 작업 시작. (§0 "Pre-flight Checks" 참조)
 - **2026-04-27** | Google Calendar 이벤트 ID를 `base64.b32encode`로 만들어서 19/19 이벤트가 "Invalid resource id" 400 에러로 모두 실패. RFC2938 base32hex(0-9, a-v)만 허용되는데 일반 base32(a-z, 2-7)는 'w'~'z'가 들어가서 거부됨. | **하지 말 것**: 외부 API의 식별자 포맷 규칙은 추측 말고 공식 문서 확인. Calendar event_id는 `b32hexencode` 사용. 새 외부 API 첫 통합 시 에러 메시지 보고 즉시 다른 인코딩 후보 시도.
+- **2026-04-28** | govt-radar 지역 필터에서 "경기도 산하 시·군"(파주·화성·부천·시흥 등) 한정 공고 19건이 [경기] prefix만 보고 통과. 본사가 용인이라 다른 시·군 한정은 지원 불가인데, NON_ELIGIBLE_REGIONS에 광역지자체만 있고 시·군이 없었음. | **하지 말 것**: 지역 필터는 광역(시·도) + 산하(시·군·구) 모두 차단 목록 작성. 본사 prefix가 없는 한 타 시·군 prefix·발주기관·본문 자격 한정(`관내 본사` 등) 모두 차단. 회귀 테스트(`tests/scorer_scenarios.py`)에 19건 케이스 박제.
 
 <!-- 신규 항목은 이 줄 위에 시간 역순(최신이 위)으로 추가 -->
 

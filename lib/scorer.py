@@ -43,6 +43,11 @@ STRONG_MATCH_KEYWORDS = [
     "소상공인 성장", "희망리턴패키지",
     # 식품 D2C 핵심
     "농식품글로벌성장패키지", "K-FOOD",
+    # 헤비로버 §9 진행 중 핵심 사업
+    "지식재산 바우처", "지식재산바우처", "IP 바우처", "IP바우처",
+    "지식재산(IP) 바우처", "지식재산(ip) 바우처",
+    "IP) 바우처",  # "지식재산(IP) 바우처" 안전 매칭
+    "온라인 플랫폼", "온라인플랫폼",
 ]
 
 TECH_KEYWORDS = [
@@ -67,6 +72,25 @@ NON_ELIGIBLE_REGIONS = [
     "서울", "강남", "강서", "강동", "강북", "구로", "금천", "노원",
     "도봉", "동대문", "동작", "마포", "서초", "성동", "성북", "송파",
     "양천", "영등포", "용산", "은평", "종로", "중랑",  # "중구" 제거 (광역시 외 모호)
+]
+
+# ⚠️ 경기도 산하 시·군 (용인 제외) — 본사 외 시·군 한정 공고 차단용
+# 광역(경기도) 또는 본사(용인) 단위 공고는 이 목록과 무관하게 통과
+NON_ELIGIBLE_GG_CITIES = [
+    "수원", "성남", "안양", "안산", "고양", "과천", "구리", "광명",
+    "군포", "김포", "남양주", "동두천", "부천", "시흥",
+    "안성", "양주", "여주", "오산", "의왕", "의정부", "이천",
+    "파주", "평택", "포천", "하남", "화성",
+    "양평", "연천", "가평",  # 군
+    # 용인 제외 — 본사 소재
+    # "광주시"는 광주광역시와 충돌 가능 → "광주" 만 NON_ELIGIBLE_REGIONS에서 처리
+]
+
+# 본문 자격요건 한정 표현
+RESTRICTION_PATTERNS = [
+    "에 소재한", "에 본사를 둔", "에 사업장을 둔",
+    "거주자에 한", "에 한해", "기업만 신청", "거주 기업",
+    "소재 기업만",
 ]
 
 # 타지역 약칭 ↔ 정식 명칭 매핑 (둘 다 매칭)
@@ -218,6 +242,66 @@ def score_announcement(item):
             "tier": "타지역 (지원불가)",
             "deadline_days": _days_until_deadline(item.get("deadline")),
             "tags": ["NON_ELIGIBLE_REGION"],
+        }
+
+    # ============================================================
+    # 경기 산하 시·군 한정 공고 차단 (본사 외 — 용인 제외)
+    # [경기] prefix가 있어도 실제로는 단일 시·군 한정인 경우가 다수
+    # (예: "[경기] 화성시 해외전시회 단체관 지원사업" → 화성시 소재 기업만)
+    # ============================================================
+    has_home_city_signal = _has_any(title + agency, ["용인", "수지"])
+
+    # 1) 제목에 타 시·군 명칭 포함 ([파주]·(파주)·파주시 등)
+    has_gg_other_city_in_title = any(
+        f"[{c}]" in title or f"({c})" in title or f"{c}시" in title
+        for c in NON_ELIGIBLE_GG_CITIES
+    )
+
+    # 2) 발주기관이 타 시·군 (파주시·화성시·시흥산업진흥원 등)
+    has_gg_other_city_agency = any(
+        (f"{c}시" in agency or f"{c}산업진흥원" in agency or
+         f"{c}경제진흥원" in agency or f"{c}시청" in agency or
+         f"{c} 1인" in agency or f"{c}1인" in agency)
+        for c in NON_ELIGIBLE_GG_CITIES
+    )
+
+    # 3) 본문 자격요건에 명시적 한정 (화성시에 소재한, 부천시 거주자에 한 등)
+    has_gg_other_city_restriction = False
+    for c in NON_ELIGIBLE_GG_CITIES:
+        for p in RESTRICTION_PATTERNS:
+            if f"{c}{p}" in body or f"{c}시{p}" in body:
+                has_gg_other_city_restriction = True
+                break
+        if has_gg_other_city_restriction:
+            break
+
+    # 4) 본문에 "관내 본사" / "관내 기업" 명시 → 단일 시·군 한정 신호 (강함)
+    has_local_only_signal = any(
+        s in body for s in ["관내 본사", "관내 기업", "관내 중소기업", "관내에 소재", "관내 사업장"]
+    )
+
+    # nationwide override가 잡혔어도, 제목에 타 시·군이 명시됐거나
+    # 본문에 "관내" 한정 표현이 있으면 단일 시·군 한정으로 판단 (override 무력화)
+    if has_gg_other_city_in_title and (has_local_only_signal or has_gg_other_city_agency):
+        return {
+            **item,
+            "score": 0,
+            "matched": [],
+            "tier": "타지역 (지원불가)",
+            "deadline_days": _days_until_deadline(item.get("deadline")),
+            "tags": ["NON_ELIGIBLE_REGION", "GG_OTHER_CITY", "LOCAL_ONLY"],
+        }
+
+    if (has_gg_other_city_in_title or has_gg_other_city_agency or
+        has_gg_other_city_restriction) and not has_home_city_signal \
+        and not has_nationwide_override:
+        return {
+            **item,
+            "score": 0,
+            "matched": [],
+            "tier": "타지역 (지원불가)",
+            "deadline_days": _days_until_deadline(item.get("deadline")),
+            "tags": ["NON_ELIGIBLE_REGION", "GG_OTHER_CITY"],
         }
 
     matched = []
