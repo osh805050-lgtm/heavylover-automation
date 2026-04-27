@@ -1,6 +1,6 @@
 # CLAUDE.md — HeavyLover 운영 컨텍스트
 
-**최종 업데이트**: 2026-04-27 (rev. 5) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
+**최종 업데이트**: 2026-04-28 (rev. 6) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
 
 ---
 
@@ -222,6 +222,43 @@
 | 08:30 시트 sync (Vultr `/root/heavylover-repurchase/`) | ✅ **매일** (주말 포함). 카페24 + SS 5상태(구매확정·결제완료·발송·배송중·배송완료) |
 | 09:00 재구매 리포트 + 마트 4종 갱신 | ✅ **매일** mart_monthly/cohort/stage/summary 시트 자동 갱신 + 텔레그램 (Anthropic 401 시 fallback 원시 숫자) |
 | 04:00 카페24 OAuth 자동 갱신 | ✅ **매일** refresh_token 만료 방지. 실패 시 텔레그램 알림 |
+
+### 재구매 분석 자동화 파이프라인 (2026-04-28 검증 완료)
+
+**위치**: Vultr `/root/heavylover-repurchase/` (GitHub clone, git pull로 코드 동기화)
+**별도 폴더 이유**: 11시 발주·13시 송장 자동화(`/root/heavylover-automation/`)와 분리 — 한쪽 깨져도 영향 X
+
+**Cron (매일, 주말 포함)**:
+- `0 4 * * *` → `refresh_cafe24_token.py` (OAuth 자동 갱신, 실패 시 텔레그램)
+- `30 8 * * *` → `sheets_sync.py` (카페24 + SS 시트 갱신)
+- `0 9 * * *` → `repurchase_report.py` (분석 탭 추출 + 마트 4종 갱신 + 텔레그램)
+
+**카페24 sync 정책**:
+- 컬럼 5개: 주문번호 / 결제일시 / 주문상태 / 실결제금액 / 휴대전화
+- 고객 식별 = 휴대전화 (col 5)
+- 윈도우 7일, cutoff에 ` 00:00` 부착해 시간대 누락 방지
+- 5튜플 키로 완전중복 dedupe
+
+**SS sync 정책**:
+- 컬럼 46개 (상세)
+- 고객 식별 = 구매자ID (col 9)
+- 5상태 모두 수집: PURCHASE_DECIDED · PAYED · DISPATCHED · DELIVERING · DELIVERED
+- 취소/반품/미결제는 원천 제외
+- 24시간 윈도우 한계 우회: 1일씩 잘라 N×5번 호출 + RATE_LIMIT 시 5초 대기 재시도
+- productOrderId 기준 reverse-dedupe (최신 상태 우선)
+- 결제일은 `order.paymentDate` (productOrder 아님 — 과거 버그 원인)
+
+**시트 탭 구조**:
+- 원본 2개: `카페24 재구매매출`, `스마트스토어 재구매매출`
+- 분석 19개 (Apps Script `repurchase_v5_4.gs` 산출): `재구매_*_월별`, `코호트_*_전환율`, `코호트_월별잔존율`, `재구매_간격분석`, `구매횟수_퍼널_*` 등
+- 마트 4개 (Python `repurchase_report.py` 산출, Looker Studio 데이터 소스): `mart_monthly`(39행) · `mart_cohort`(18) · `mart_stage`(6) · `mart_summary`(8)
+
+**검증 (3회 연속 실행)**: 카페24 2272행 안정, SS 6644행 안정, productOrderId 중복 0, 누락·오류 없음.
+
+**알려진 한계**:
+- Anthropic API 401 (결제 카드 미등록) → 매일 09:00 텔레그램은 Claude 분석 대신 fallback 원시 숫자
+- Apps Script 19개 분석 탭은 시간 트리거 미설정 → 승현님이 가끔 수동 ▶ 실행 (또는 시트 → 확장 프로그램 → Apps Script → 트리거 추가로 자동화 가능)
+- 카페24 + SS 통합 분석 시 같은 사람이 두 채널에서 산 건 다른 사람으로 잡힘 (식별 체계 다름)
 
 ### 엑셀 생성 로직
 - 카페24: `fetch_orders(days_back=7)` → `order_status=N20`만 포함
@@ -462,6 +499,10 @@ heavylover-automation/
 ```
 
 ### 로그
+- **2026-04-28** | SS sync 코드가 `productOrder.paymentDate`를 보고 있었는데 실제 결제일은 `order.paymentDate`에 있어서, 4월 신규 행 전체가 결제일 컬럼 비어있는 채로 들어감. 시트 진단 전엔 발견 못 함. | **하지 말 것**: 외부 API 응답 매핑 코드는 작성 직후 raw JSON 1건 출력해서 키 경로 검증. 한 달 가동된 자동화도 실제 시트 데이터가 비어있는지 점검할 것.
+- **2026-04-28** | SS sync가 PURCHASE_DECIDED만 시트에 넣어, 결제됐지만 자동확정(7일) 안 된 PAYED·DISPATCHED·DELIVERING·DELIVERED 주문이 시트에서 누락. 4월 후반 데이터 빈 것처럼 보였음. | **하지 말 것**: "구매확정만"이라는 분석 정책과 "데이터 이전 범위"는 분리. 시트엔 5상태 모두 보관 + 분석 시 주문상태 컬럼으로 필터.
+- **2026-04-28** | sync_cafe24가 매 실행마다 9건씩 누적 중복. 원인은 cutoff='YYYY-MM-DD' vs 결제일시 'YYYY-MM-DD HH:MM:SS' 문자열 비교에서 cutoff 당일 시간대 행이 keep에 남고 새 행이 또 추가. | **하지 말 것**: 시간 포함 컬럼 cutoff 비교 시 cutoff에 ` 00:00` 명시. 시트 dedupe는 자연 키(주문번호+결제일시+...) 기반으로 1회 더 적용.
+- **2026-04-28** | 카페24 OAuth refresh_token 2주 만료를 사람이 매번 재발급 — 작업 도중 만료 발견. | **하지 말 것**: 외부 API refresh_token 만료 정책 있는 서비스는 만료 전 자동 갱신 cron 신설(매일 04:00 `refresh_cafe24_token.py`). 같은 패턴 적용 후보: Meta long-lived token, 네이버 커머스.
 - **2026-04-27** | `/insights` 1·2차 리포트 통합 결과, 과거 한 세션 전체가 출력 토큰 한도(500) 초과 에러 반복으로 손실됨. 큰 파일·다중 모듈을 한 응답에 다 토하려 한 것이 원인. | **하지 말 것**: 5,000자 초과 우려 시 단계 분할 출력. 분석 리포트는 표+요약 우선. (§0 "출력 길이 제어" 참조)
 - **2026-04-27** | `/insights` 1·2차 리포트 통합 결과, 과거 Excel "디자인" 요청에서 freeze panes·hidden rows·invalid cell types·duplicate columns·orphaned panes를 임의 추가해 파일 손상 반복. 사용자 frustration 발생. | **하지 말 것**: 디자인 요청은 색상·폰트·테두리·열너비만. 수식·freeze·숨김·셀 타입·구조 일체 금지. 편집 후 `openpyxl.load_workbook()` 검증 후 보고. (§0 "스프레드시트 편집 규칙" 참조)
 - **2026-04-27** | 메인 메일이 Naver(`ohkm8050@naver.com`)인데 Gmail로 가정하고 IMAP 코드 작성 → 재계획 발생. 또한 활성 Claude 세션 안에 `claude -c`·`claude -r` CLI 명령을 사용자가 직접 타이핑해도 인식 안 됨을 즉시 안내 못함. | **하지 말 것**: 세션 시작 시 메일·OS·배포 상태를 먼저 확인. CLI스러운 입력 들어오면 즉시 위치 안내. (§0 "환경 컨텍스트" 참조)
