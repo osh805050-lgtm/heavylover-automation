@@ -110,34 +110,49 @@ def build_telegram_message(scored_items, stats_l1, count_l2, today_str):
     lines.append(f"적합 후보: {len(notify)}건 (S {len(s_tier)} / A {len(a_tier)} / B {len(b_tier)} / C {len(c_tier)})")
     lines.append("")
 
-    if s_tier:
-        lines.append("🚨 S - 긴급 (계획서 즉시 검토)")
-        for s in s_tier[:5]:
-            tag_str = " ".join(f"[{t}]" for t in s.get("tags", []))
-            lines.append(f"  • [{s['score']}] {s['title'][:60]} {tag_str}")
-            if s.get("deadline"):
-                lines.append(f"    마감 {s['deadline']} (D{s.get('deadline_days', '?')})")
-            if s.get("url"):
-                lines.append(f"    {s['url'][:80]}")
+    def _fmt_score_breakdown(s):
+        """점수 분해 표시: 적합도+지역+마감 = 총점"""
+        fit = s.get("fit_score", 0)
+        reg = s.get("region_score", 0)
+        dl = s.get("deadline_score", 0)
+        return f"적합 {fit} + 지역 {reg} + 마감 {dl} = {s['score']}"
 
+    # S 등급은 전부 표시 (절대 누락 금지)
+    if s_tier:
+        lines.append(f"🚨 S - 긴급 ({len(s_tier)}건, 전체 표시)")
+        for s in s_tier:
+            tag_str = " ".join(f"[{t}]" for t in s.get("tags", []))
+            lines.append(f"• [{s['score']}] {s['title'][:65]} {tag_str}")
+            lines.append(f"  📊 {_fmt_score_breakdown(s)} ({s.get('region_label','?')})")
+            if s.get("deadline"):
+                lines.append(f"  📅 마감 {s['deadline']} (D{s.get('deadline_days', '?')})")
+            if s.get("agency"):
+                lines.append(f"  🏛 발주: {s['agency']}")
+            if s.get("url"):
+                lines.append(f"  🔗 {s['url'][:80]}")
+
+    # A 등급도 전부 (사업계획서 후보라 누락 금지)
     if a_tier:
         lines.append("")
-        lines.append("⭐ A - 사업계획서 작성 후보")
-        for s in a_tier[:8]:
+        lines.append(f"⭐ A - 사업계획서 후보 ({len(a_tier)}건, 전체 표시)")
+        for s in a_tier:
             tag_str = " ".join(f"[{t}]" for t in s.get("tags", []))
-            lines.append(f"  • [{s['score']}] {s['title'][:60]} {tag_str}")
+            lines.append(f"• [{s['score']}] {s['title'][:65]} {tag_str}")
+            lines.append(f"  📊 {_fmt_score_breakdown(s)} ({s.get('region_label','?')})")
             if s.get("deadline"):
-                lines.append(f"    마감 {s['deadline']}")
+                lines.append(f"  📅 마감 {s['deadline']}")
+            if s.get("agency"):
+                lines.append(f"  🏛 발주: {s['agency']}")
 
     if b_tier:
         lines.append("")
-        lines.append("📋 B - 검토 권장")
-        for s in b_tier[:5]:
-            lines.append(f"  • [{s['score']}] {s['title'][:60]}")
+        lines.append(f"📋 B - 검토 ({len(b_tier)}건, 상위 10건)")
+        for s in b_tier[:10]:
+            lines.append(f"• [{s['score']}] {s['title'][:60]}")
 
     if c_tier and len(c_tier) > 0:
         lines.append("")
-        lines.append(f"📎 C - 참고 ({len(c_tier)}건, 상세는 시트)")
+        lines.append(f"📎 C - 참고 {len(c_tier)}건 (시트에서 확인)")
 
     return "\n".join(lines)
 
