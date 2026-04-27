@@ -278,9 +278,9 @@ def _ss_wrap_to_row(wrap: dict) -> list | None:
         _won(po.get("deliveryFeeAmount", 0)),              # 배송비 합계
         _won(po.get("remoteAreaDeliveryFee", 0)),          # 제주/도서 추가배송비
         _won(po.get("deliveryFeeDiscountAmount", 0)),      # 배송비 할인액
-        _iso_to_sheet(po.get("paymentDate", "")),          # 결제일
-        po.get("paymentMeans", "") or "",                  # 결제수단
-        "MOBILE",                                           # 결제위치
+        _iso_to_sheet(order.get("paymentDate", "")),       # 결제일 (order에 위치)
+        order.get("paymentMeans", "") or "",               # 결제수단 (order에 위치)
+        order.get("payLocationType", "") or "",            # 결제위치 (order.payLocationType)
         _won(po.get("commissionRatePayCost", 0) or 0),     # 네이버페이 주문관리 수수료
         _won(po.get("commissionFee", 0) or po.get("salesChannelPayCommission", 0) or 0),  # 매출연동 수수료
         _won(po.get("expectedSettlementAmount", 0)),       # 정산예정금액
