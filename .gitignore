@@ -3,6 +3,9 @@
 .env.local
 *.secret
 *_token.json
+gcp-service-account.json
+*service-account*.json
+*-credentials.json
 
 # Python
 __pycache__/

@@ -429,6 +429,154 @@ def build_ground_truth(spreadsheet) -> dict:
 
 
 # ============================================================
+# 마트 탭 작성 (Looker Studio 데이터 소스)
+# ============================================================
+
+MART_MONTHLY_HEADER = [
+    "연월", "채널", "신규구매자", "재구매자", "재구매율", "재구매AOV", "재구매매출", "갱신시각",
+]
+MART_COHORT_HEADER = [
+    "코호트월", "채널", "첫구매자수", "M+1", "M+2", "M+3", "M+6", "갱신시각",
+]
+MART_STAGE_HEADER = [
+    "채널", "단계", "기준고객수", "전환고객수", "전환율", "갱신시각",
+]
+MART_SUMMARY_HEADER = [
+    "지표", "값", "벤치마크", "상태", "갱신시각",
+]
+
+
+def _ensure_mart_tab(spreadsheet, name: str, header: list[str]):
+    """탭이 없으면 만들고 헤더를 보장. 있으면 그대로 반환."""
+    try:
+        ws = spreadsheet.worksheet(name)
+    except Exception:
+        ws = spreadsheet.add_worksheet(title=name, rows=200, cols=max(10, len(header)))
+        ws.update("A1", [header])
+        return ws
+
+    cur = ws.row_values(1)
+    if cur != header:
+        ws.update("A1", [header])
+    return ws
+
+
+def _summary_status(value, good: float, warn: float, higher_is_better: bool = True) -> str:
+    if value is None:
+        return "—"
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    if higher_is_better:
+        if v >= good:
+            return "✅"
+        if v >= warn:
+            return "⚠️"
+        return "🔴"
+    else:
+        if v <= good:
+            return "✅"
+        if v <= warn:
+            return "⚠️"
+        return "🔴"
+
+
+def write_marts(spreadsheet, gt: dict, tabs: dict):
+    """마트 4종(월별/코호트/단계/요약)을 long-format으로 덮어쓴다.
+
+    - 시트=raw 저장소, Looker Studio=시각화 원칙
+    - 기존 19개 분석 탭은 건드리지 않음 (롤백·검증용 보존)
+    """
+    now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
+
+    # ---------- mart_monthly ----------
+    monthly_rows: list[list] = []
+    for ch_key, ch_label in [
+        ("integrated_monthly", "통합"),
+        ("cafe24_monthly", "카페24"),
+        ("ss_monthly", "스마트스토어"),
+    ]:
+        for r in _extract_monthly(tabs.get(ch_key)):
+            monthly_rows.append([
+                r["월"], ch_label,
+                r.get("신규구매자수") or 0,
+                r.get("재구매자수") or 0,
+                r.get("재구매율") or 0,
+                r.get("AOV") or 0,
+                r.get("재구매매출") or 0,
+                now_str,
+            ])
+
+    ws = _ensure_mart_tab(spreadsheet, "mart_monthly", MART_MONTHLY_HEADER)
+    ws.clear()
+    ws.update("A1", [MART_MONTHLY_HEADER] + monthly_rows)
+    _log(f"  mart_monthly: {len(monthly_rows)}행")
+
+    # ---------- mart_cohort ----------
+    cohort_rows: list[list] = []
+    # mn_retention 탭은 통합 1개만 존재 (코드 구조상)
+    for r in _extract_mn(tabs.get("mn_retention")):
+        cohort_rows.append([
+            r["코호트월"], "통합",
+            r.get("첫구매자수") or 0,
+            r.get("M+1"), r.get("M+2"), r.get("M+3"), r.get("M+6"),
+            now_str,
+        ])
+
+    ws = _ensure_mart_tab(spreadsheet, "mart_cohort", MART_COHORT_HEADER)
+    ws.clear()
+    ws.update("A1", [MART_COHORT_HEADER] + cohort_rows)
+    _log(f"  mart_cohort: {len(cohort_rows)}행")
+
+    # ---------- mart_stage ----------
+    stage_rows: list[list] = []
+    for ch_key, ch_label in [
+        ("integrated_stage", "통합"),
+        ("cafe24_stage", "카페24"),
+        ("ss_stage", "스마트스토어"),
+    ]:
+        for r in _extract_stage_flat(tabs.get(ch_key)):
+            stage_rows.append([
+                ch_label, r.get("단계", ""),
+                r.get("기준고객수") or 0,
+                r.get("전환고객수") or 0,
+                r.get("전환율") or 0,
+                now_str,
+            ])
+
+    ws = _ensure_mart_tab(spreadsheet, "mart_stage", MART_STAGE_HEADER)
+    ws.clear()
+    ws.update("A1", [MART_STAGE_HEADER] + stage_rows)
+    _log(f"  mart_stage: {len(stage_rows)}행")
+
+    # ---------- mart_summary ----------
+    inm = gt.get("월별_재구매_매출", {}).get("통합", {})
+    stage = gt.get("단계별_전환율_현재", {}).get("통합", [])
+    s1_2 = next((s for s in stage if s.get("단계") == "1→2"), {})
+    s2_3 = next((s for s in stage if s.get("단계") == "2→3"), {})
+    mn_recent = (gt.get("M+N_리텐션_통합") or [])
+    m1_recent = mn_recent[-1].get("M+1") if mn_recent else None
+    interval = gt.get("재구매_간격", {}) or {}
+
+    summary_rows = [
+        ["당월 재구매 매출", inm.get("당월", {}).get("매출"), "—", "—", now_str],
+        ["전월 재구매 매출", inm.get("전월", {}).get("매출"), "—", "—", now_str],
+        ["MoM 변화율(%)", inm.get("MoM_변화_pct"), "0% 이상", _summary_status(inm.get("MoM_변화_pct"), 0, -10, True), now_str],
+        ["1→2 전환율(%)", s1_2.get("전환율"), "30%+ ✅ / 23~30% ⚠️", _summary_status(s1_2.get("전환율"), 30, 23, True), now_str],
+        ["2→3 전환율(%)", s2_3.get("전환율"), "40%+ ✅", _summary_status(s2_3.get("전환율"), 40, 30, True), now_str],
+        ["M+1 리텐션 최신 코호트(%)", m1_recent, "20~30% ✅", _summary_status(m1_recent, 20, 14, True), now_str],
+        ["재구매 간격 P50(일)", interval.get("P50") or interval.get("중앙값") or interval.get("50%"), "15일 부근", "—", now_str],
+        ["재구매 간격 P90(일)", interval.get("P90") or interval.get("90%"), "31~62일", "—", now_str],
+    ]
+
+    ws = _ensure_mart_tab(spreadsheet, "mart_summary", MART_SUMMARY_HEADER)
+    ws.clear()
+    ws.update("A1", [MART_SUMMARY_HEADER] + summary_rows)
+    _log(f"  mart_summary: {len(summary_rows)}행")
+
+
+# ============================================================
 # Claude 분석
 # ============================================================
 
@@ -639,6 +787,14 @@ def run() -> dict:
     _log("=== 재구매 리포트 시작 ===")
     ss = _open_sheet()
     gt = build_ground_truth(ss)
+
+    # 마트 4종 갱신 (Looker Studio 데이터 소스). 실패해도 리포트는 계속 진행.
+    try:
+        _log("마트 탭 갱신 중...")
+        write_marts(ss, gt, _classify_tabs(ss))
+        _log("✅ 마트 탭 갱신 완료")
+    except Exception as e:
+        _log(f"⚠️ 마트 탭 갱신 실패 (리포트는 계속): {e}")
 
     # GT를 로그 저장 (감사 목적)
     date_str = datetime.now(KST).strftime("%Y-%m-%d")
