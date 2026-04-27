@@ -368,6 +368,12 @@ def format_telegram_summary(target_date, metrics, flags, ok, action_text=None):
         lines.append("[Claude 코멘트]")
         lines.append(action_text)
 
+    # 퍼널 한 줄 (가장 큰 drop-off)
+    funnel_line = metrics.get("_funnel_summary")
+    if funnel_line:
+        lines.append("")
+        lines.append(funnel_line)
+
     return "\n".join(lines)
 
 
@@ -552,9 +558,28 @@ def run():
         print(f"fallback 리포트 저장: {path}")
 
         err_msg = raw.get("error") or "응답 데이터 비어있음"
-        telegram_client.send_message(
-            f"📈 [Meta광고] {target_date}\n─────────────\n데이터 없음 (API 실패)\n사유: {err_msg}"
+
+        # 토큰 만료 자동 감지 — 명확한 안내 메시지
+        token_expired = any(
+            keyword in err_msg
+            for keyword in ["Session has expired", "expired", "OAuthException", "code\":190", "code\":463"]
         )
+        if token_expired:
+            tg_msg = (
+                f"🚨 [Meta광고 토큰 만료] {target_date}\n"
+                "─────────────\n"
+                "Meta API 토큰이 만료됐습니다.\n\n"
+                "[해결]\n"
+                "1. https://developers.facebook.com/tools/explorer/\n"
+                "2. 앱 '광고 자동화' 선택 → User Token 발급\n"
+                "3. 권한: ads_read 체크\n"
+                "4. 토큰 복사 후 Claude에게 붙여넣기\n\n"
+                "(앱 시크릿 발급 후 자동 갱신 cron 활성화 시 이 알림 사라짐)"
+            )
+        else:
+            tg_msg = f"📈 [Meta광고] {target_date}\n─────────────\n데이터 없음 (API 실패)\n사유: {err_msg}"
+
+        telegram_client.send_message(tg_msg)
         return 1
 
     row = raw["data"][0]
@@ -635,6 +660,22 @@ def run():
     if deep_err:
         print(f"Claude 심층 분석 skip: {deep_err}")
 
+    # 퍼널 한 줄 — 가장 큰 drop-off 텔레그램에 노출
+    try:
+        from meta_ads_funnel_analysis import overall_funnel
+        f = overall_funnel(raw.get("data") or [])
+        drops = f.get("drop_offs") or []
+        valid = [d for d in drops if d.get("drop_off_pct") is not None]
+        if valid:
+            biggest = max(valid, key=lambda d: d["drop_off_pct"])
+            metrics["_funnel_summary"] = (
+                f"퍼널 최대 이탈: {biggest['from']}→{biggest['to']} "
+                f"{biggest['drop_off_pct']:.1f}% 이탈 "
+                f"({biggest['from_count']:,}→{biggest['to_count']:,})"
+            )
+    except Exception as e:
+        print(f"퍼널 요약 생성 실패: {e}")
+
     # 텔레그램 (요약 + 짧은 코멘트)
     summary = format_telegram_summary(
         target_date, metrics, flags, ok=True, action_text=short_text
@@ -658,6 +699,7 @@ def run():
             campaigns=campaign_summaries,
             winner_patterns=winner_patterns,
             sheet_url=sheet_url,
+            raw_account_rows=raw.get("data") or [],
         )
         if ok:
             print("이메일 4역할 심층 발송 완료")
