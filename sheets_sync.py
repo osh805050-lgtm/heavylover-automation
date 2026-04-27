@@ -144,6 +144,11 @@ def cafe24_order_to_rows(order: dict) -> list[list]:
 
 
 def sync_cafe24(spreadsheet, days: int = BACKFILL_DAYS) -> int:
+    """카페24 sync — cutoff 기반 행 교체 + (주문번호, 아이템번호 기준) dedupe.
+
+    같은 주문이 옵션·수량으로 여러 행으로 분해될 수 있으므로
+    (주문번호 + 결제일시 + 실결제금액) 조합 키로 시트 내 중복 제거.
+    """
     ws = _find_tab(spreadsheet, CAFE24_HEADER_FIRST, CAFE24_HEADER_SECOND)
     if ws is None:
         raise RuntimeError("카페24 원본 탭을 찾지 못했습니다 (헤더 불일치)")
@@ -159,17 +164,19 @@ def sync_cafe24(spreadsheet, days: int = BACKFILL_DAYS) -> int:
         new_rows.extend(cafe24_order_to_rows(o))
     _log(f"  변환된 행: {len(new_rows)}")
 
-    # 3) 기존 시트에서 "최근 days일 내 결제일" 행 위치 찾기
-    cutoff = (datetime.now(KST) - timedelta(days=days)).strftime("%Y-%m-%d")
+    # 3) cutoff: 결제일시 컬럼은 "2026-04-19 18:04:28" 형식
+    #   문자열 비교에서 "2026-04-19 18:04" < "2026-04-20" 이므로
+    #   cutoff에 " 00:00" 같은 시간 안 붙이면 4/20 03시 행이 빠지지 않음.
+    #   안전을 위해 cutoff에 " 00:00" 부착.
+    cutoff_date = (datetime.now(KST) - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = cutoff_date + " 00:00"
     all_rows = ws.get_all_values()
-    # 1행은 헤더
     keep: list[list] = [all_rows[0]] if all_rows else []
     delete_count = 0
     for r in all_rows[1:]:
         if len(r) < 2 or not r[1]:
             keep.append(r)
             continue
-        # 결제일 비교 (문자열 비교로 OK — YYYY-MM-DD 포맷)
         if r[1] >= cutoff:
             delete_count += 1
             continue
@@ -179,11 +186,25 @@ def sync_cafe24(spreadsheet, days: int = BACKFILL_DAYS) -> int:
     # 4) 새 행 추가
     keep.extend(new_rows)
 
-    # 5) 시트 전체 덮어쓰기
+    # 5) (주문번호 + 결제일시 + 실결제금액) 조합 키로 시트 전체 dedupe
+    #   같은 옵션·수량 분해 행은 휴대전화·금액까지 같으니 그대로 보존.
+    seen = set()
+    deduped = [keep[0]] if keep else []
+    for r in keep[1:]:
+        key = tuple(r[:5]) if len(r) >= 5 else tuple(r)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(r)
+    removed_dup = len(keep) - len(deduped)
+    if removed_dup > 0:
+        _log(f"  완전중복 제거: {removed_dup}행")
+
+    # 6) 시트 전체 덮어쓰기
     ws.clear()
-    if keep:
-        ws.update(values=keep, range_name="A1", value_input_option="USER_ENTERED")
-    _log(f"  최종 카페24 시트 행 수: {len(keep)-1}")
+    if deduped:
+        ws.update(values=deduped, range_name="A1", value_input_option="USER_ENTERED")
+    _log(f"  최종 카페24 시트 행 수: {len(deduped)-1}")
     return len(new_rows)
 
 
@@ -382,10 +403,29 @@ def sync_smartstore(spreadsheet, days: int = BACKFILL_DAYS) -> int:
 
     keep.extend(new_rows)
 
-    ws.clear()
+    # productOrderId 기준 dedupe — 신규(new_rows)가 뒤에 있으니
+    # 같은 pid가 있으면 *나중 행(새 정보)*을 유지
+    seen_pid = set()
+    deduped = []
     if keep:
-        ws.update(values=keep, range_name="A1", value_input_option="USER_ENTERED")
-    _log(f"  최종 SS 시트 행 수: {len(keep)-1}")
+        deduped.append(keep[0])  # 헤더
+    for r in reversed(keep[1:]):
+        pid = r[0] if r else ""
+        if not pid or pid in seen_pid:
+            if pid:
+                continue
+        seen_pid.add(pid)
+        deduped.append(r)
+    # reversed 순회했으니 다시 뒤집어 시간 순 복원
+    deduped = [deduped[0]] + list(reversed(deduped[1:]))
+    removed_dup = len(keep) - len(deduped)
+    if removed_dup > 0:
+        _log(f"  productOrderId 중복 제거: {removed_dup}행")
+
+    ws.clear()
+    if deduped:
+        ws.update(values=deduped, range_name="A1", value_input_option="USER_ENTERED")
+    _log(f"  최종 SS 시트 행 수: {len(deduped)-1}")
     return len(new_rows)
 
 
