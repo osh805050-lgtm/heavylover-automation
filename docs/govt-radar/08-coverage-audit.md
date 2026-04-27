@@ -112,9 +112,31 @@
 - ✅ 시나리오 회귀 테스트 12건 (`tests/scorer_scenarios.py`)
 - ✅ STRONG_MATCH_KEYWORDS에 "지식재산(IP) 바우처", "온라인 플랫폼" 추가
 
+### P1 조사 결과 (2026-04-28)
+직접 HTML 크롤러는 **모두 SPA(JavaScript 렌더링) 또는 봇 차단** 상태:
+- **농림축산식품부 (mafra.go.kr)**: 직접 페이지 6KB 빈 셸 응답
+- **경기테크노파크 (gtp.or.kr)**: 1KB 빈 응답 (모든 게시판 URL)
+- **식품진흥원 (foodpolis.kr)**: 3KB 빈 응답
+- data.go.kr 검색 API: 봇 차단 (Connection reset)
+
+**채택한 우회 전략**:
+1. **기업마당 API 키워드 보강 검색** (`lib/govt_sources.fetch_bizinfo`)
+   - 일반 페이지네이션 + "식품/농식품/수출/창업/소상공인/K-Food" 6개 키워드별 hashtag 검색
+   - 농림부·식품의약품안전처·KOTRA 등 P1 발주를 페이지네이션 후순위에서 끌어옴
+2. **메일 화이트리스트 명시 등록** (`lib/naver_mail_client.TRUSTED_SENDERS`)
+   - gtp.or.kr·foodpolis.kr·mafra.go.kr·at.or.kr·gcon.or.kr·kfia.or.kr 추가
+   - 사용자가 이미 메일 구독 신청 완료 → IMAP에서 fuzzy match 가능
+
+**현재 P1 채널 커버 현황** (2026-04-28 실측):
+| 발주처 | 현재 수집 경로 | 일평균 |
+|---|---|---|
+| 농림축산식품부 | 기업마당 API | 1건 (보강 후 +5~10건 예상) |
+| 경기테크노파크 | K-Startup API | 2건 |
+| 식품진흥원 | (메일 의존) | 0건 → 메일 도착 시 자동 |
+
 ### 단기 (1주 내)
-- P1 채널 3개 (경기TP·식품진흥원·농림부) HTML 크롤러 신규
-- 메일 발신자 화이트리스트에 P1 도메인 추가
+- 경기TP·식품진흥원 메일 도착 후 IMAP 캐치 검증 (사용자가 구독 신청 완료)
+- 기업마당 API 보강검색 효과 측정 (599건 → 700건+ 예상)
 
 ### 중기 (2주 내)
 - **Layer 4 LLM 자격 검증** 도입 (Claude Haiku)

@@ -75,9 +75,38 @@ def fetch_bizinfo():
 
     중앙부처·지자체·유관기관(소상공인진흥공단·창업진흥원 포함) 통합 공고.
     DATA_GO_KR_API_KEY 필요.
+
+    수집 전략:
+      1) 일반 페이지네이션 3페이지 (최신 300건)
+      2) 헤비로버 직결 키워드별 hashtag 검색 추가 — 페이지네이션에서 밀려나는
+         식품·농식품·수출·창업·소상공인 도약 사업 보강 (P1 누락 대응)
+      pblancId 기준 dedupe.
     """
     try:
-        return bizinfo_api.fetch_announcements(per_page=100, max_pages=3)
+        results = bizinfo_api.fetch_announcements(per_page=100, max_pages=3)
+        seen = {(it.get("raw") or {}).get("pblancId") for it in results}
+
+        # 헤비로버 직결 키워드 — 식품진흥원·농림부·KOTRA 등 발주를 보강
+        boost_keywords = ["식품", "농식품", "수출", "창업", "소상공인", "K-Food"]
+        for kw in boost_keywords:
+            try:
+                extra = bizinfo_api.fetch_announcements(
+                    per_page=100, max_pages=1, search_keyword=kw
+                )
+            except Exception as e:
+                log.warning(f"기업마당 보강검색('{kw}') 실패: {e}")
+                continue
+            added = 0
+            for it in extra:
+                pid = (it.get("raw") or {}).get("pblancId")
+                if pid and pid not in seen:
+                    seen.add(pid)
+                    results.append(it)
+                    added += 1
+            if added:
+                log.info(f"기업마당 보강검색 '{kw}': +{added}건")
+
+        return results
     except RuntimeError as e:
         log.warning(f"기업마당 API 키 미설정: {e}")
         return []
