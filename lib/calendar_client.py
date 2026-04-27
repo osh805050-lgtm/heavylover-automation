@@ -33,8 +33,8 @@ CALENDAR_THRESHOLD = 7.0  # 적합도 ≥ 7만 등록
 log = logging.getLogger(__name__)
 
 
-def _load_credentials():
-    """서비스 계정 자격증명 로드.
+def _load_sa_info():
+    """서비스 계정 키 JSON dict 로드 (스코프 무관 — 재사용 가능).
 
     우선순위:
       1) GOOGLE_SA_KEY_JSON 환경변수에 JSON 원본 또는 Base64
@@ -52,29 +52,30 @@ def _load_credentials():
             except Exception:
                 pass
         try:
-            info = json.loads(raw_json)
+            return json.loads(raw_json)
         except json.JSONDecodeError as e:
             raise RuntimeError(f"GOOGLE_SA_KEY_JSON 파싱 실패: {e}")
-    else:
-        # 파일 경로 시도
-        key_path = os.getenv("GOOGLE_SA_KEY_PATH")
-        if not key_path:
-            # 프로젝트 루트 폴백
-            default = Path(__file__).parent.parent / "gcp-key.json"
-            if default.exists():
-                key_path = str(default)
-        if not key_path or not Path(key_path).exists():
-            raise RuntimeError(
-                "Google Service Account 키 미설정. "
-                "GOOGLE_SA_KEY_JSON 또는 GOOGLE_SA_KEY_PATH 또는 ./gcp-key.json 필요. "
-                "docs/govt-radar/06-google-calendar-setup.md 참고."
-            )
-        with open(key_path, "r", encoding="utf-8") as f:
-            info = json.load(f)
 
-    # google-auth lazy import (의존성 미설치 시 ImportError 방지)
+    key_path = os.getenv("GOOGLE_SA_KEY_PATH")
+    if not key_path:
+        default = Path(__file__).parent.parent / "gcp-key.json"
+        if default.exists():
+            key_path = str(default)
+    if not key_path or not Path(key_path).exists():
+        raise RuntimeError(
+            "Google Service Account 키 미설정. "
+            "GOOGLE_SA_KEY_JSON 또는 GOOGLE_SA_KEY_PATH 또는 ./gcp-key.json 필요."
+        )
+    with open(key_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _load_credentials(scopes=None):
+    """서비스 계정 자격증명 로드 (기본은 Calendar 스코프, scopes 파라미터로 다른 API용 발급 가능)."""
+    info = _load_sa_info()
+    use_scopes = scopes or SCOPES
     from google.oauth2 import service_account
-    return service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+    return service_account.Credentials.from_service_account_info(info, scopes=use_scopes)
 
 
 def _get_calendar_service():

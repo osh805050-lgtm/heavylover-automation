@@ -1,0 +1,68 @@
+name: 정부지원 레이더 텔레그램 명령 처리
+
+# 5분마다 실행 — 사용자가 텔레그램에 입력한 /details, /why, /save, /draft 명령 폴링·응답
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write  # /save·/draft 결과 커밋용
+
+concurrency:
+  group: govt-radar-commands
+  cancel-in-progress: false  # 명령 누락 방지 — 누적 처리
+
+jobs:
+  handle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4  # cron 5분 간격 안에 끝나도록
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Handle telegram commands
+        env:
+          # 정부지원 레이더용 봇 (TELEGRAM_GOVT_BOT_TOKEN 미설정 시 기존 키 폴백)
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_GOVT_BOT_TOKEN || secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Google Drive/Docs (사업계획서 업로드용 — Calendar SA 키 재사용)
+          GOOGLE_SA_KEY_JSON: ${{ secrets.GOOGLE_SA_KEY_JSON }}
+          GOOGLE_DOCS_SHARE_EMAIL: ${{ vars.GOOGLE_DOCS_SHARE_EMAIL || 'osh805050@gmail.com' }}
+        run: python telegram_command_handler.py
+
+      - name: Commit results (saved + drafts + last_id)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/govt_radar/saved_announcements.json data/govt_radar/last_processed_update_id.txt docs/govt-proposals/ 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "변경 사항 없음 - 커밋 스킵"
+          else
+            git commit -m "chore(govt-radar): 텔레그램 명령 처리 결과 자동 저장 [skip ci]"
+            git push
+          fi
+
+      - name: Notify failure on Telegram
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_GOVT_BOT_TOKEN || secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="[govt-radar 명령 처리 실패] run=${{ github.run_id }}" \
+            > /dev/null || true

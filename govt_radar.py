@@ -96,82 +96,238 @@ def collect_layer2(log, days_back=2):
         return []
 
 
-def _fmt_score_breakdown(s):
-    """점수 분해 표시: 적합도+지역+마감 = 총점"""
-    fit = s.get("fit_score", 0)
-    reg = s.get("region_score", 0)
-    dl = s.get("deadline_score", 0)
-    return f"적합 {fit} + 지역 {reg} + 마감 {dl} = {s['score']}"
+def _clean_body(text, max_len=180):
+    """본문 정제 — HTML 엔티티·점선·공백·연장 표기 제거, 길이 제한.
 
-
-def _clean_body(text, max_len=200):
-    """본문 정제 - 공백·줄바꿈 정규화, 길이 제한"""
+    - &nbsp; &amp; 같은 HTML 엔티티 디코드
+    - 점선·말미·반복 기호 제거 (… ··· ☞ ※ ▶)
+    - 연속 공백·줄바꿈 → 단일 공백
+    - 길이 초과 시 단어 경계로 잘라 …
+    """
     if not text:
         return ""
+    import html as _html
     import re as _re
-    cleaned = _re.sub(r"\s+", " ", text).strip()
+
+    # 1) HTML 엔티티 디코드
+    cleaned = _html.unescape(text)
+    # 2) 시각 장식 문자 제거 (의미 없는 점선·구분선)
+    cleaned = _re.sub(r"[·•●○◎※▶▷☞◆◇■□★☆＊]+", " ", cleaned)
+    # 3) 연속 ㅡ/ㅡ/-/_ 제거
+    cleaned = _re.sub(r"[ㅡ\-_=]{3,}", " ", cleaned)
+    # 4) zero-width / non-breaking space 제거
+    cleaned = cleaned.replace("​", "").replace(" ", " ")
+    # 5) 공백 정규화
+    cleaned = _re.sub(r"\s+", " ", cleaned).strip()
+
     if len(cleaned) <= max_len:
         return cleaned
-    return cleaned[:max_len].rstrip() + "…"
+    # 단어 경계로 자르기 (한글이라 공백 기준)
+    truncated = cleaned[:max_len]
+    last_space = truncated.rfind(" ")
+    if last_space > max_len * 0.7:
+        truncated = truncated[:last_space]
+    return truncated.rstrip() + "…"
+
+
+def _clean_title(title, max_len=58):
+    """제목 정제 — 의미 없는 꼬리 제거 + 길이 제한.
+
+    제거 대상:
+      - "참가기업 모집 공고", "신청 공고", "모집공고" 등 꼬리표
+      - 연도 prefix("2026년 ") 단독은 유지
+      - "(연장)", "(재공고)" 같은 부가 메모는 유지 (정보 가치 있음)
+    """
+    if not title:
+        return ""
+    import re as _re
+    t = title.strip()
+    # 의미 없는 꼬리 자동 절단 (정보 손실 없음)
+    tail_patterns = [
+        r"\s+참가기업\s*모집\s*공고\s*$",
+        r"\s+참여기업\s*모집\s*공고\s*$",
+        r"\s+신청\s*공고\s*$",
+        r"\s+모집공고\s*$",
+        r"\s+모집\s*공고\s*$",
+        r"\s+공고\s*$",
+    ]
+    for p in tail_patterns:
+        new_t = _re.sub(p, "", t)
+        if new_t != t and len(new_t) >= 10:
+            t = new_t
+            break
+    if len(t) > max_len:
+        t = t[: max_len - 1].rstrip() + "…"
+    return t
+
+
+def _fmt_deadline(deadline_str, days_left):
+    """마감 표기 — '~04/30 (수) · 2일 남음' 형식.
+
+    Returns: (표시 문자열, 신호등 이모지)
+        🔴: D-2 이하  🟠: D-7 이하  🟡: D-30 이하  🟢: 그 외
+    """
+    if not deadline_str:
+        return "마감일 미정", "⚪"
+    try:
+        from datetime import datetime as _dt
+        d = _dt.strptime(deadline_str, "%Y-%m-%d")
+        dow = ["월", "화", "수", "목", "금", "토", "일"][d.weekday()]
+        date_str = f"~{d.month:02d}/{d.day:02d} ({dow})"
+    except (ValueError, TypeError):
+        return deadline_str, "⚪"
+
+    if days_left is None:
+        return date_str, "⚪"
+    if days_left < 0:
+        return f"{date_str} · 마감됨", "⚫"
+    if days_left == 0:
+        return f"{date_str} · 오늘 마감", "🔴"
+    if days_left <= 2:
+        return f"{date_str} · {days_left}일 남음", "🔴"
+    if days_left <= 7:
+        return f"{date_str} · {days_left}일 남음", "🟠"
+    if days_left <= 30:
+        return f"{date_str} · {days_left}일 남음", "🟡"
+    return f"{date_str} · {days_left}일 남음", "🟢"
+
+
+def _short_url(url):
+    """URL 도메인 + 끝 식별자만 표시 (모바일 가독성)"""
+    if not url:
+        return ""
+    import re as _re
+    m = _re.match(r"https?://(?:www\.)?([^/]+)(/.+)?", url)
+    if not m:
+        return url[:60]
+    domain = m.group(1)
+    path = m.group(2) or ""
+    # 끝 30자만
+    if len(path) > 35:
+        path = "/..." + path[-30:]
+    return f"{domain}{path}"
 
 
 def _format_announcement_block(s, include_body=False, number=None):
-    """공고 한 건의 텔레그램 표시 블록 생성
+    """공고 한 건의 텔레그램 표시 블록 — 가독성 우선 (2026-04-28 v2).
+
+    레이아웃:
+        ━━━━━━━━━━━━━━━━━━━━
+        🔴 #S1 · D-2 마감 임박
+        제목 (꼬리표 제거됨)
+
+        📅 ~04/30 (수) · 2일 남음
+        🏛 경기도 (전국대상 가능)
+        🎯 적합도 10/10 · 본사지역
+        🔑 K-Food, 농식품, 수출
+
+        📝 본문 (HTML 정리, 줄바꿈)
+
+        🔗 도메인/식별자
 
     Args:
         s: scored item
-        include_body: 본문·자격·분류 포함 여부 (S/A에만 True)
-        number: 카테고리 내 순서 (예: "S1", "A3"). None이면 표시 안 함
+        include_body: 본문·매칭키워드 포함 (S/A에만 True)
+        number: 카테고리 내 순서 (예: "S1")
     """
     lines = []
-    tag_str = " ".join(f"[{t}]" for t in s.get("tags", []))
-    num_prefix = f"#{number} " if number else ""
-    lines.append(f"{num_prefix}[{s['score']}] {s['title'][:70]} {tag_str}".strip())
-    lines.append(f"  📊 {_fmt_score_breakdown(s)} ({s.get('region_label','?')})")
 
-    # 마감일 + D-Day
-    if s.get("deadline"):
-        d_str = f"  📅 마감 {s['deadline']}"
-        if s.get("deadline_days") is not None:
-            d_str += f" (D{s['deadline_days']})"
-        lines.append(d_str)
+    # 1) 헤더 — 신호등 + 번호 + 마감 요약
+    deadline_str = s.get("deadline")
+    days_left = s.get("deadline_days")
+    deadline_label, signal = _fmt_deadline(deadline_str, days_left)
 
-    # 발주기관
+    header_parts = []
+    if number:
+        header_parts.append(f"{signal} #{number}")
+    else:
+        header_parts.append(signal)
+
+    # 마감 임박 강조 라벨
+    if days_left is not None and days_left >= 0:
+        if days_left <= 2:
+            header_parts.append(f"D-{days_left} 마감 임박")
+        elif days_left <= 7:
+            header_parts.append(f"D-{days_left} 임박")
+
+    lines.append(" · ".join(header_parts))
+
+    # 2) 제목 (정리됨)
+    title = _clean_title(s.get("title", ""))
+    lines.append(title)
+    lines.append("")  # 빈 줄
+
+    # 3) 핵심 메타데이터 (4줄 고정 패턴)
+    lines.append(f"📅 {deadline_label}")
     if s.get("agency"):
-        lines.append(f"  🏛 발주: {s['agency']}")
+        agency = s["agency"][:40]
+        lines.append(f"🏛 {agency}")
+
+    region_label = s.get("region_label", "?")
+    score = s.get("score", 0)
+    lines.append(f"🎯 적합도 {score}/10 · {region_label}")
 
     if include_body:
-        # 자격요건 (raw에서)
-        raw = s.get("raw", {}) or {}
+        # 매칭 키워드
+        matched = s.get("matched", []) or []
+        if matched:
+            kw = ", ".join(matched[:5])
+            lines.append(f"🔑 {kw}")
+
+        # 자격요건
+        raw = s.get("raw") or {}
         target = raw.get("trgetNm") or raw.get("biz_enyy")
         if target:
-            target_clean = _clean_body(str(target), 80)
-            if target_clean:
-                lines.append(f"  👥 대상: {target_clean}")
+            t_clean = _clean_body(str(target), 70)
+            if t_clean:
+                lines.append(f"👥 {t_clean}")
 
-        # 분류·분야
-        realm = raw.get("realm") or raw.get("supt_biz_clsfc")
-        if realm:
-            lines.append(f"  🏷 분야: {realm[:50]}")
-
-        # 본문 200자
+        # 4) 본문
         body = s.get("body_excerpt") or ""
         if body:
-            body_clean = _clean_body(body, 200)
+            body_clean = _clean_body(body, 180)
             if body_clean:
-                lines.append(f"  📝 {body_clean}")
+                lines.append("")
+                lines.append(f"📝 {body_clean}")
 
-        # 매칭 키워드 (사용자가 왜 적합한지 보여줌)
-        matched = s.get("matched", [])
-        if matched:
-            m_str = ", ".join(matched[:5])
-            lines.append(f"  🔑 매칭: {m_str}")
-
-    # URL은 마지막
+    # 5) URL (짧게)
     if s.get("url"):
-        lines.append(f"  🔗 {s['url'][:90]}")
+        lines.append("")
+        lines.append(f"🔗 {_short_url(s['url'])}")
+
+    # 6) 명령 힌트 (S/A 등급에만, 사용자가 무엇을 할 수 있는지 알려줌)
+    if include_body and number:
+        lines.append("")
+        lines.append(f"💬 /details {number}  /save {number}  /draft {number}")
 
     return "\n".join(lines)
+
+
+def _assign_notify_ids(scored_items):
+    """텔레그램 알림 노출 순서대로 notify_id 부여 (#S1, #A1, #B1...).
+
+    /details, /why, /save, /draft 명령에서 매핑용. score+tier 동일 기준으로
+    build_telegram_messages와 같은 순서를 따라야 일관성 보장.
+    """
+    EXCLUDE_TIER_PREFIX = (
+        "타지역", "제외", "비공고", "메뉴", "자격미달", "검증불가",
+    )
+    notify = [
+        s for s in scored_items
+        if (s.get("score") or 0) >= 3
+        and not (s.get("tier") or "").startswith(EXCLUDE_TIER_PREFIX)
+    ]
+    s_tier = [s for s in notify if s["score"] >= 9]
+    a_tier = [s for s in notify if 7 <= s["score"] < 9]
+    b_tier = [s for s in notify if 5 <= s["score"] < 7]
+    # C 등급은 텔레그램에 카운트만 표시되므로 notify_id 부여 안 함
+
+    for idx, s in enumerate(s_tier, 1):
+        s["notify_id"] = f"S{idx}"
+    for idx, s in enumerate(a_tier, 1):
+        s["notify_id"] = f"A{idx}"
+    for idx, s in enumerate(b_tier[:15], 1):  # B는 상위 15건만 노출
+        s["notify_id"] = f"B{idx}"
 
 
 def build_telegram_messages(scored_items, stats_l1, count_l2, today_str):
@@ -196,23 +352,41 @@ def build_telegram_messages(scored_items, stats_l1, count_l2, today_str):
     b_tier = [s for s in notify if 5 <= s["score"] < 7]
     c_tier = [s for s in notify if 3 <= s["score"] < 5]
 
-    # 첫 메시지: 헤더 + S 등급
+    # 첫 메시지: 헤더
+    DIVIDER = "━━━━━━━━━━━━━━━━━━━"
     messages = []
     current = []
-    current.append(f"🎯 정부지원 레이더 - {today_str}")
+    current.append(f"🎯 정부지원 레이더 · {today_str}")
+    current.append(DIVIDER)
+    l1_total = sum(v for v in stats_l1.values() if isinstance(v, int))
+    current.append(f"📊 수집 {l1_total}건 (포털) + {count_l2}건 (메일)")
+    current.append(
+        f"✅ 적합 {len(notify)}건 · S {len(s_tier)} / A {len(a_tier)} / B {len(b_tier)} / C {len(c_tier)}"
+    )
     current.append("")
-    current.append(f"수집: 1차 {sum(v for v in stats_l1.values() if isinstance(v, int))}건 + 2차 {count_l2}건 (메일)")
-    current.append(f"적합 후보: {len(notify)}건 (S {len(s_tier)} / A {len(a_tier)} / B {len(b_tier)} / C {len(c_tier)})")
+    current.append("💡 사용법")
+    current.append("  /details S1 — 풀 본문·자격·신청방법")
+    current.append("  /why S1     — 적합 이유 분석")
+    current.append("  /save A2    — 관심 공고 박제")
+    current.append("  /draft S1   — 사업계획서 초안 생성")
     current.append("")
 
+    def _start_section(emoji_label):
+        """섹션 헤더 + 구분선"""
+        current.append(DIVIDER)
+        current.append(emoji_label)
+        current.append(DIVIDER)
+        current.append("")
+
     if s_tier:
-        current.append(f"🚨 S - 긴급 계획서 즉시 검토 ({len(s_tier)}건)")
+        _start_section(f"🚨 S 긴급 — 즉시 검토 ({len(s_tier)}건)")
         for idx, s in enumerate(s_tier, 1):
+            # notify_id는 _assign_notify_ids에서 미리 박제됨 (JSON 저장 호환)
             block = _format_announcement_block(s, include_body=True, number=f"S{idx}")
             # 현재 메시지 누적 길이 체크 (3500자 = 안전 한도)
             if sum(len(l) + 1 for l in current) + len(block) > 3500:
                 messages.append("\n".join(current))
-                current = [f"🚨 S 등급 (계속)"]
+                current = [f"🚨 S 등급 (계속)", DIVIDER, ""]
             current.append(block)
             current.append("")  # 공고 간 빈 줄
 
@@ -221,12 +395,12 @@ def build_telegram_messages(scored_items, stats_l1, count_l2, today_str):
         if current and sum(len(l) + 1 for l in current) > 2500:
             messages.append("\n".join(current))
             current = []
-        current.append(f"⭐ A - 사업계획서 후보 ({len(a_tier)}건)")
+        _start_section(f"⭐ A 사업계획서 후보 ({len(a_tier)}건)")
         for idx, s in enumerate(a_tier, 1):
             block = _format_announcement_block(s, include_body=True, number=f"A{idx}")
             if sum(len(l) + 1 for l in current) + len(block) > 3500:
                 messages.append("\n".join(current))
-                current = [f"⭐ A 등급 (계속)"]
+                current = [f"⭐ A 등급 (계속)", DIVIDER, ""]
             current.append(block)
             current.append("")
 
@@ -234,19 +408,23 @@ def build_telegram_messages(scored_items, stats_l1, count_l2, today_str):
         if current and sum(len(l) + 1 for l in current) > 2500:
             messages.append("\n".join(current))
             current = []
-        current.append(f"📋 B - 검토 ({len(b_tier)}건, 상위 15건)")
+        _start_section(f"📋 B 검토 ({len(b_tier)}건, 상위 15건)")
         for idx, s in enumerate(b_tier[:15], 1):
-            current.append(f"#B{idx} [{s['score']}] {s['title'][:60]} ({s.get('region_label','?')})")
+            title = _clean_title(s.get("title", ""), max_len=52)
+            d_label, signal = _fmt_deadline(s.get("deadline"), s.get("deadline_days"))
+            current.append(f"{signal} #B{idx} [{s['score']}] {title}")
+            current.append(f"   📅 {d_label}")
             if sum(len(l) + 1 for l in current) > 3500:
                 messages.append("\n".join(current))
-                current = ["📋 B 등급 (계속)"]
+                current = ["📋 B 등급 (계속)", DIVIDER, ""]
 
     if c_tier:
         if current and sum(len(l) + 1 for l in current) > 3500:
             messages.append("\n".join(current))
             current = []
         current.append("")
-        current.append(f"📎 C - 참고 {len(c_tier)}건 (시트에서 확인)")
+        current.append(DIVIDER)
+        current.append(f"📎 C 참고 — {len(c_tier)}건 (시트·다이제스트에서 확인)")
 
     if current:
         messages.append("\n".join(current))
@@ -359,6 +537,10 @@ def main():
             log.info("자격검증 스킵 (--skip-eligibility)")
         else:
             log.info("자격검증 스킵 (ANTHROPIC_API_KEY 없음)")
+
+    # notify_id 부여 (텔레그램 명령 처리기에서 #S1·#A2 매핑용)
+    # JSON 저장 전에 미리 박제해야 텔레그램 응답 시 동일 ID로 찾을 수 있음
+    _assign_notify_ids(scored)
 
     # 결과 저장
     out_file = save_results(scored, datetime.now(KST).strftime("%Y%m%d"))

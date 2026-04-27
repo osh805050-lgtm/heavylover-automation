@@ -28,8 +28,49 @@ import email_sender
 
 KST = timezone(timedelta(hours=9))
 DATA_DIR = Path(__file__).parent.parent / "data" / "govt_radar"
+SAVED_PATH = DATA_DIR / "saved_announcements.json"
 
 log = logging.getLogger(__name__)
+
+
+def _load_saved_announcements_active(within_days=30):
+    """saved_announcements.json에서 마감 within_days일 이내 항목만 반환.
+
+    마감 지난 건 자동 제외. 마감일 없으면 within_days × 2 이내 saved_at만 통과.
+    """
+    if not SAVED_PATH.exists():
+        return []
+    try:
+        saved = json.loads(SAVED_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    today = datetime.now(KST).date()
+    cutoff = today + timedelta(days=within_days)
+    active = []
+    for it in saved:
+        deadline_str = it.get("deadline")
+        if deadline_str:
+            try:
+                d = datetime.strptime(deadline_str, "%Y-%m-%d").date()
+                if today <= d <= cutoff:
+                    active.append(it)
+            except (ValueError, TypeError):
+                # 파싱 불가 → 보수적으로 포함
+                active.append(it)
+        else:
+            # 마감일 없는 케이스: 최근 within_days*2 이내 박제만
+            saved_at = it.get("saved_at", "")
+            try:
+                sa = datetime.fromisoformat(saved_at).date()
+                if (today - sa).days <= within_days * 2:
+                    active.append(it)
+            except (ValueError, TypeError):
+                pass
+    # 마감 임박순 정렬
+    return sorted(
+        active,
+        key=lambda x: x.get("deadline") or "9999-12-31",
+    )
 
 
 def _load_recent_results(days=7):
@@ -194,6 +235,18 @@ def build_digest_html(items, daily_counts, today):
         period = today.isoformat()
 
     sections_html = []
+
+    # 0. 관심 공고 (사용자가 /save로 박제한 항목 — 마감 30일 이내만)
+    saved_active = _load_saved_announcements_active(within_days=30)
+    if saved_active:
+        cards = "\n".join(_render_announcement_html(it, "#9333ea") for it in saved_active)
+        sections_html.append(f"""
+        <h2 style="font-size:18px;color:#9333ea;margin:24px 0 12px 0;">
+            ⭐ 관심 공고 — /save 박제 ({len(saved_active)}건)
+        </h2>
+        <p style="color:#666;font-size:12px;margin:0 0 12px 0;">텔레그램에서 /save 명령으로 박제한 공고. 마감 지난 항목 자동 제외.</p>
+        {cards}
+        """)
 
     # 1. 마감 임박 (최우선)
     if actionable:
