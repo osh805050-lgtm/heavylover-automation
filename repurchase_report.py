@@ -452,12 +452,12 @@ def _ensure_mart_tab(spreadsheet, name: str, header: list[str]):
         ws = spreadsheet.worksheet(name)
     except Exception:
         ws = spreadsheet.add_worksheet(title=name, rows=200, cols=max(10, len(header)))
-        ws.update("A1", [header])
+        ws.update(values=[header], range_name="A1")
         return ws
 
     cur = ws.row_values(1)
     if cur != header:
-        ws.update("A1", [header])
+        ws.update(values=[header], range_name="A1")
     return ws
 
 
@@ -510,7 +510,7 @@ def write_marts(spreadsheet, gt: dict, tabs: dict):
 
     ws = _ensure_mart_tab(spreadsheet, "mart_monthly", MART_MONTHLY_HEADER)
     ws.clear()
-    ws.update("A1", [MART_MONTHLY_HEADER] + monthly_rows)
+    ws.update(values=[MART_MONTHLY_HEADER] + monthly_rows, range_name="A1")
     _log(f"  mart_monthly: {len(monthly_rows)}행")
 
     # ---------- mart_cohort ----------
@@ -526,7 +526,7 @@ def write_marts(spreadsheet, gt: dict, tabs: dict):
 
     ws = _ensure_mart_tab(spreadsheet, "mart_cohort", MART_COHORT_HEADER)
     ws.clear()
-    ws.update("A1", [MART_COHORT_HEADER] + cohort_rows)
+    ws.update(values=[MART_COHORT_HEADER] + cohort_rows, range_name="A1")
     _log(f"  mart_cohort: {len(cohort_rows)}행")
 
     # ---------- mart_stage ----------
@@ -547,7 +547,7 @@ def write_marts(spreadsheet, gt: dict, tabs: dict):
 
     ws = _ensure_mart_tab(spreadsheet, "mart_stage", MART_STAGE_HEADER)
     ws.clear()
-    ws.update("A1", [MART_STAGE_HEADER] + stage_rows)
+    ws.update(values=[MART_STAGE_HEADER] + stage_rows, range_name="A1")
     _log(f"  mart_stage: {len(stage_rows)}행")
 
     # ---------- mart_summary ----------
@@ -572,7 +572,7 @@ def write_marts(spreadsheet, gt: dict, tabs: dict):
 
     ws = _ensure_mart_tab(spreadsheet, "mart_summary", MART_SUMMARY_HEADER)
     ws.clear()
-    ws.update("A1", [MART_SUMMARY_HEADER] + summary_rows)
+    ws.update(values=[MART_SUMMARY_HEADER] + summary_rows, range_name="A1")
     _log(f"  mart_summary: {len(summary_rows)}행")
 
 

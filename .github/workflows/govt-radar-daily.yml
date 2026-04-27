@@ -37,6 +37,7 @@ jobs:
         env:
           NAVER_MAIL_USER: ${{ secrets.NAVER_MAIL_USER }}
           NAVER_MAIL_APP_PASSWORD: ${{ secrets.NAVER_MAIL_APP_PASSWORD }}
+          DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python govt_radar.py --days-back 2

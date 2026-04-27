@@ -23,6 +23,8 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from . import kstartup_api
+
 log = logging.getLogger(__name__)
 
 USER_AGENT = (
@@ -107,41 +109,20 @@ def fetch_bizinfo():
     return items[:80]
 
 
-# ==================== 2. K-Startup ====================
+# ==================== 2. K-Startup (공식 Open API) ====================
 def fetch_kstartup():
-    """K-Startup — 창업진흥원 통합 (초창패·예창패)"""
-    url = "https://www.k-startup.go.kr/homepage/biz/announcementList.do"
-    r = _safe_get(url)
-    if not r:
+    """K-Startup — 공공데이터포털 공식 API 사용 (안정적)
+
+    DATA_GO_KR_API_KEY 필요. 미설정 시 빈 리스트 반환.
+    """
+    try:
+        return kstartup_api.fetch_announcements(per_page=100, max_pages=3, only_recruiting=True)
+    except RuntimeError as e:
+        log.warning(f"K-Startup API 키 미설정: {e}")
         return []
-
-    soup = BeautifulSoup(r.text, "lxml")
-    items = []
-
-    for row in soup.select("ul.notice_list li, table.bbs_list tbody tr, .biz_list li"):
-        title_el = row.select_one("a")
-        if not title_el:
-            continue
-        title = title_el.get_text(" ", strip=True)
-        if not title or len(title) < 5:
-            continue
-        href = title_el.get("href", "")
-        full_url = urljoin(url, href)
-
-        text = row.get_text(" ", strip=True)
-        deadline = _parse_date(text)
-
-        items.append({
-            "source": "K-Startup",
-            "title": title,
-            "url": full_url,
-            "agency": "창업진흥원",
-            "deadline": deadline,
-            "posted_date": None,
-            "raw": {},
-        })
-
-    return items[:60]
+    except Exception as e:
+        log.warning(f"K-Startup API 실패: {e}")
+        return []
 
 
 # ==================== 3. KOTRA ====================
