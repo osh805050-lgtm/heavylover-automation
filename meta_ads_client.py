@@ -239,6 +239,132 @@ def fetch_campaign_insights(since, until, max_retries=3):
     }
 
 
+def fetch_account_daily_range(since, until, max_retries=3):
+    """계정 합계 일별 시계열 (date_start별 1행씩).
+
+    Args:
+        since: "YYYY-MM-DD"
+        until: "YYYY-MM-DD" (inclusive)
+
+    Returns:
+        dict: {"ok": bool, "data": list[dict], "since": str, "until": str, "error": str|None}
+              data 각 행에 date_start, date_stop이 같은 일자로 들어옴
+    """
+    env = _get_env()
+    if not env["token"] or not env["account_id"]:
+        return {"ok": False, "data": [], "since": since, "until": until,
+                "error": "META_ACCESS_TOKEN 또는 META_AD_ACCOUNT_ID 환경변수 없음"}
+
+    account_id = env["account_id"].replace("act_", "")
+    url = f"{GRAPH_BASE}/{env['api_version']}/act_{account_id}/insights"
+
+    params = {
+        "access_token": env["token"],
+        "fields": ",".join(INSIGHT_FIELDS),
+        "time_range": f'{{"since":"{since}","until":"{until}"}}',
+        "level": "account",
+        "time_increment": 1,  # 일별 분할
+        "action_attribution_windows": '["7d_click","1d_view"]',
+        "limit": 500,
+    }
+
+    all_rows = []
+    next_url = url
+    next_params = params
+    last_err = None
+
+    for _ in range(50):
+        got = False
+        for attempt in range(max_retries):
+            try:
+                r = requests.get(next_url, params=next_params, timeout=120)
+                if r.status_code == 200:
+                    body = r.json()
+                    all_rows.extend(body.get("data", []))
+                    next_cursor = (body.get("paging") or {}).get("next")
+                    if next_cursor:
+                        next_url = next_cursor
+                        next_params = None
+                    else:
+                        next_url = None
+                    got = True
+                    break
+                if 400 <= r.status_code < 500 and r.status_code != 429:
+                    return {"ok": False, "data": all_rows, "since": since, "until": until,
+                            "error": f"HTTP {r.status_code}: {r.text[:500]}"}
+                last_err = f"HTTP {r.status_code}: {r.text[:300]}"
+            except requests.RequestException as e:
+                last_err = f"네트워크 오류: {e}"
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+        if not got:
+            return {"ok": False, "data": all_rows, "since": since, "until": until,
+                    "error": f"재시도 실패: {last_err}"}
+        if not next_url:
+            break
+
+    return {"ok": True, "data": all_rows, "since": since, "until": until, "error": None}
+
+
+def fetch_campaign_daily_range(since, until, max_retries=3):
+    """캠페인별 일별 시계열 (campaign_id × date_start)."""
+    env = _get_env()
+    if not env["token"] or not env["account_id"]:
+        return {"ok": False, "data": [], "since": since, "until": until,
+                "error": "META_ACCESS_TOKEN 또는 META_AD_ACCOUNT_ID 환경변수 없음"}
+
+    account_id = env["account_id"].replace("act_", "")
+    url = f"{GRAPH_BASE}/{env['api_version']}/act_{account_id}/insights"
+
+    fields = INSIGHT_FIELDS + ["campaign_id", "campaign_name"]
+    params = {
+        "access_token": env["token"],
+        "fields": ",".join(fields),
+        "time_range": f'{{"since":"{since}","until":"{until}"}}',
+        "level": "campaign",
+        "time_increment": 1,
+        "action_attribution_windows": '["7d_click","1d_view"]',
+        "limit": 500,
+    }
+
+    all_rows = []
+    next_url = url
+    next_params = params
+    last_err = None
+
+    for _ in range(200):  # 1년치 캠페인×일별이라 페이지 많을 수 있음
+        got = False
+        for attempt in range(max_retries):
+            try:
+                r = requests.get(next_url, params=next_params, timeout=180)
+                if r.status_code == 200:
+                    body = r.json()
+                    all_rows.extend(body.get("data", []))
+                    next_cursor = (body.get("paging") or {}).get("next")
+                    if next_cursor:
+                        next_url = next_cursor
+                        next_params = None
+                    else:
+                        next_url = None
+                    got = True
+                    break
+                if 400 <= r.status_code < 500 and r.status_code != 429:
+                    return {"ok": False, "data": all_rows, "since": since, "until": until,
+                            "error": f"HTTP {r.status_code}: {r.text[:500]}"}
+                last_err = f"HTTP {r.status_code}: {r.text[:300]}"
+            except requests.RequestException as e:
+                last_err = f"네트워크 오류: {e}"
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+        if not got:
+            return {"ok": False, "data": all_rows, "since": since, "until": until,
+                    "error": f"재시도 실패: {last_err}"}
+        if not next_url:
+            break
+
+    return {"ok": True, "data": all_rows, "since": since, "until": until, "error": None}
+
+
 def validate_insights(raw):
     """API 응답 유효성 검증 (ground truth 훼손 없이)
 
