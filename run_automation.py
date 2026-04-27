@@ -51,11 +51,11 @@ def _summarize_specials(cafe24_specials, naver_specials):
 def _fetch_all():
     """카페24 + 네이버 주문 조회 후 정리
 
-    카페24: 7일치 조회 (미출고 상태의 오래된 주문도 포함)
-    네이버: 24시간 내 상태 변경분 (API 한계)
+    카페24: 7일치 조회 후 N20(배송준비중)만 필터 (상태 기반)
+    네이버: 14일 윈도우로 PAYED 전수 조회 (며칠 전 결제·발송기한 초과 포함)
     """
     cafe24_orders = cafe24_client.fetch_orders(days_back=7)
-    naver_orders = naver_client.orders_by_status(status="PAYED", hours_back=24)
+    naver_orders = naver_client.orders_pending_dispatch(days_back=14)
     return cafe24_orders, naver_orders
 
 
@@ -92,20 +92,29 @@ def run(skip_weekend_check=False):
         1 for w in naver_orders
         if w.get("productOrder", {}).get("placeOrderStatus") == "NOT_YET"
     )
+    # 발송기한 초과 (당일 미발송 누적분)
+    naver_overdue_count = sum(
+        1 for w in naver_orders
+        if naver_client.is_shipping_overdue(w.get("productOrder", {}))
+    )
 
     print(f"  - 카페24 배송준비건: {len(cafe24_df)}행")
-    print(f"  - 스마트스토어 배송준비건: {len(naver_df)}행 (신규 {naver_new_count}건)")
+    print(f"  - 스마트스토어 배송준비건: {len(naver_df)}행 (신규 {naver_new_count}건, 발송기한초과 {naver_overdue_count}건)")
     print(f"  - 특이사항: 카페24 {len(cafe24_specials)}건 / 스마트스토어 {len(naver_specials)}건")
 
     # 2) 신규 주문 or 특이사항 있으면 승인 받기
     need_approval = naver_new_count > 0 or cafe24_specials or naver_specials
     if need_approval:
         print("\n[2/5] 텔레그램으로 승인 요청 중...")
+        ss_line = f"스마트스토어: {len(naver_df)}행 (신규 {naver_new_count}건"
+        if naver_overdue_count > 0:
+            ss_line += f", ⚠️ 발송기한초과 {naver_overdue_count}건"
+        ss_line += ")"
         summary_parts = [
             f"📋 주문 자동화 ({now:%Y-%m-%d %H:%M})",
             "",
             f"카페24 배송준비: {len(cafe24_df)}행",
-            f"스마트스토어: {len(naver_df)}행 (신규 {naver_new_count}건)",
+            ss_line,
         ]
         specials_text = _summarize_specials(cafe24_specials, naver_specials)
         if specials_text:

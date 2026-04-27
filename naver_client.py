@@ -123,6 +123,69 @@ def orders_by_status(status="PAYED", hours_back=24):
     return orders
 
 
+def orders_pending_dispatch(days_back=14):
+    """현재 발송 대기인 SS 주문 전수 조회 (며칠 전 결제분·발송기한 초과 포함).
+
+    네이버 last-changed API의 24h 윈도우 한계를 1일 분할 호출 N회 + dedupe로 우회.
+    상세 조회 후 productOrderStatus=='PAYED'만 반환 (이미 발송된 건 자동 배제).
+
+    shippingDueDate < now 인 주문 = 발송기한 초과 (당일 미발송 누적분, 판매자 점수 차감 위험).
+    호출자는 productOrder.shippingDueDate를 참조해 별도 카운트·강조 가능.
+    """
+    import time as _time
+    token = get_access_token()
+    seen = {}
+
+    for d in range(1, days_back + 1):
+        try:
+            changes = get_changed_product_orders(token, "PAYED", hours_back=d * 24)
+        except Exception as e:
+            msg = str(e)
+            if "RATE_LIMIT" in msg or "429" in msg:
+                _time.sleep(5)
+                try:
+                    changes = get_changed_product_orders(token, "PAYED", hours_back=d * 24)
+                except Exception:
+                    continue
+            else:
+                continue
+        for c in changes:
+            pid = c.get("productOrderId")
+            if pid:
+                seen[pid] = c
+        _time.sleep(1.2)
+
+    ids = list(seen.keys())
+    if not ids:
+        return []
+    orders = get_order_details(token, ids)
+
+    pending = [
+        o for o in orders
+        if o.get("productOrder", {}).get("productOrderStatus") == "PAYED"
+    ]
+
+    pending.sort(
+        key=lambda o: (
+            o.get("productOrder", {}).get("paymentDate", ""),
+            o.get("productOrder", {}).get("productOrderId", ""),
+        )
+    )
+    return pending
+
+
+def is_shipping_overdue(product_order):
+    """productOrder.shippingDueDate < now 이면 발송기한 초과."""
+    due = product_order.get("shippingDueDate", "")
+    if not due:
+        return False
+    try:
+        due_dt = datetime.fromisoformat(due.replace("Z", "+00:00"))
+        return due_dt < datetime.now(KST)
+    except Exception:
+        return False
+
+
 def dispatch_orders(product_order_ids, token=None):
     """네이버 주문 발주확인 (PAYED → PLACE_ORDER)
 
