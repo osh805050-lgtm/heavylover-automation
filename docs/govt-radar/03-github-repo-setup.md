@@ -275,3 +275,4 @@ git push
 - [ ] [01-naver-mail-setup.md](01-naver-mail-setup.md) 진행 — 네이버 메일 IMAP
 
 세 개 다 끝나면 알려주세요. 코드 작업(Layer 1·2) 시작합니다.
+](<스크린샷 2026-04-27 144812.png>)
