@@ -26,6 +26,13 @@ from dotenv import load_dotenv
 from sheets_sync import _open_sheet
 from telegram_client import send_message
 
+# Windows 콘솔(cp949)에서 이모지·한글 출력 시 UnicodeEncodeError 방지
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 KST = timezone(timedelta(hours=9))
 ENV_PATH = Path(__file__).parent / ".env"
 
@@ -42,113 +49,47 @@ def _log(msg: str):
 # ============================================================
 
 def _classify_tabs(spreadsheet) -> dict:
-    """모든 탭을 순회하며 용도별로 분류."""
+    """탭 이름 기반 분류 (repurchase_v5_4.gs 산출 탭 구조).
+
+    탭 이름 규칙:
+      재구매_{플랫폼}_월별  ← 월별 매출
+      코호트_{플랫폼}_전환율 ← 단계별·코호트 전환 (30일/60일)
+      코호트_월별잔존율    ← M+N 리텐션
+      재구매_간격분석      ← P50/P90
+      구매횟수_퍼널_{플랫폼} ← 구매 횟수 분포
+    """
     classified: dict = {
-        "cafe24_monthly": None,       # 카페24 월별 재구매
-        "ss_monthly": None,           # 스마트스토어 월별 재구매
-        "integrated_monthly": None,   # 통합 월별 재구매
-        "cafe24_stage": None,         # 카페24 단계별 전환율 (1→2, 2→3, 3→4)
-        "ss_stage": None,
-        "integrated_stage": None,
-        "cafe24_cohort_stage": None,  # 카페24 코호트별 1→2, 2→3
-        "ss_cohort_stage": None,
-        "integrated_cohort_stage": None,
-        "mn_retention": None,         # M+N 리텐션
-        "ltv": None,                  # 코호트 매출 + LTV
-        "interval_stats": None,       # 재구매 간격 P50/P90
-        "interval_dist": None,        # 재구매 간격 분포
-        "visit_count_cafe24": None,   # 구매횟수 분포
+        "cafe24_monthly": None,
+        "ss_monthly": None,
+        "integrated_monthly": None,
+        "cafe24_cohort": None,
+        "ss_cohort": None,
+        "integrated_cohort": None,
+        "mn_retention": None,
+        "interval_stats": None,
+        "visit_count_cafe24": None,
         "visit_count_ss": None,
         "visit_count_integrated": None,
     }
 
+    name_map = {
+        "재구매_카페24_월별": "cafe24_monthly",
+        "재구매_SS_월별": "ss_monthly",
+        "재구매_통합_월별": "integrated_monthly",
+        "코호트_카페24_전환율": "cafe24_cohort",
+        "코호트_SS_전환율": "ss_cohort",
+        "코호트_통합_전환율": "integrated_cohort",
+        "코호트_월별잔존율": "mn_retention",
+        "재구매_간격분석": "interval_stats",
+        "구매횟수_퍼널_카페24": "visit_count_cafe24",
+        "구매횟수_퍼널_SS": "visit_count_ss",
+        "구매횟수_퍼널_통합": "visit_count_integrated",
+    }
+
     for ws in spreadsheet.worksheets():
-        title = ws.title
-        try:
-            header = ws.row_values(1)
-        except Exception:
-            continue
-        if not header:
-            continue
-        hdr_str = "|".join(header)
-        title_lower = title.replace(" ", "").replace("_", "")
-
-        # 헤더 패턴 매칭
-        is_monthly_like = hdr_str.startswith("기간|재구매자수|재구매건수")
-        is_stage_flat = "단계별 전환율" in hdr_str and "해석" in hdr_str
-        is_cohort_stage = hdr_str.startswith("코호트월|첫구매자수|1→2 전환수")
-        is_mn = "M+1" in hdr_str and "M+12" in hdr_str
-        is_ltv = "1인당LTV" in hdr_str or "첫구매AOV" in hdr_str
-        is_interval_stat = header[:3] == ["지표", "값", "의미"]
-        is_interval_dist = header[:3] == ["구간", "건수", "비율"]
-        is_visit_count = header[:3] == ["구분", "고객수", "비율"]
-
-        # 플랫폼 판별 (title에서)
-        is_cafe24 = "카페24" in title or "cafe24" in title_lower.lower()
-        is_ss = "스마트스토어" in title or "smartstore" in title_lower.lower()
-        is_integrated = "통합" in title or "integrated" in title_lower.lower()
-
-        # 월별 (기간이 YYYY-MM 형식) vs 일/주별 — 첫 데이터 행 확인
-        if is_monthly_like:
-            # 첫 데이터 행의 기간 값 확인
-            try:
-                first_data = ws.get("A2")
-                first_val = first_data[0][0] if first_data and first_data[0] else ""
-            except Exception:
-                first_val = ""
-            # "2024-11" (월) vs "2024-11-04" (일) vs "2024-11-04(주)" (주)
-            is_month = bool(re.match(r"^\d{4}-\d{2}$", first_val.strip()))
-            if is_month:
-                if is_cafe24:
-                    classified["cafe24_monthly"] = ws
-                elif is_ss:
-                    classified["ss_monthly"] = ws
-                elif is_integrated:
-                    classified["integrated_monthly"] = ws
-            continue
-
-        if is_stage_flat:
-            if is_cafe24:
-                classified["cafe24_stage"] = ws
-            elif is_ss:
-                classified["ss_stage"] = ws
-            elif is_integrated:
-                classified["integrated_stage"] = ws
-            continue
-
-        if is_cohort_stage:
-            if is_cafe24:
-                classified["cafe24_cohort_stage"] = ws
-            elif is_ss:
-                classified["ss_cohort_stage"] = ws
-            elif is_integrated:
-                classified["integrated_cohort_stage"] = ws
-            continue
-
-        if is_mn:
-            classified["mn_retention"] = ws
-            continue
-
-        if is_ltv:
-            classified["ltv"] = ws
-            continue
-
-        if is_interval_stat:
-            classified["interval_stats"] = ws
-            continue
-
-        if is_interval_dist:
-            classified["interval_dist"] = ws
-            continue
-
-        if is_visit_count:
-            if is_cafe24:
-                classified["visit_count_cafe24"] = ws
-            elif is_ss:
-                classified["visit_count_ss"] = ws
-            elif is_integrated:
-                classified["visit_count_integrated"] = ws
-            continue
+        key = name_map.get(ws.title)
+        if key:
+            classified[key] = ws
 
     return classified
 
@@ -186,80 +127,100 @@ def _to_pct(v) -> float | None:
 # Ground truth 추출
 # ============================================================
 
-def _extract_monthly(ws) -> list[dict]:
-    """월별 재구매 탭 → 최근 13개월."""
+_MONTH_RE = re.compile(r"^\d{4}-\d{1,2}$")
+
+
+def _normalize_month(s: str) -> str:
+    """'2025-1' → '2025-01' 정규화 (1자리/2자리 혼재 대응)."""
+    s = (s or "").strip()
+    m = _MONTH_RE.match(s)
+    if not m:
+        return s
+    y, mm = s.split("-")
+    return f"{y}-{int(mm):02d}"
+
+
+def _data_rows(ws):
+    """탭 1행 타이틀·2행 경고 등을 건너뛰고 헤더+데이터 영역만 반환.
+
+    첫 컬럼이 YYYY-M(M) 또는 명시 키워드인 행만 유효 데이터로 본다.
+    """
     if not ws:
         return []
-    rows = ws.get_all_values()
+    return ws.get_all_values()
+
+
+def _extract_monthly(ws) -> list[dict]:
+    """월별 재구매 탭 (재구매_*_월별).
+
+    헤더 (3행): 기간|재구매자수|재구매건수|재구매매출(원)|AOV(원)|재구매빈도|재구매율(%)|신규구매자수
+    """
+    rows = _data_rows(ws)
     out = []
-    for r in rows[1:]:
-        if not r or not r[0] or not re.match(r"^\d{4}-\d{2}$", r[0].strip()):
+    for r in rows:
+        if not r or not r[0]:
+            continue
+        m = _normalize_month(r[0])
+        if not _MONTH_RE.match(m):
             continue
         out.append({
-            "월": r[0].strip(),
+            "월": m,
             "재구매자수": _to_int(r[1]) if len(r) > 1 else 0,
             "재구매건수": _to_int(r[2]) if len(r) > 2 else 0,
             "재구매매출": _to_int(r[3]) if len(r) > 3 else 0,
             "AOV": _to_int(r[4]) if len(r) > 4 else 0,
             "재구매율": _to_pct(r[6]) if len(r) > 6 else 0,
             "신규구매자수": _to_int(r[7]) if len(r) > 7 else 0,
-            "신규매출": _to_int(r[8]) if len(r) > 8 else 0,
         })
-    return out[-13:]  # 최근 13개월
-
-
-def _extract_stage_flat(ws) -> list[dict]:
-    """단계별 전환율 (1→2, 2→3, 3→4)."""
-    if not ws:
-        return []
-    rows = ws.get_all_values()
-    out = []
-    for r in rows[1:]:
-        if not r or not r[0] or "→" not in r[0]:
-            continue
-        out.append({
-            "단계": r[0].strip(),
-            "기준고객수": _to_int(r[1]) if len(r) > 1 else 0,
-            "전환고객수": _to_int(r[2]) if len(r) > 2 else 0,
-            "전환율": _to_pct(r[3]) if len(r) > 3 else 0,
-            "평균소요일": _to_int(r[4]) if len(r) > 4 else 0,
-            "중앙값소요일": _to_int(r[5]) if len(r) > 5 else 0,
-            "해석": r[6].strip() if len(r) > 6 else "",
-        })
-    return out
+    return out[-13:]
 
 
 def _extract_cohort_stage(ws) -> list[dict]:
-    """코호트별 1→2, 2→3 전환율 (월별 추세)."""
-    if not ws:
-        return []
-    rows = ws.get_all_values()
+    """코호트별 30일/60일 전환율 (코호트_*_전환율).
+
+    헤더 (3행): 코호트월|첫구매자수|30일 전환수|30일 전환율|30일 상태|60일 전환수|60일 전환율|60일 상태
+
+    의미:
+      30일 전환율 = 첫 구매 후 30일 내 2번째 구매 발생 비율 ≈ 1→2 전환의 빠른 지표
+      60일 전환율 = 60일 내 2번째 구매 발생 비율 (확정에 가까움)
+    """
+    rows = _data_rows(ws)
     out = []
-    for r in rows[1:]:
-        if not r or not r[0] or not re.match(r"^\d{4}-\d{2}$", r[0].strip()):
+    for r in rows:
+        if not r or not r[0]:
+            continue
+        m = _normalize_month(r[0])
+        if not _MONTH_RE.match(m):
             continue
         out.append({
-            "코호트월": r[0].strip(),
+            "코호트월": m,
             "첫구매자수": _to_int(r[1]) if len(r) > 1 else 0,
-            "1→2_전환수": _to_int(r[2]) if len(r) > 2 else 0,
-            "1→2_전환율": _to_pct(r[3]) if len(r) > 3 else 0,
-            "1→2_평균소요일": _to_int(r[4]) if len(r) > 4 else 0,
-            "2→3_전환수": _to_int(r[5]) if len(r) > 5 else 0,
-            "2→3_전환율": _to_pct(r[6]) if len(r) > 6 else 0,
+            "30일_전환수": _to_int(r[2]) if len(r) > 2 else 0,
+            "30일_전환율": _to_pct(r[3]) if len(r) > 3 else 0,
+            "60일_전환수": _to_int(r[5]) if len(r) > 5 else 0,
+            "60일_전환율": _to_pct(r[6]) if len(r) > 6 else 0,
+            # 호환용 별칭 (기존 build_ground_truth가 1→2_전환율을 참조)
+            "1→2_전환율": _to_pct(r[6]) if len(r) > 6 else 0,
+            "2→3_전환율": None,  # 새 시트엔 없음
         })
     return out
 
 
 def _extract_mn(ws) -> list[dict]:
-    if not ws:
-        return []
-    rows = ws.get_all_values()
+    """M+N 잔존율 (코호트_월별잔존율).
+
+    헤더 (3행): 코호트월|첫구매자수|M+1|M+2|M+3|M+4|M+5|M+6
+    """
+    rows = _data_rows(ws)
     out = []
-    for r in rows[1:]:
-        if not r or not r[0] or not re.match(r"^\d{4}-\d{2}$", r[0].strip()):
+    for r in rows:
+        if not r or not r[0]:
+            continue
+        m = _normalize_month(r[0])
+        if not _MONTH_RE.match(m):
             continue
         out.append({
-            "코호트월": r[0].strip(),
+            "코호트월": m,
             "첫구매자수": _to_int(r[1]) if len(r) > 1 else 0,
             "M+1": _to_pct(r[2]) if len(r) > 2 else None,
             "M+2": _to_pct(r[3]) if len(r) > 3 else None,
@@ -270,15 +231,52 @@ def _extract_mn(ws) -> list[dict]:
 
 
 def _extract_interval_stats(ws) -> dict:
-    if not ws:
-        return {}
-    rows = ws.get_all_values()
-    out = {}
-    for r in rows[1:]:
+    """재구매 간격 P50/P75/P90 (재구매_간격분석).
+
+    헤더 (3행): 지표|값|의미
+    행 1열에 '중앙값 (P50)', 'P75', 'P90 ← CRM 기준' 등 — 키 매칭.
+    """
+    rows = _data_rows(ws)
+    out: dict = {}
+    for r in rows:
         if len(r) < 2 or not r[0]:
             continue
-        out[r[0].strip()] = r[1].strip()
+        key = r[0].strip()
+        val = r[1].strip()
+        if "P50" in key or "중앙값" in key:
+            out["P50"] = val
+        elif "P75" in key:
+            out["P75"] = val
+        elif "P90" in key:
+            out["P90"] = val
+        elif key == "평균":
+            out["평균"] = val
+        elif "샘플" in key:
+            out["샘플수"] = val
     return out
+
+
+# 새 시트엔 단계별 전환율 평탄 탭이 없음. 코호트 전환율로 대체.
+def _extract_stage_flat(ws) -> list[dict]:
+    """30일/60일 코호트 전환율의 평균을 단계 형태로 변환 (호환용)."""
+    rows = _extract_cohort_stage(ws)
+    if not rows:
+        return []
+    completed = [r for r in rows if r["30일_전환율"] is not None and r["첫구매자수"] >= 5]
+    if not completed:
+        return []
+    last3 = completed[-3:]
+    avg30 = round(sum(r["30일_전환율"] or 0 for r in last3) / len(last3), 2)
+    avg60 = round(sum(r["60일_전환율"] or 0 for r in last3) / len(last3), 2)
+    base = sum(r["첫구매자수"] for r in last3)
+    conv30 = sum(r["30일_전환수"] for r in last3)
+    conv60 = sum(r["60일_전환수"] for r in last3)
+    return [
+        {"단계": "1→2", "기준고객수": base, "전환고객수": conv60, "전환율": avg60,
+         "해석": f"60일 누적, 최근 3개월({last3[0]['코호트월']}~{last3[-1]['코호트월']}) 평균"},
+        {"단계": "1→2_30일", "기준고객수": base, "전환고객수": conv30, "전환율": avg30,
+         "해석": "30일 빠른 전환 지표"},
+    ]
 
 
 def build_ground_truth(spreadsheet) -> dict:
@@ -316,13 +314,13 @@ def build_ground_truth(spreadsheet) -> dict:
             return None
         return round((cur - prev) / prev * 100, 1)
 
-    # 단계별 전환율 (통합 기준)
-    integrated_stage = _extract_stage_flat(tabs.get("integrated_stage"))
-    cafe24_stage = _extract_stage_flat(tabs.get("cafe24_stage"))
-    ss_stage = _extract_stage_flat(tabs.get("ss_stage"))
+    # 단계별 전환율 (통합 기준) — 새 시트엔 평탄 탭 없음. 코호트 전환율의 최근 평균을 단계 형태로 변환
+    integrated_stage = _extract_stage_flat(tabs.get("integrated_cohort"))
+    cafe24_stage = _extract_stage_flat(tabs.get("cafe24_cohort"))
+    ss_stage = _extract_stage_flat(tabs.get("ss_cohort"))
 
-    # 코호트 추세 (통합): 최근 6개월 1→2, 2→3 전환율
-    integrated_cohort = _extract_cohort_stage(tabs.get("integrated_cohort_stage"))
+    # 코호트 추세 (통합): 최근 6개월 30일·60일 전환율
+    integrated_cohort = _extract_cohort_stage(tabs.get("integrated_cohort"))
     # 최근 6개월 중 완결 코호트만 (최근 1~2개월은 아직 집계 중일 수 있음)
     cohort_recent = integrated_cohort[-8:]
 
@@ -532,9 +530,9 @@ def write_marts(spreadsheet, gt: dict, tabs: dict):
     # ---------- mart_stage ----------
     stage_rows: list[list] = []
     for ch_key, ch_label in [
-        ("integrated_stage", "통합"),
-        ("cafe24_stage", "카페24"),
-        ("ss_stage", "스마트스토어"),
+        ("integrated_cohort", "통합"),
+        ("cafe24_cohort", "카페24"),
+        ("ss_cohort", "스마트스토어"),
     ]:
         for r in _extract_stage_flat(tabs.get(ch_key)):
             stage_rows.append([
