@@ -217,18 +217,26 @@
 > 상세 — 벤치마크 표, 자동 플래그, CBO/ABO 전략, ASC 활성화 조건, 스케일업 정책 전부: **`docs/context/ads.md`**
 > 자동화 코드 동기 정본: `docs/meta-ads/benchmarks.md` (`meta_ads_report.py` 상수와 동기). 작업 시: meta-ads-analyst 서브에이전트 호출.
 
-### 자동화 (2026-04-28 가동)
+### 자동화 (2026-04-28 가동, 4역할 심층 격상 완료)
 - 매일 09:00 KST GitHub Actions cron — `meta_ads_report.py`
-- 데이터 흐름: Graph API → 일일 metrics 계산 → KRW 환산 (1,450원/USD 고정) → CSV+Sheets 누적 → 자사 P50 계산 (14일+ 누적 시 활성) → Claude 분석 → 텔레그램 요약 + 이메일 심층
+- 데이터 흐름: Graph API → 일일 metrics 계산 → KRW 환산 (1,450원/USD 고정) → CSV+Sheets 누적 → 자사 P50 계산 (14일+ 누적 시 활성) → Claude 분석 → 텔레그램 요약 + 이메일 4역할 심층
+- **텔레그램 prefix `📈 [Meta광고]`** + 구분선 — 다른 자동화(발주·재구매·정부지원)와 명확히 구분
+- **이메일 = 재구매 일일 리포트와 동일 수준** (`meta_ads_email_daily.py`):
+  - 4역할 페르소나 (분석가/전략가/회의주의자/의사결정자) 1회 호출, claude-opus-4-7
+  - 차트 PNG 3개 인라인 (`lib/charts_meta.py`): 7일 추세, 벤치 비교, 캠페인 ROAS
+  - Anthropic 401 시 fallback (원시 숫자 표)
 - 매주 월요일 09:00 KST — 위너 광고 패턴 식별(`meta_ads_winner_patterns.py`) + Meta 토큰 자동 갱신(`refresh_meta_token.py`, 60일 만료 회피)
-- 광고 계정: `act_445075134545178` (HEAVY ROVER, 통화 USD)
+- 광고 계정: `act_445075134545178` (HEAVY ROVER, 통화 USD → 1,450원/USD 환산)
 - 토큰: User Access Token (60일 만료, 주간 자동 연장 — `META_APP_ID`/`META_APP_SECRET` 등록 후 가동)
 - 데이터 저장:
   - `data/meta_ads/daily.csv` (계정 합계, 1일 1행)
   - `data/meta_ads/daily_campaign.csv` (캠페인별, 1일 N행)
   - `data/meta_ads/raw/{date}.json` (감사용 원본, .gitignore)
   - `data/meta_ads/winner_patterns.jsonl` (위너 광고 누적)
-  - Google Sheets `Meta_Ads_Daily/Daily_Campaign/Winners` (시트 ID 등록 시)
+  - Google Sheets — **재구매 시트와 공유** (`GOOGLE_SHEETS_ID=REPURCHASE_SHEET_ID`):
+    - `Meta_Ads_Daily` (계정 합계 워크시트)
+    - `Meta_Ads_Daily_Campaign` (캠페인별 워크시트)
+    - `Meta_Ads_Winners` (위너 패턴, 30일+ 데이터 누적 후 활성)
 
 ### 필수 비교 지표
 - CPC·CTR·전환율·ROAS·CPA — 각 지표 업계 평균 대비 + 자사 P50 듀얼 표기
