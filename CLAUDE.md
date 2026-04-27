@@ -1,6 +1,12 @@
 # CLAUDE.md — HeavyLover 운영 컨텍스트
 
-**최종 업데이트**: 2026-04-28 (rev. 6) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
+**최종 업데이트**: 2026-04-28 (rev. 7) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
+
+> **외부 컨텍스트 우선 참조 규칙**: 정보 부족 시 추측 금지. 다음 위치를 먼저 Glob/Read 후 결정한다.
+> - 작업 종류별 회피 규칙: `docs/lessons/patterns.md`
+> - 과거 실수 시간순 로그: `docs/lessons/failures.md`
+> - 영역별 상세 컨텍스트: `docs/context/{infra,blog,ads}.md`
+> - 사용자 환경 박제: `memory/MEMORY.md` 인덱스
 
 ---
 
@@ -42,51 +48,24 @@
 
 ### 세션 시작 체크
 - 호칭 **"승현님"**
-- 사업 상태 답변 → §3·§4·§5·§9 최신값 확인
-- 블로그 → §7 (네이버 SEO)
-- 광고 → §8 (벤치마크)
+- 사업 상태 답변 → §3·§4·§9 최신값 + 인프라는 `docs/context/infra.md`
+- 블로그 → `docs/context/blog.md` (또는 blog-writer 서브에이전트)
+- 광고 → `docs/context/ads.md` (또는 meta-ads-analyst 서브에이전트)
 - 코드 → §11 (디렉토리)
-- **실수 회피** → `docs/lessons/failures.md`(패턴) + §13(단발) 먼저 훑고 시작
+- **실수 회피** → `docs/lessons/patterns.md` 카테고리 매칭 → 필요 시 `failures.md` grep
 
-### Pre-flight Checks (자동화·API 작업 시작 전 필수)
-**목적**: 자격증명·서비스 상태 미확인으로 작업 도중 막히는 패턴 차단 (실패노트 §A 참조)
-
-코드 작성 **전에** 다음을 검증한다:
-1. **`.env` 필수 키 존재**: 작업에 필요한 키가 비어있으면 → 코드 작성 보류, 발급 가이드부터 안내
-2. **외부 토큰 만료 여부**: Cafe24·Meta·Anthropic·Naver IMAP·Gmail SMTP — 만료 의심 시 갱신부터
-3. **대상 디렉터리·파일 실재**: `Glob`·`ls`로 검증. 비존재면 작업 중단하고 사용자에게 알림
-4. **배포 상태는 문서가 아니라 실측**: `crontab -l`, 서버 파일 존재, `gh workflow list`로 1차 검증. CLAUDE.md에 "가동 중"이라 적혀 있어도 실제 가동 여부 별개로 확인
-
-### 환경 컨텍스트 (사용자 환경 박제 — 가정 금지)
-- **메일 분리**:
-  - 사적 (Naver IMAP): `ohkm8050@naver.com` — 정부지원 레이더 Layer 2 교차검증 수신
-  - 업무 (Gmail SMTP): `osh805050@gmail.com` — 자동화 발송 + 주간 리포트 수신
-  - **Gmail이 메인이라고 가정하지 말 것.** 둘 다 사용 중. 작업 시 어느 쪽인지 명시.
-- **알림 채널 우선순위**: Telegram(승인·일일 알림) > 이메일(주간 리포트) > 카카오(추후 도입)
-- **OS·셸**: Windows 11 + Git Bash + PowerShell 병행. 경로는 백슬래시·슬래시 혼용 가능
-- **사용자 자질**: 비전공자 한국어 사용자. 기술 용어는 비유·예시로 풀어서. "뭔소린지 모르겠어" 류 발화 시 즉시 더 쉬운 비유로 재설명
-
-### 스프레드시트 편집 규칙 (Excel·구글시트)
-**근거**: 과거 디자인 요청에서 Claude가 freeze panes·hidden rows·invalid cell types를 임의 추가해 파일 손상 반복 (실패노트 §C 참조)
-
-- "디자인/포맷팅" 요청 시 **건드릴 것**: 색상·폰트·테두리·열 너비만
-- **건드리지 말 것**: 수식·freeze panes·숨김 행/열·셀 타입·시트 구조·행 높이
-- 편집 후 **반드시 검증**: `python -c "import openpyxl; openpyxl.load_workbook('파일')"` 통과 확인 후 보고
-- "이거 추가하면 좋겠는데"는 **사용자 확인 후 진행**, 자체 판단 금지
-
-### 출력 길이 제어
-**근거**: 과거 한 세션 전체가 출력 토큰 한도 초과로 손실 (실패노트 §D 참조)
-
-- 큰 파일·다중 모듈은 **단계 분할 출력**: ① 파일 구조 → ② 핵심 로직 → ③ 통합 → ④ 테스트
-- 분석 리포트는 **표 + 요약** 우선, 문장 나열 지양
-- 한 응답 5,000자 초과 우려 시 사용자에게 분할 제안 후 진행
+### 안전 규칙 요약 (상세는 patterns.md)
+- **§자동화점검** (Pre-flight): API·cron·.env 작업 전 키 존재·토큰 만료·디렉터리 실재·`crontab -l` 실측 확인. 문서 신뢰 금지. → `patterns.md §자동화점검`
+- **§외부API다루기**: raw JSON 1건 출력 후 키 검증 / 페이지네이션 끝까지 / 식별자 인코딩은 공식 문서 / memory/MEMORY.md 사전 훑기. → `patterns.md §외부API다루기`
+- **§엑셀편집**: 색상·폰트·테두리·열너비만 건드림. 수식·freeze panes·숨김·셀 타입 금지. 편집 후 `openpyxl.load_workbook()` 검증. → `patterns.md §엑셀편집`
+- **§출력관리**: 5,000자 초과 우려 시 분할 제안. 분석 리포트는 표+요약 우선. → `patterns.md §출력관리`
+- **§환경컨텍스트**: 메일 분리(Naver=정부지원수신, Gmail=업무발송), Windows 11 + Git Bash/PowerShell, 활성 세션 안 `claude -c`/`-r` 안 먹힘. → `patterns.md §환경컨텍스트`
 
 ### 실수 자동 기록 (필수)
-- 승현님이 실수·오류·잘못된 판단·금지사항 위반을 지적하면 → **즉시 §13 실험 노트에 누적 기록**
-- 형식: `- **YYYY-MM-DD** | {무엇을 잘못했는지 한 줄} | **하지 말 것**: {다음번 회피 규칙 한 줄}`
-- 추가 시 사용자에게 "§13에 기록했습니다" 한 줄 보고
-- 매 세션 시작 시 §13 + `docs/lessons/failures.md` 훑고 동일 실수 재발 방지
-- **3회 이상 반복되는 실수**는 패턴으로 승격 → `docs/lessons/failures.md` 카테고리 신설 또는 보강
+- 승현님이 실수·오류·잘못된 판단·금지사항 위반을 지적하면 → **즉시 `docs/lessons/failures.md` 상단(시간 역순)에 한 줄 누적 기록**
+- 형식: `- **YYYY-MM-DD** ⓝ | {무엇을 잘못했는지} | **하지 말 것**: {회피 규칙}`
+- 추가 시 사용자에게 "failures.md에 기록했습니다" 한 줄 보고
+- 매 세션 시작 시 `patterns.md` 카테고리 인덱스 훑고 작업 종류 매칭. 같은 키워드 3회+ 반복 시 `patterns.md` 카테고리 보강.
 
 ---
 
@@ -176,108 +155,26 @@
 
 ---
 
-## 5. 기술 인프라
+## 5. 기술 인프라 (요약)
 
-### CRM (자체 구축, 핵심 자산)
-- 파일: `repurchase_v5_4.gs` (Google Apps Script)
-- 19개 분석 시트: 원본·시계열(일/주/월)·코호트(30/60/90일, M+1~M+12)·간격(P50/75/90/95)
-- 고객 식별:
-  - Cafe24: 주문자 휴대전화번호 (5컬럼 포맷 col 5)
-  - 스마트스토어: 구매자ID (col 9)
-  - Imweb: 수동 import (노란색 배경)
-- 날짜 기준: 결제일
-- 금액 기준: **총 상품구매금액** (네이버 포인트·자체 쿠폰은 판매자 비용)
-- 취소 필터: 취소/환불/반품 (교환은 유지)
+> 상세 — Cron·시트 정책·SS sync 규칙·재구매 파이프라인·엑셀 생성 로직·SaaS 스택 전부: **`docs/context/infra.md`**
+> 운영 가이드: `docs/deploy-repurchase-cron.md`, `docs/setup-repurchase-automation.md`, `docs/looker-studio-repurchase-dashboard.md`
 
-### 플랫폼 API (2026-04-23)
-- **Cafe24**: OAuth 완료 (`mall.read_order` + `mall.write_order`)
-- **스마트스토어**: Vultr 프록시(158.247.215.170:8443) 경유
-- **PlusCL**: Open API 존재. `/open/item_out` 출고서 조회. 인증값 5개 발급 대기
-- **Meta Ads**: API → Apps Script 트리거 → 시트 append (구축 예정)
-
-### 주문 자동화 파이프라인
-- 실행: Vultr (158.247.215.170, Ubuntu 22.04) 24시간
-- 코드: 로컬 `heavylover-automation/`, 서버 `/root/heavylover-automation/`
-- 핵심 파일: `run_automation.py`, `cafe24_client.py`, `naver_client.py`, `dada_excel.py`, `telegram_client.py`, `tracking_register.py`
-- Cron:
-  - `0 11 * * 1-5` → 엑셀 + OneDrive + 텔레그램
-  - `0 13 * * 1-5` → PlusCL 송장 → 카페24/SS 자동 등록
-- OneDrive: rclone "더다 양식" 폴더 자동 업로드
-- 텔레그램: `@heavyrover_order_osh_bot`, `/done`·`/cancel` 승인
-- 프록시: Squid 8443, 자동 재시작
-- 택배사: 로젠 (단일)
-  - 카페24: `0004` (이 몰에서 `0001`은 자체배송)
-  - 네이버: `KGB` (합병 이력으로 `LOGEN` 무효)
-  - PlusCL `tran_comp_code` 사용 불필요
-
-### 자동화 상태
+### 자동화 상태 (한눈에)
 | 기능 | 상태 |
 |---|---|
-| 11시 엑셀 생성 | ✅ |
-| OneDrive 업로드 | ✅ |
-| 텔레그램 승인 | ✅ |
-| 13시 송장 등록 | ⏳ PlusCL 인증 5개 대기 |
-| 카페24 N10→N20 전환 | 수동 (API 불가) |
-| SS 신규→발주확인 | 수동 (API 한계) |
-| 08:30 시트 sync (Vultr `/root/heavylover-repurchase/`) | ✅ **매일** (주말 포함). 카페24 + SS 5상태(구매확정·결제완료·발송·배송중·배송완료) |
-| 09:00 재구매 리포트 + 마트 4종 갱신 | ✅ **매일** mart_monthly/cohort/stage/summary 시트 자동 갱신 + 텔레그램 (Anthropic 401 시 fallback 원시 숫자) |
-| 04:00 카페24 OAuth 자동 갱신 | ✅ **매일** refresh_token 만료 방지. 실패 시 텔레그램 알림 |
+| 11시 엑셀 생성 + OneDrive + 텔레그램 | ✅ 평일 |
+| 13시 PlusCL 송장 → 카페24/SS 등록 | ⏳ PlusCL 인증 5개 대기 |
+| 04:00 카페24 OAuth 자동 갱신 | ✅ 매일 |
+| 08:30 시트 sync (카페24 + SS 5상태) | ✅ 매일 |
+| 09:00 재구매 리포트 + 마트 4종 + 텔레그램 | ✅ 매일 (Anthropic 401 시 fallback) |
+| 카페24 N10→N20 / SS 신규→발주확인 | 수동 (API 한계) |
 
-### 재구매 분석 자동화 파이프라인 (2026-04-28 검증 완료)
-
-**위치**: Vultr `/root/heavylover-repurchase/` (GitHub clone, git pull로 코드 동기화)
-**별도 폴더 이유**: 11시 발주·13시 송장 자동화(`/root/heavylover-automation/`)와 분리 — 한쪽 깨져도 영향 X
-
-**Cron (매일, 주말 포함)**:
-- `0 4 * * *` → `refresh_cafe24_token.py` (OAuth 자동 갱신, 실패 시 텔레그램)
-- `30 8 * * *` → `sheets_sync.py` (카페24 + SS 시트 갱신)
-- `0 9 * * *` → `repurchase_report.py` (분석 탭 추출 + 마트 4종 갱신 + 텔레그램)
-
-**카페24 sync 정책**:
-- 컬럼 5개: 주문번호 / 결제일시 / 주문상태 / 실결제금액 / 휴대전화
-- 고객 식별 = 휴대전화 (col 5)
-- 윈도우 7일, cutoff에 ` 00:00` 부착해 시간대 누락 방지
-- 5튜플 키로 완전중복 dedupe
-
-**SS sync 정책**:
-- 컬럼 46개 (상세)
-- 고객 식별 = 구매자ID (col 9)
-- 5상태 모두 수집: PURCHASE_DECIDED · PAYED · DISPATCHED · DELIVERING · DELIVERED
-- 취소/반품/미결제는 원천 제외
-- 24시간 윈도우 한계 우회: 1일씩 잘라 N×5번 호출 + RATE_LIMIT 시 5초 대기 재시도
-- productOrderId 기준 reverse-dedupe (최신 상태 우선)
-- 결제일은 `order.paymentDate` (productOrder 아님 — 과거 버그 원인)
-
-**시트 탭 구조**:
-- 원본 2개: `카페24 재구매매출`, `스마트스토어 재구매매출`
-- 분석 19개 (Apps Script `repurchase_v5_4.gs` 산출): `재구매_*_월별`, `코호트_*_전환율`, `코호트_월별잔존율`, `재구매_간격분석`, `구매횟수_퍼널_*` 등
-- 마트 4개 (Python `repurchase_report.py` 산출, Looker Studio 데이터 소스): `mart_monthly`(39행) · `mart_cohort`(18) · `mart_stage`(6) · `mart_summary`(8)
-
-**검증 (3회 연속 실행)**: 카페24 2272행 안정, SS 6644행 안정, productOrderId 중복 0, 누락·오류 없음.
-
-**알려진 한계**:
-- Anthropic API 401 (결제 카드 미등록) → 매일 09:00 텔레그램은 Claude 분석 대신 fallback 원시 숫자
-- Apps Script 19개 분석 탭은 시간 트리거 미설정 → 승현님이 가끔 수동 ▶ 실행 (또는 시트 → 확장 프로그램 → Apps Script → 트리거 추가로 자동화 가능)
-- 카페24 + SS 통합 분석 시 같은 사람이 두 채널에서 산 건 다른 사람으로 잡힘 (식별 체계 다름)
-
-### 엑셀 생성 로직 (상태 기반 전수 — 누락 0건 보장)
-- **카페24**: `fetch_orders(days_back=7)` → `order_status=N20`만 포함
-- **스마트스토어**: `orders_pending_dispatch(days_back=14)` — PAYED 상태 전수 조회
-  - 14일 1일 분할 N회 호출 + productOrderId dedupe (24h 윈도우 한계 우회)
-  - 상세 후 `productOrderStatus=='PAYED'`만 (이미 발송된 건 자동 배제)
-  - 며칠 전 결제분·발송기한 초과(`shippingDueDate < now`)분 모두 포함 → 텔레그램에 별도 카운트 노출
-- 템플릿 복제 (`shutil.copy2`) → 서식·열너비·숨김컬럼 보존
-- 파일명: `더다냉동물류 발주양식 YY.M.D.xlsx`
-
-### 코딩 도구
-- 메인: Claude Code + Google Apps Script
-- 검토: Lovable (0→1), Cursor (1→프로덕션) — 효율 입증 시 도입
-- SaaS 스택 확정: Next.js + Supabase + Stripe + Vercel
-
-### 작업 환경
-- OS: Windows (WSL2 권장 받음)
-- 폴더: `heavylover-automation`
-- 실행: PowerShell/.bat → `cd {폴더}` → `claude`
+### 위치 요약
+- 주문 자동화: Vultr (158.247.215.170, Ubuntu 22.04) `/root/heavylover-automation/`
+- 재구매 분석: Vultr `/root/heavylover-repurchase/` (별도 폴더, 충돌 방지)
+- 택배사: 로젠 단일 — Cafe24 `0004` / 네이버 `KGB`
+- 작업: Windows + Git Bash/PowerShell. CLAUDE.md "가동 중" 표기 신뢰 금지 → `crontab -l` 실측 (patterns.md §자동화점검)
 
 ---
 
@@ -304,120 +201,43 @@
 
 ---
 
-## 7. 블로그 작성 (네이버 SEO 2026)
+## 7. 블로그 작성 (요약)
 
-### 스케줄
-- 작성: 화·목 (주 2회)
-- 리마인더: 월·수 10:00 (D-1) / 화·목 10:00 (당일)
-- 매주 월: 주간 키워드·주제 요약표 제공
+> 상세 — 네이버 C-Rank/D.I.A+ 알고리즘, 글 구조, 분량·이미지 규칙, 발행 전 체크리스트, 표준 도입 프롬프트 전부: **`docs/context/blog.md`**
+> 작업 시: blog-writer 서브에이전트 호출 (메인 컨텍스트 보호) 또는 위 파일 직접 Read.
 
-### 알고리즘 핵심
-- **C-Rank** (블로그 단위): 주제 전문성 ~40% / 활동 지속성 ~30% / 사용자 반응 ~20% / 콘텐츠 품질 ~10%
-- **D.I.A+** (글 단위): 체류·스크롤·공유·댓글·스크랩으로 진짜 반응 판별
-- **2026 변화**: 사업자 블로그 가점 / AI 친화 구조 / VIEW → 스마트블록
-- **주제 일관성**: 운동·식단·단백질 범위 이탈 금지 (블로그 지수 갉아먹음)
-
-### 글 구조
-1. **제목**: 키워드 앞 20자 / 30자 이내 / 후킹 1개 이상 / 후보 3~5개
-2. **첫 문단** (100자): 키워드 1~2회, 페인 + 가치
-3. **TL;DR** 2~3 불릿: 핵심 수치 미리 노출
-4. **본문 소제목 3~5개**: 키워드 변형 분산, 출처 명시, 구체 숫자
-5. **현실 팁**: 체크리스트·단계 가이드
-6. **CTA**: 자연스러운 제품 연결, 링크 1개
-
-### 분량·밀도
-- 1,500~2,500자
-- 문장 평균 20~35자, 한 문장 = 한 주장
-- 키워드 밀도 2~3%
-
-### 시각 요소
-- 이미지 3~5장 (대표 1 + 본문 2~4)
-- alt 텍스트 키워드 포함
-- 본인 촬영 우선
-- 표/인포그래픽 1개 이상
-
-### 발행
-- 시간: 평일 오전 8~9시 / 저녁 7~9시
-- 해시태그 5~7개 (전부 주제 관련)
-- 카테고리 일관 유지
-- 내부 링크 1~2 / 외부 링크 1~2 (논문·기관)
-
-### 발행 전 체크리스트
-```
-[ ] 제목 앞 20자 키워드, 30자 이내, 후킹
-[ ] 첫 문단 키워드 1~2회
-[ ] 소제목 3~5개 키워드 분산
-[ ] 1,500~2,500자, 문장 20~35자
-[ ] 이미지 3장+, alt 포함
-[ ] 표/인포그래픽 1개+
-[ ] 외부 출처 1개+
-[ ] 내부 링크 1~2
-[ ] 해시태그 5~7개
-[ ] 자연스러운 CTA
-[ ] AI 화법·과장 검증 (§0 금지 표현)
-[ ] blog-history.md 중복 검사
-```
-
-### 경쟁 비교 (발행 전)
-상위 3개와 분량·이미지·표·소제목·외부 인용·체류 유인 비교.
-
-### 표준 도입 프롬프트
-```
-너는 20~30대 운동 직장인을 위한 식품 브랜드 '헤비로버'의 콘텐츠 에디터야.
-이번 글은 [주제]를 주제로 작성할 거야.
-(네이버 C-Rank + D.I.A+ 최적화)
-
-작성 기준:
-- 제목 앞 20자에 키워드, 후킹
-- 첫 문단 100자, 키워드 1~2회
-- 소제목 3~5개 키워드 분산
-- 1,500~2,500자, 문장 20~35자
-- 이미지 3장+ 위치 지시, 표 1개+
-- 외부 출처 1개+
-- 자연스러운 제품 CTA
-```
-
-### 저장
-- 초안: `docs/blog-drafts/{YYYY-MM-DD}-{slug}.md`
-- 이력: `docs/brand-guide/blog-history.md`
-- 3개월 내 유사 주제 금지 (카니발라이제이션)
+- 발행: 화·목 주 2회 / 1,500~2,500자 / 이미지 3+장 / 외부 출처 1+
+- 제목 앞 20자 키워드 + 후킹, 첫 문단 100자 키워드 1~2회
+- 주제 일관성 유지 (운동·식단·단백질). AI 화법·과장 금지(§0)
 
 ---
 
-## 8. Meta 광고 일일 리포트
+## 8. Meta 광고 (요약)
 
-### 스케줄
-- 매일 오전 11:00 요약
+> 상세 — 벤치마크 표, 자동 플래그, CBO/ABO 전략, ASC 활성화 조건, 스케일업 정책 전부: **`docs/context/ads.md`**
+> 자동화 코드 동기 정본: `docs/meta-ads/benchmarks.md` (`meta_ads_report.py` 상수와 동기). 작업 시: meta-ads-analyst 서브에이전트 호출.
 
-### 필수 지표
-- CPC, CTR, 전환율, ROAS, CPA — 각각 **업계 평균 대비 비교 컬럼** 필수
+### 자동화 (2026-04-28 가동)
+- 매일 09:00 KST GitHub Actions cron — `meta_ads_report.py`
+- 데이터 흐름: Graph API → 일일 metrics 계산 → KRW 환산 (1,450원/USD 고정) → CSV+Sheets 누적 → 자사 P50 계산 (14일+ 누적 시 활성) → Claude 분석 → 텔레그램 요약 + 이메일 심층
+- 매주 월요일 09:00 KST — 위너 광고 패턴 식별(`meta_ads_winner_patterns.py`) + Meta 토큰 자동 갱신(`refresh_meta_token.py`, 60일 만료 회피)
+- 광고 계정: `act_445075134545178` (HEAVY ROVER, 통화 USD)
+- 토큰: User Access Token (60일 만료, 주간 자동 연장 — `META_APP_ID`/`META_APP_SECRET` 등록 후 가동)
+- 데이터 저장:
+  - `data/meta_ads/daily.csv` (계정 합계, 1일 1행)
+  - `data/meta_ads/daily_campaign.csv` (캠페인별, 1일 N행)
+  - `data/meta_ads/raw/{date}.json` (감사용 원본, .gitignore)
+  - `data/meta_ads/winner_patterns.jsonl` (위너 광고 누적)
+  - Google Sheets `Meta_Ads_Daily/Daily_Campaign/Winners` (시트 ID 등록 시)
 
-### 벤치마크 (2026, 한국 D2C 식품)
-| 지표 | 평균 | 우수 |
-|---|---|---|
-| CTR | 1.2% | 2.0%+ |
-| CPC | 700원 | 500원- |
-| ROAS | 2.5 | 4.0+ |
-| CPA | 30,000원 | 20,000원- |
-| Frequency | 2~4 | 1.5~3 |
+### 필수 비교 지표
+- CPC·CTR·전환율·ROAS·CPA — 각 지표 업계 평균 대비 + 자사 P50 듀얼 표기
+- 핵심 벤치: ROAS 평균 2.5 / 우수 4.0+, CPA 평균 30,000원 / 우수 20,000원-
 
-### 자동 플래그
-- Learning Limited → 예산·타겟 확장 제안
-- Frequency > 5 → 크리에이티브 피로
-- CPA > 벤치 ×1.5 → 오디언스·크리에이티브 재검토
-- ROAS < 2.0 → 일시 정지 검토
-- CAPI ↔ Pixel 편차 > 20% → 이벤트 정합성 점검
-
-### 전략
-- CBO Broad (메인) + ABO (크리에이티브 테스트)
-- Broad > Lookalike (확정)
-- CAPI 서버사이드 (Cafe24) 우선
-- ASC 활성화: 주 50+ 전환, CAPI 중복 제거, 10~15 크리에이티브, 30일 ROAS 안정 시
-- 스케일업: 월 500만 → 5,000만
-
-### 기록
-- 일일: Google Sheets (마스터 DB)
-- 액션·이유: Notion 결정 로그
+### 광고 카피 자동 생성 (장기, 60일 누적 후)
+- 위너 광고 기획 패턴 누적 → Claude가 약점 보완 카피 5개 변형 생성
+- 이미지·영상 AI 생성 제외 (식품 D2C 효과 미달)
+- 자동 광고매니저 푸시 제외 (광고비 사고 위험, 사람 승인 유지)
 
 ---
 
@@ -436,7 +256,7 @@
    - 지식재산바우처 (상표)
 5. M+1 리텐션 14% → 20~25% 개선 (자본 효율 최고 레버)
 6. 등기사항전부증명서 리뷰
-7. Meta Ads API → Apps Script 자동 수집
+7. ~~Meta Ads API → Apps Script 자동 수집~~ ✅ 완료 (2026-04-28, GitHub Actions cron 가동)
 
 ### 검토 (2순위)
 - 모두의 아이디어 경진대회 — 전세 사기 방지 시스템 지원
@@ -461,21 +281,24 @@
 
 ```
 heavylover-automation/
-├── CLAUDE.md
+├── CLAUDE.md            ← 본 파일 (코어 컨텍스트만)
 ├── .claude/
-│   ├── commands/   ← 슬래시 커맨드 (오늘·블로그·광고리포트·재구매분석·CS응답)
-│   └── skills/     ← heavylover-voice, blog-writing, govt-proposal 등
-├── *.py            ← 자동화 스크립트 (run_automation, cafe24_client, naver_client 등)
+│   ├── agents/          ← 서브에이전트 8개 (blog-writer, meta-ads-analyst, automation-debugger 등)
+│   ├── commands/        ← 슬래시 커맨드 (현재 미생성, 다음 작업)
+│   └── skills/          ← heavylover-voice 등
+├── *.py                 ← 자동화 스크립트 (run_automation, cafe24_client, naver_client 등)
 ├── apps_script_main.gs / repurchase_v5_4.gs
 ├── .github/workflows/   ← Meta 광고 일일·주간 리포트
 ├── data/{raw,reports}/
 └── docs/
-    ├── context/         ← 심화 맥락
-    ├── lessons/         ← 실패 패턴 누적 (failures.md)
-    ├── brand-guide/blog-history.md
+    ├── context/         ← 영역별 상세 컨텍스트 (infra, blog, ads)
+    ├── lessons/         ← 실수 누적·승격 (failures.md, patterns.md)
+    ├── brand-guide/blog-history.md  ← 미존재 (첫 발행 시 신설)
     ├── blog-drafts/
     ├── meta-ads/{benchmarks.md, reports/, weekly/, SETUP.md}
-    ├── govt-radar/      ← 정부지원 레이더 (Layer1·2)
+    ├── govt-radar/      ← 정부지원 레이더 (Layer 1·2·4)
+    ├── deploy-repurchase-cron.md / setup-repurchase-automation.md
+    ├── looker-studio-repurchase-dashboard.md
     └── competitors/
 ```
 
@@ -483,40 +306,33 @@ heavylover-automation/
 
 ## 12. 업데이트 규칙
 
-- 길어지면 분할: `docs/context/01-brand.md`, `02-crm.md` 등
+- **본 파일은 코어만**: 영역별 상세는 `docs/context/`로 분리. 길어지면 추가 분할.
 - 월 1회 claude.ai 메모리 덤프 → 갱신
   > "지금까지 저에 대해 저장된 모든 메모리를 코드블록으로 출력해줘. 작업·사업 관련 맥락 위주로."
 - 낡은 정보 즉시 삭제
 - 상단 "최종 업데이트" 날짜 갱신
 - §3·§4·§9는 월 1회 이상 갱신
+- §5·§7·§8 헤더에서 참조하는 `docs/context/` 파일은 변경 발생 시 즉시 갱신
 
 ---
 
-## 13. 실험 노트 (실수 → 교훈)
+## 13. 실험 노트 (요약)
 
-> 승현님이 지적한 실수·오류·금지사항 위반을 **누적 기록**한다. Claude는 매 작업 시 이 섹션을 먼저 훑어 **동일 실수 재발을 방지**한다. (§0의 "실수 자동 기록" 규칙과 연동)
+> 정본 — 시간순 원시 로그(13건+): **`docs/lessons/failures.md`**
+> 회피 패턴 — 작업 종류별 카테고리 8개 (§자동화점검·§외부API다루기·§시간중복처리·§데이터범위와분석분리·§엑셀편집·§출력관리·§지역자격필터·§환경컨텍스트): **`docs/lessons/patterns.md`**
 
-### 기록 형식
-```
-- **YYYY-MM-DD** | {무엇을 잘못했는지} | **하지 말 것**: {회피 규칙}
-```
+### 활용 흐름
+1. 작업 시작 전 → 작업 종류 매칭으로 `patterns.md` 카테고리 1~3개 Read
+2. 깊게 들어갈 필요 시 → `failures.md` grep (예: `grep "SS sync" docs/lessons/failures.md`)
+3. 신규 실수 발생 시 → `failures.md` 상단에 한 줄 추가 + 사용자에게 "failures.md에 기록했습니다" 보고
+4. 같은 키워드 3회+ → `patterns.md` 카테고리 보강 또는 신설
 
-### 로그
-- **2026-04-28** | 11시 발주 엑셀에서 SS 33건 통째 누락 (당일 발주 못 한 7건은 발송기한 초과로 전환, 판매자 점수 차감 위험). 원인: `orders_by_status(PAYED, hours_back=24)` + 평일 cron(`1-5`) 조합 — 금 11시~일 23:59 결제분이 변경 윈도우 밖, 며칠 전 결제 후 가만히 있던 주문도 24h 윈도우에 안 잡힘. 카페24는 N20 상태 기반이라 안전. 해결: `orders_pending_dispatch(days_back=14)` 신설 — sheets_sync 패턴(1일 분할 N회 + dedupe) 재사용, 상세 후 `productOrderStatus=='PAYED'`만 반환. `shippingDueDate < now` = 발송기한 초과 별도 카운트. | **하지 말 것**: 시간 윈도우 방식은 cron 갭과 만나면 누락 영구화. 채널이 상태 기반 조회를 지원하면 그걸 우선. 변경 윈도우 강제면 cron 주기보다 충분히 넓게(14일+) + dedupe + 상세 응답 상태 재필터 3중 안전망.
-- **2026-04-28** | SS sync 코드가 `productOrder.paymentDate`를 보고 있었는데 실제 결제일은 `order.paymentDate`에 있어서, 4월 신규 행 전체가 결제일 컬럼 비어있는 채로 들어감. 시트 진단 전엔 발견 못 함. | **하지 말 것**: 외부 API 응답 매핑 코드는 작성 직후 raw JSON 1건 출력해서 키 경로 검증. 한 달 가동된 자동화도 실제 시트 데이터가 비어있는지 점검할 것.
-- **2026-04-28** | SS sync가 PURCHASE_DECIDED만 시트에 넣어, 결제됐지만 자동확정(7일) 안 된 PAYED·DISPATCHED·DELIVERING·DELIVERED 주문이 시트에서 누락. 4월 후반 데이터 빈 것처럼 보였음. | **하지 말 것**: "구매확정만"이라는 분석 정책과 "데이터 이전 범위"는 분리. 시트엔 5상태 모두 보관 + 분석 시 주문상태 컬럼으로 필터.
-- **2026-04-28** | sync_cafe24가 매 실행마다 9건씩 누적 중복. 원인은 cutoff='YYYY-MM-DD' vs 결제일시 'YYYY-MM-DD HH:MM:SS' 문자열 비교에서 cutoff 당일 시간대 행이 keep에 남고 새 행이 또 추가. | **하지 말 것**: 시간 포함 컬럼 cutoff 비교 시 cutoff에 ` 00:00` 명시. 시트 dedupe는 자연 키(주문번호+결제일시+...) 기반으로 1회 더 적용.
-- **2026-04-28** | 카페24 OAuth refresh_token 2주 만료를 사람이 매번 재발급 — 작업 도중 만료 발견. | **하지 말 것**: 외부 API refresh_token 만료 정책 있는 서비스는 만료 전 자동 갱신 cron 신설(매일 04:00 `refresh_cafe24_token.py`). 같은 패턴 적용 후보: Meta long-lived token, 네이버 커머스.
-- **2026-04-27** | `/insights` 1·2차 리포트 통합 결과, 과거 한 세션 전체가 출력 토큰 한도(500) 초과 에러 반복으로 손실됨. 큰 파일·다중 모듈을 한 응답에 다 토하려 한 것이 원인. | **하지 말 것**: 5,000자 초과 우려 시 단계 분할 출력. 분석 리포트는 표+요약 우선. (§0 "출력 길이 제어" 참조)
-- **2026-04-27** | `/insights` 1·2차 리포트 통합 결과, 과거 Excel "디자인" 요청에서 freeze panes·hidden rows·invalid cell types·duplicate columns·orphaned panes를 임의 추가해 파일 손상 반복. 사용자 frustration 발생. | **하지 말 것**: 디자인 요청은 색상·폰트·테두리·열너비만. 수식·freeze·숨김·셀 타입·구조 일체 금지. 편집 후 `openpyxl.load_workbook()` 검증 후 보고. (§0 "스프레드시트 편집 규칙" 참조)
-- **2026-04-27** | 메인 메일이 Naver(`ohkm8050@naver.com`)인데 Gmail로 가정하고 IMAP 코드 작성 → 재계획 발생. 또한 활성 Claude 세션 안에 `claude -c`·`claude -r` CLI 명령을 사용자가 직접 타이핑해도 인식 안 됨을 즉시 안내 못함. | **하지 말 것**: 세션 시작 시 메일·OS·배포 상태를 먼저 확인. CLI스러운 입력 들어오면 즉시 위치 안내. (§0 "환경 컨텍스트" 참조)
-- **2026-04-27** | govt-radar `lib/scorer.py` 작성 시 memory/MEMORY.md를 안 보고 키워드 정해서 "강한 소상공인" 명칭 변경(→ 소상공인 도약)을 반영 못함. 이미 `project_grant_renames.md`에 기록돼 있던 사항. 사용자가 텔레그램 알림 누락 발견 후 지적. | **하지 말 것**: 키워드 매칭·검색 로직 작성 전 memory/MEMORY.md 1회 훑고 관련 항목(명칭 변경·본사 위치·발신자 화이트리스트) 반영.
-- **2026-04-27** | govt-radar 1차 데이터 진단 시 "100건 샘플"만 보고 "소진공 직접 발주는 기업마당 API에 안 옴"이라고 결론. 500건 펼쳐보니 8건 들어있었음. | **하지 말 것**: API 커버리지 판단할 때 첫 페이지만 보고 결정하지 말 것. 페이지네이션 끝까지 또는 키워드 직접 검색으로 확인.
-- **2026-04-27** | CLAUDE.md §5에 "08:30 sync, 09:00 report cron 가동 중"이라고 적혀 있어 사실로 전제하고 마트 플랜을 짰으나 실제 Vultr `crontab -l`엔 11시·13시 자동화만 있었음 (재구매 cron 미배포). | **하지 말 것**: 자동화 가동 여부는 문서가 아니라 `crontab -l` + 서버 파일 존재로 1차 검증한 뒤 작업 시작. (§0 "Pre-flight Checks" 참조)
-- **2026-04-27** | Google Calendar 이벤트 ID를 `base64.b32encode`로 만들어서 19/19 이벤트가 "Invalid resource id" 400 에러로 모두 실패. RFC2938 base32hex(0-9, a-v)만 허용되는데 일반 base32(a-z, 2-7)는 'w'~'z'가 들어가서 거부됨. | **하지 말 것**: 외부 API의 식별자 포맷 규칙은 추측 말고 공식 문서 확인. Calendar event_id는 `b32hexencode` 사용. 새 외부 API 첫 통합 시 에러 메시지 보고 즉시 다른 인코딩 후보 시도.
-- **2026-04-28** | govt-radar 지역 필터에서 "경기도 산하 시·군"(파주·화성·부천·시흥 등) 한정 공고 19건이 [경기] prefix만 보고 통과. 본사가 용인이라 다른 시·군 한정은 지원 불가인데, NON_ELIGIBLE_REGIONS에 광역지자체만 있고 시·군이 없었음. | **하지 말 것**: 지역 필터는 광역(시·도) + 산하(시·군·구) 모두 차단 목록 작성. 본사 prefix가 없는 한 타 시·군 prefix·발주기관·본문 자격 한정(`관내 본사` 등) 모두 차단. 회귀 테스트(`tests/scorer_scenarios.py`)에 19건 케이스 박제.
-
-<!-- 신규 항목은 이 줄 위에 시간 역순(최신이 위)으로 추가 -->
+### 최근 5건 (전체는 failures.md)
+- **2026-04-28** ⑬ | govt-radar 시·군 한정 19건 통과 — 광역+산하 모두 차단 필요
+- **2026-04-28** ⑤ | 카페24 OAuth refresh_token 만료 사람이 매번 재발급 — 04:00 자동 갱신 cron 신설
+- **2026-04-28** ④ | sync_cafe24 매 실행 9건 누적 중복 — cutoff에 ` 00:00` 명시 + 자연키 dedupe
+- **2026-04-28** ③ | SS sync가 PURCHASE_DECIDED만 시트 저장 — 5상태 모두 보관 + 분석 시 컬럼 필터
+- **2026-04-28** ② | SS sync `productOrder.paymentDate` 오매핑 — raw JSON 1건 출력 후 키 검증
 
 ---
 
