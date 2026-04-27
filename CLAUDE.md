@@ -219,8 +219,9 @@
 | 13시 송장 등록 | ⏳ PlusCL 인증 5개 대기 |
 | 카페24 N10→N20 전환 | 수동 (API 불가) |
 | SS 신규→발주확인 | 수동 (API 한계) |
-| 08:30 시트 sync (Vultr `/root/heavylover-repurchase/`) | ✅ 평일 매일 |
-| 09:00 재구매 리포트 + 마트 4종 갱신 | ✅ mart_monthly/cohort/stage/summary 시트 자동 갱신 + 텔레그램 (Anthropic 401 시 fallback 원시 숫자) |
+| 08:30 시트 sync (Vultr `/root/heavylover-repurchase/`) | ✅ **매일** (주말 포함). 카페24 + SS 5상태(구매확정·결제완료·발송·배송중·배송완료) |
+| 09:00 재구매 리포트 + 마트 4종 갱신 | ✅ **매일** mart_monthly/cohort/stage/summary 시트 자동 갱신 + 텔레그램 (Anthropic 401 시 fallback 원시 숫자) |
+| 04:00 카페24 OAuth 자동 갱신 | ✅ **매일** refresh_token 만료 방지. 실패 시 텔레그램 알림 |
 
 ### 엑셀 생성 로직
 - 카페24: `fetch_orders(days_back=7)` → `order_status=N20`만 포함
@@ -467,6 +468,7 @@ heavylover-automation/
 - **2026-04-27** | govt-radar `lib/scorer.py` 작성 시 memory/MEMORY.md를 안 보고 키워드 정해서 "강한 소상공인" 명칭 변경(→ 소상공인 도약)을 반영 못함. 이미 `project_grant_renames.md`에 기록돼 있던 사항. 사용자가 텔레그램 알림 누락 발견 후 지적. | **하지 말 것**: 키워드 매칭·검색 로직 작성 전 memory/MEMORY.md 1회 훑고 관련 항목(명칭 변경·본사 위치·발신자 화이트리스트) 반영.
 - **2026-04-27** | govt-radar 1차 데이터 진단 시 "100건 샘플"만 보고 "소진공 직접 발주는 기업마당 API에 안 옴"이라고 결론. 500건 펼쳐보니 8건 들어있었음. | **하지 말 것**: API 커버리지 판단할 때 첫 페이지만 보고 결정하지 말 것. 페이지네이션 끝까지 또는 키워드 직접 검색으로 확인.
 - **2026-04-27** | CLAUDE.md §5에 "08:30 sync, 09:00 report cron 가동 중"이라고 적혀 있어 사실로 전제하고 마트 플랜을 짰으나 실제 Vultr `crontab -l`엔 11시·13시 자동화만 있었음 (재구매 cron 미배포). | **하지 말 것**: 자동화 가동 여부는 문서가 아니라 `crontab -l` + 서버 파일 존재로 1차 검증한 뒤 작업 시작. (§0 "Pre-flight Checks" 참조)
+- **2026-04-27** | Google Calendar 이벤트 ID를 `base64.b32encode`로 만들어서 19/19 이벤트가 "Invalid resource id" 400 에러로 모두 실패. RFC2938 base32hex(0-9, a-v)만 허용되는데 일반 base32(a-z, 2-7)는 'w'~'z'가 들어가서 거부됨. | **하지 말 것**: 외부 API의 식별자 포맷 규칙은 추측 말고 공식 문서 확인. Calendar event_id는 `b32hexencode` 사용. 새 외부 API 첫 통합 시 에러 메시지 보고 즉시 다른 인코딩 후보 시도.
 
 <!-- 신규 항목은 이 줄 위에 시간 역순(최신이 위)으로 추가 -->
 
