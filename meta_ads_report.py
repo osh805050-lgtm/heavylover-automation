@@ -17,6 +17,7 @@ CLAUDE.md §8 기준:
 
 import io
 import json
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -315,7 +316,7 @@ def format_markdown_report(target_date, metrics, flags, validation, raw_data, se
 def format_telegram_summary(target_date, metrics, flags, ok, action_text=None):
     """텔레그램 간결 요약 (이모지 정책 준수: 최소)"""
     if not ok:
-        return f"[Meta 광고 {target_date}]\n데이터 없음 (API 실패 또는 노출 없음)"
+        return f"📈 [Meta광고] {target_date}\n─────────────\n데이터 없음 (API 실패 또는 노출 없음)"
 
     def _line(label, actual_str, bench_str=None, cmp_str=None):
         parts = [f"{label}: {actual_str}"]
@@ -325,7 +326,8 @@ def format_telegram_summary(target_date, metrics, flags, ok, action_text=None):
             parts.append(f"→ {cmp_str}")
         return " ".join(parts)
 
-    lines = [f"[Meta 광고 {target_date}]"]
+    # 텔레그램 식별 prefix 강화 — 다른 자동화(발주·재구매·정부지원)와 명확히 구분
+    lines = [f"📈 [Meta광고] {target_date}", "─" * 18]
     lines.append(_line("지출", _fmt_num(metrics['spend'], 0, '원')))
     lines.append(
         _line("CTR", _fmt_num(metrics['ctr_pct'], 2, '%'),
@@ -551,7 +553,7 @@ def run():
 
         err_msg = raw.get("error") or "응답 데이터 비어있음"
         telegram_client.send_message(
-            f"[Meta 광고 {target_date}] 데이터 없음\n사유: {err_msg}"
+            f"📈 [Meta광고] {target_date}\n─────────────\n데이터 없음 (API 실패)\n사유: {err_msg}"
         )
         return 1
 
@@ -640,18 +642,29 @@ def run():
     sent = telegram_client.send_message(summary)
     print(f"텔레그램 전송: {sent}")
 
-    # 이메일 (심층)
+    # 이메일 — 4역할 페르소나 심층 + 차트 인라인 (재구매 일일 리포트와 동일 수준)
     try:
-        html = build_email_html(
-            target_date, metrics, flags, validation, self_bench,
-            deep_text, recent_trend, campaign_summaries
+        import meta_ads_email_daily
+        sheet_id = os.getenv("GOOGLE_SHEETS_ID", "").strip()
+        sheet_url = (
+            f"https://docs.google.com/spreadsheets/d/{sheet_id}" if sheet_id else ""
         )
-        text_fallback = (deep_text or "Claude 분석 미생성") + "\n\n" + summary
-        subject = f"[Meta 광고 일일 심층 리포트] {target_date}"
-        email_sender.send_email(subject, text_fallback, html)
-        print("이메일 전송 완료")
+        ok, err = meta_ads_email_daily.send_daily_email(
+            target_date=target_date,
+            metrics=metrics,
+            self_bench=self_bench,
+            flags=flags,
+            recent_trend=recent_trend,
+            campaigns=campaign_summaries,
+            winner_patterns=winner_patterns,
+            sheet_url=sheet_url,
+        )
+        if ok:
+            print("이메일 4역할 심층 발송 완료")
+        else:
+            print(f"이메일 발송 실패 (텔레그램은 발송됨): {err}")
     except Exception as e:
-        print(f"이메일 전송 실패 (텔레그램은 발송됨): {e}")
+        print(f"이메일 모듈 호출 실패: {e}")
 
     return 0
 

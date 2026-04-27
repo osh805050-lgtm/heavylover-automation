@@ -1,2 +1,2 @@
 date,level,campaign_id,campaign_name,spend,impressions,clicks,ctr_pct,cpc_krw,frequency,purchases,purchase_value_krw,cpa_krw,roas,raw_json_path,appended_at
-2026-04-27,account,account,,121901.49999999999,20323.0,301.0,1.481081,404.98789999999997,1.247345,6.0,411191.0,20316.917149999997,3.373141,data/meta_ads/raw/2026-04-27.json,2026-04-28T03:13:29+09:00
+2026-04-27,account,account,,121901.49999999999,20323.0,301.0,1.481081,404.98789999999997,1.247345,6.0,411191.0,20316.917149999997,3.373141,data/meta_ads/raw/2026-04-27.json,2026-04-28T03:23:02+09:00
