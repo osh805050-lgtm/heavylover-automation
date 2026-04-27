@@ -50,6 +50,29 @@ STRONG_MATCH_KEYWORDS = [
     "온라인 플랫폼", "온라인플랫폼",
 ]
 
+# 헤비로버 우선순위 지원 유형 — 자금·인프라·공간 (가중치 ×2)
+# 사용자 명시 (2026-04-28): 자금지원, 인프라 제공, 사업공간 제공 유달리 필요
+HIGH_PRIORITY_SUPPORT_KEYWORDS = [
+    # 자금
+    "정책자금", "융자", "보조금", "지원금", "운영자금",
+    "성장자금", "긴급자금", "특례보증",
+    # 인프라
+    "시설장비", "시설·장비", "장비활용", "장비 활용",
+    "테스트베드", "공장 임대", "공유주방", "공유공장",
+    "스마트공장 구축",  # "스마트공장"은 일반 R&D 의미 강해서 "구축" 한정
+    # 사업공간
+    "입주기업", "입주공간", "창업보육", "보육센터",
+    "사무공간", "사무실 임대", "코워킹", "오피스 입주",
+    "창업공간",
+]
+
+# 명백히 부적합한 지원 유형 (가중치 -1.5)
+LOW_PRIORITY_SUPPORT_KEYWORDS = [
+    "교육생 모집", "교육과정", "강의 수강",  # 단순 교육
+    "세미나 참가", "워크숍 참가",
+    "포럼 참가", "박람회 관람",
+]
+
 TECH_KEYWORDS = [
     "AI", "데이터", "ICT", "디지털", "스마트공장",
     "R&D", "기술개발", "혁신",
@@ -61,7 +84,8 @@ EXCLUDE_KEYWORDS = [
     "건축", "토목", "건설현장",
     "의료기기", "제약", "바이오의약",
     "철강", "조선", "항공우주",
-    "노인", "장애인 시설", "보육",
+    "노인", "장애인 시설",
+    "어린이집", "보육시설", "보육교사",  # 단순 "보육"은 창업보육센터와 충돌 → 구체화
 ]
 
 # ⚠️ 본사 외 타지역 한정 공고 — 헤비로버(경기도 용인시 수지구) 지원 불가
@@ -380,6 +404,19 @@ def score_announcement(item):
     tech_hits = _count_hits(text, TECH_KEYWORDS)
     if tech_hits > 0:
         fit_score += min(1, tech_hits * 0.3)
+
+    # 헤비로버 우선순위 지원 유형 가점 (자금·인프라·공간)
+    high_prio_hits = _count_hits(text, HIGH_PRIORITY_SUPPORT_KEYWORDS)
+    if high_prio_hits > 0:
+        matched += [k for k in HIGH_PRIORITY_SUPPORT_KEYWORDS if k.lower() in text.lower()][:3]
+        fit_score += min(2.5, high_prio_hits * 1.2)  # 1개 = +1.2, 2개 = +2.4 cap
+
+    # 부적합 지원 유형 감점 (단순 교육·세미나만)
+    low_prio_hits = _count_hits(text, LOW_PRIORITY_SUPPORT_KEYWORDS)
+    if low_prio_hits > 0:
+        # 단, 자금·인프라·공간 키워드도 같이 있으면 감점 안 함 (실질 지원이면 OK)
+        if not high_prio_hits:
+            fit_score -= min(2, low_prio_hits * 1.0)
 
     # 발주 기관 가점 (사업 적합도에 포함 — 농식품부·aT 같은 헤비로버 친화 기관)
     agency_text = f"{source} {agency}"

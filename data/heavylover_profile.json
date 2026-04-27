@@ -76,8 +76,24 @@
     "is_female_business": false,
     "is_disabled_business": false,
     "is_veteran_business": false,
-    "is_social_enterprise": false
+    "is_social_enterprise": false,
+    "is_north_korean_defector_business": false,
+    "is_multicultural_family_business": false,
+    "_note_for_llm": "헤비로버는 일반 남성 대표 법인. 여성·장애인·국가유공자·북한이탈주민·다문화가정·사회적기업 한정 공고는 자격 미달."
   },
+
+  "high_priority_support_types": [
+    "자금지원 (정책자금·융자·보조금·바우처)",
+    "인프라 제공 (시설·장비·테스트베드·공장 임대)",
+    "사업공간 제공 (사무실·입주공간·창업보육센터·코워킹스페이스)",
+    "수출지원 (해외전시·통상촉진단·바이어 매칭)",
+    "마케팅·판로 (온라인몰 입점·광고 매칭·쇼피·아마존)"
+  ],
+  "low_priority_support_types": [
+    "단순 교육·세미나 (자금·인프라·공간 동반 없음)",
+    "컨설팅만 (실질 지원 없는 멘토링)",
+    "행사·박람회 참가 (수출 비연결)"
+  ],
 
   "current_grants_in_progress_2026": [
     "초기창업패키지 2차 (마지막 자격)",
