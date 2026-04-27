@@ -218,16 +218,34 @@ def _iso_to_sheet(dt_str: str) -> str:
     return s
 
 
+SS_STATUS_LABEL = {
+    "PAYED": "결제완료",
+    "DISPATCHED": "발송처리",
+    "DELIVERING": "배송중",
+    "DELIVERED": "배송완료",
+    "PURCHASE_DECIDED": "구매확정",
+    "EXCHANGED": "교환",
+    "CANCELED": "취소",
+    "RETURNED": "반품",
+    "CANCELED_BY_NOPAYMENT": "미결제취소",
+}
+
+
 def _ss_wrap_to_row(wrap: dict) -> list | None:
-    """SS API wrap → 46컬럼 행. 구매확정 상태만 포함."""
+    """SS API wrap → 46컬럼 행.
+
+    구매확정·결제완료·발송·배송 상태 모두 포함 (취소/반품/미결제는 제외).
+    분석은 주문상태 컬럼으로 필터해서 사용.
+    """
     po = wrap.get("productOrder", {}) or {}
     order = wrap.get("order", {}) or {}
     delivery = wrap.get("delivery", {}) or {}
 
     status = po.get("productOrderStatus", "")
-    # PURCHASE_DECIDED(구매확정)만 유효 (시트에 "구매확정"으로 표시됨)
-    if status != "PURCHASE_DECIDED":
+    # 매출로 잡히는 유효 상태만 포함 (취소/반품/미결제 제외)
+    if status not in ("PAYED", "DISPATCHED", "DELIVERING", "DELIVERED", "PURCHASE_DECIDED", "EXCHANGED"):
         return None
+    status_label = SS_STATUS_LABEL.get(status, status)
 
     def _won(v):
         try:
@@ -242,9 +260,9 @@ def _ss_wrap_to_row(wrap: dict) -> list | None:
     row = [
         po.get("productOrderId", ""),                    # 상품주문번호
         po.get("orderId", "") or order.get("orderId", ""), # 주문번호
-        _iso_to_sheet(po.get("decisionDate", "") or po.get("purchaseDecisionDate", "")),  # 구매확정일
+        _iso_to_sheet(po.get("decisionDate", "") or po.get("purchaseDecisionDate", "")),  # 구매확정일 (구매확정 상태만 채워짐)
         "스마트스토어",                                    # 판매채널
-        "구매확정",                                        # 주문상태
+        status_label,                                       # 주문상태 (결제완료/발송처리/구매확정/...)
         po.get("shippingAttribute", "") or "",            # 배송속성
         "",                                                # 풀필먼트사
         buyer_name,                                        # 구매자명
@@ -292,16 +310,53 @@ def _ss_wrap_to_row(wrap: dict) -> list | None:
 
 
 def sync_smartstore(spreadsheet, days: int = BACKFILL_DAYS) -> int:
+    """스마트스토어 sync — 결제·발송·배송·구매확정 상태 모두 포함.
+
+    24시간 윈도우 한계 우회를 위해 1일씩 잘라 호출하고 productOrderId로 dedupe.
+    cutoff는 구매확정일(있으면) 또는 결제일(없으면) 기준으로 비교.
+    """
+    import time as _time
     ws = _find_tab(spreadsheet, SS_HEADER_FIRST)
     if ws is None:
         raise RuntimeError("스마트스토어 원본 탭을 찾지 못했습니다")
     _log(f"스마트스토어 탭: {ws.title}")
 
-    # 구매확정 기준: 최근 days일 동안 구매확정된 건
-    # last-changed-type=PURCHASE_DECIDED, hours_back=days*24
-    hours = days * 24
-    orders = naver_client.orders_by_status(status="PURCHASE_DECIDED", hours_back=hours)
-    _log(f"  SS API 주문 {len(orders)}건 수신 (구매확정, 최근 {days}일)")
+    # 구매확정 + 결제완료 + 발송처리 + 배송중 + 배송완료 모두 수집
+    # (CANCELED/RETURNED는 자연스럽게 제외)
+    statuses = ["PURCHASE_DECIDED", "PAYED", "DISPATCHED", "DELIVERING", "DELIVERED"]
+    token = naver_client.get_access_token()
+    seen: dict = {}
+
+    for status in statuses:
+        # 1일씩 잘라서 호출 (한 번에 24h 한계 + RATE_LIMIT 회피)
+        for d in range(1, days + 1):
+            try:
+                changes = naver_client.get_changed_product_orders(
+                    token, status, hours_back=d * 24
+                )
+            except Exception as e:
+                msg = str(e)
+                if "RATE_LIMIT" in msg or "429" in msg:
+                    _time.sleep(5)
+                    try:
+                        changes = naver_client.get_changed_product_orders(
+                            token, status, hours_back=d * 24
+                        )
+                    except Exception:
+                        continue
+                else:
+                    continue
+            for c in changes:
+                pid = c.get("productOrderId")
+                if pid:
+                    seen[pid] = c
+            _time.sleep(1.2)
+        _log(f"  status={status} 누적 unique: {len(seen)}건")
+
+    # 상세 조회 (300개씩 배치)
+    ids = list(seen.keys())
+    orders = naver_client.get_order_details(token, ids)
+    _log(f"  SS API 상세 {len(orders)}건 수신 (최근 {days}일, 5개 상태)")
 
     new_rows: list[list] = []
     for w in orders:
@@ -310,17 +365,16 @@ def sync_smartstore(spreadsheet, days: int = BACKFILL_DAYS) -> int:
             new_rows.append(row)
     _log(f"  변환된 행: {len(new_rows)}")
 
-    # 기존 시트에서 최근 days일 내 구매확정일 행 제거
+    # cutoff: 구매확정일(col 2) 또는 결제일(col 39) 둘 중 하나라도 cutoff 이후면 제거
     cutoff = (datetime.now(KST) - timedelta(days=days)).strftime("%Y-%m-%d")
     all_rows = ws.get_all_values()
     keep: list[list] = [all_rows[0]] if all_rows else []
     delete_count = 0
     for r in all_rows[1:]:
-        if len(r) < 3 or not r[2]:
-            keep.append(r)
-            continue
-        # 구매확정일 컬럼(index 2) 비교
-        if r[2] >= cutoff:
+        decision = r[2][:10] if len(r) > 2 and r[2] else ""
+        payment = r[39][:10] if len(r) > 39 and r[39] else ""
+        latest = max(decision, payment)
+        if latest and latest >= cutoff:
             delete_count += 1
             continue
         keep.append(r)
