@@ -40,6 +40,9 @@ jobs:
           DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # 캘린더 (선택 — 미설정 시 자동 스킵)
+          GOOGLE_SA_KEY_JSON: ${{ secrets.GOOGLE_SA_KEY_JSON }}
+          GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
         run: python govt_radar.py --days-back 2
 
       - name: Commit results

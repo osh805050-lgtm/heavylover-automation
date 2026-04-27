@@ -24,6 +24,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from . import kstartup_api
+from . import bizinfo_api
 
 log = logging.getLogger(__name__)
 
@@ -68,45 +69,21 @@ def _safe_get(url, **kwargs):
         return None
 
 
-# ==================== 1. 기업마당 (bizinfo.go.kr) ====================
+# ==================== 1. 기업마당 (공식 Open API) ====================
 def fetch_bizinfo():
-    """기업마당 — 정부 통합 (가장 광범위)"""
-    url = "https://www.bizinfo.go.kr/web/lay1/bbs/S1T122C128/AS/74/list.do"
-    r = _safe_get(url)
-    if not r:
+    """기업마당 통합 — 공공데이터포털 공식 API
+
+    중앙부처·지자체·유관기관(소상공인진흥공단·창업진흥원 포함) 통합 공고.
+    DATA_GO_KR_API_KEY 필요.
+    """
+    try:
+        return bizinfo_api.fetch_announcements(per_page=100, max_pages=3)
+    except RuntimeError as e:
+        log.warning(f"기업마당 API 키 미설정: {e}")
         return []
-
-    soup = BeautifulSoup(r.text, "lxml")
-    items = []
-
-    for link in soup.select("a[href*='pblancId=']"):
-        title = link.get_text(strip=True)
-        if not title or len(title) < 5:
-            continue
-        href = link.get("href", "")
-        full_url = urljoin("https://www.bizinfo.go.kr", href)
-
-        parent = link.find_parent("li") or link.find_parent("tr")
-        agency = None
-        deadline = None
-        if parent:
-            agency_el = parent.select_one(".agency, .org, .ministry")
-            if agency_el:
-                agency = agency_el.get_text(strip=True)
-            text = parent.get_text(" ", strip=True)
-            deadline = _parse_date(text)
-
-        items.append({
-            "source": "기업마당",
-            "title": title,
-            "url": full_url,
-            "agency": agency,
-            "deadline": deadline,
-            "posted_date": None,
-            "raw": {},
-        })
-
-    return items[:80]
+    except Exception as e:
+        log.warning(f"기업마당 API 실패: {e}")
+        return []
 
 
 # ==================== 2. K-Startup (공식 Open API) ====================

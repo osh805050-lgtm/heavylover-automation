@@ -95,66 +95,153 @@ def collect_layer2(log, days_back=2):
         return []
 
 
-def build_telegram_message(scored_items, stats_l1, count_l2, today_str):
-    """텔레그램 메시지 구성 - 적합도 ≥ 3만"""
+def _fmt_score_breakdown(s):
+    """점수 분해 표시: 적합도+지역+마감 = 총점"""
+    fit = s.get("fit_score", 0)
+    reg = s.get("region_score", 0)
+    dl = s.get("deadline_score", 0)
+    return f"적합 {fit} + 지역 {reg} + 마감 {dl} = {s['score']}"
+
+
+def _clean_body(text, max_len=200):
+    """본문 정제 - 공백·줄바꿈 정규화, 길이 제한"""
+    if not text:
+        return ""
+    import re as _re
+    cleaned = _re.sub(r"\s+", " ", text).strip()
+    if len(cleaned) <= max_len:
+        return cleaned
+    return cleaned[:max_len].rstrip() + "…"
+
+
+def _format_announcement_block(s, include_body=False):
+    """공고 한 건의 텔레그램 표시 블록 생성"""
+    lines = []
+    tag_str = " ".join(f"[{t}]" for t in s.get("tags", []))
+    lines.append(f"• [{s['score']}] {s['title'][:70]} {tag_str}".strip())
+    lines.append(f"  📊 {_fmt_score_breakdown(s)} ({s.get('region_label','?')})")
+
+    # 마감일 + D-Day
+    if s.get("deadline"):
+        d_str = f"  📅 마감 {s['deadline']}"
+        if s.get("deadline_days") is not None:
+            d_str += f" (D{s['deadline_days']})"
+        lines.append(d_str)
+
+    # 발주기관
+    if s.get("agency"):
+        lines.append(f"  🏛 발주: {s['agency']}")
+
+    if include_body:
+        # 자격요건 (raw에서)
+        raw = s.get("raw", {}) or {}
+        target = raw.get("trgetNm") or raw.get("biz_enyy")
+        if target:
+            target_clean = _clean_body(str(target), 80)
+            if target_clean:
+                lines.append(f"  👥 대상: {target_clean}")
+
+        # 분류·분야
+        realm = raw.get("realm") or raw.get("supt_biz_clsfc")
+        if realm:
+            lines.append(f"  🏷 분야: {realm[:50]}")
+
+        # 본문 200자
+        body = s.get("body_excerpt") or ""
+        if body:
+            body_clean = _clean_body(body, 200)
+            if body_clean:
+                lines.append(f"  📝 {body_clean}")
+
+        # 매칭 키워드 (사용자가 왜 적합한지 보여줌)
+        matched = s.get("matched", [])
+        if matched:
+            m_str = ", ".join(matched[:5])
+            lines.append(f"  🔑 매칭: {m_str}")
+
+    # URL은 마지막
+    if s.get("url"):
+        lines.append(f"  🔗 {s['url'][:90]}")
+
+    return "\n".join(lines)
+
+
+def build_telegram_messages(scored_items, stats_l1, count_l2, today_str):
+    """텔레그램 메시지 구성 (분할 발송용 list[str] 반환).
+
+    텔레그램 4096자 제한 → 한 메시지가 3500자 넘으면 분할.
+    S+A 등급: 본문 200자 + 자격·분야·매칭키워드 풀 표시
+    B 등급: 제목+점수만
+    C 등급: 카운트만
+    """
     notify = [s for s in scored_items if s["score"] >= 3]
     s_tier = [s for s in notify if s["score"] >= 9]
     a_tier = [s for s in notify if 7 <= s["score"] < 9]
     b_tier = [s for s in notify if 5 <= s["score"] < 7]
     c_tier = [s for s in notify if 3 <= s["score"] < 5]
 
-    lines = []
-    lines.append(f"🎯 정부지원 레이더 - {today_str}")
-    lines.append("")
-    lines.append(f"수집: 1차 {sum(v for v in stats_l1.values() if isinstance(v, int))}건 (15개 포털) + 2차 {count_l2}건 (메일)")
-    lines.append(f"적합 후보: {len(notify)}건 (S {len(s_tier)} / A {len(a_tier)} / B {len(b_tier)} / C {len(c_tier)})")
-    lines.append("")
+    # 첫 메시지: 헤더 + S 등급
+    messages = []
+    current = []
+    current.append(f"🎯 정부지원 레이더 - {today_str}")
+    current.append("")
+    current.append(f"수집: 1차 {sum(v for v in stats_l1.values() if isinstance(v, int))}건 + 2차 {count_l2}건 (메일)")
+    current.append(f"적합 후보: {len(notify)}건 (S {len(s_tier)} / A {len(a_tier)} / B {len(b_tier)} / C {len(c_tier)})")
+    current.append("")
 
-    def _fmt_score_breakdown(s):
-        """점수 분해 표시: 적합도+지역+마감 = 총점"""
-        fit = s.get("fit_score", 0)
-        reg = s.get("region_score", 0)
-        dl = s.get("deadline_score", 0)
-        return f"적합 {fit} + 지역 {reg} + 마감 {dl} = {s['score']}"
-
-    # S 등급은 전부 표시 (절대 누락 금지)
     if s_tier:
-        lines.append(f"🚨 S - 긴급 ({len(s_tier)}건, 전체 표시)")
+        current.append(f"🚨 S - 긴급 계획서 즉시 검토 ({len(s_tier)}건)")
         for s in s_tier:
-            tag_str = " ".join(f"[{t}]" for t in s.get("tags", []))
-            lines.append(f"• [{s['score']}] {s['title'][:65]} {tag_str}")
-            lines.append(f"  📊 {_fmt_score_breakdown(s)} ({s.get('region_label','?')})")
-            if s.get("deadline"):
-                lines.append(f"  📅 마감 {s['deadline']} (D{s.get('deadline_days', '?')})")
-            if s.get("agency"):
-                lines.append(f"  🏛 발주: {s['agency']}")
-            if s.get("url"):
-                lines.append(f"  🔗 {s['url'][:80]}")
+            block = _format_announcement_block(s, include_body=True)
+            # 현재 메시지 누적 길이 체크 (3500자 = 안전 한도)
+            if sum(len(l) + 1 for l in current) + len(block) > 3500:
+                messages.append("\n".join(current))
+                current = [f"🚨 S 등급 (계속)"]
+            current.append(block)
+            current.append("")  # 공고 간 빈 줄
 
-    # A 등급도 전부 (사업계획서 후보라 누락 금지)
     if a_tier:
-        lines.append("")
-        lines.append(f"⭐ A - 사업계획서 후보 ({len(a_tier)}건, 전체 표시)")
+        # A 등급 시작 전 분할
+        if current and sum(len(l) + 1 for l in current) > 2500:
+            messages.append("\n".join(current))
+            current = []
+        current.append(f"⭐ A - 사업계획서 후보 ({len(a_tier)}건)")
         for s in a_tier:
-            tag_str = " ".join(f"[{t}]" for t in s.get("tags", []))
-            lines.append(f"• [{s['score']}] {s['title'][:65]} {tag_str}")
-            lines.append(f"  📊 {_fmt_score_breakdown(s)} ({s.get('region_label','?')})")
-            if s.get("deadline"):
-                lines.append(f"  📅 마감 {s['deadline']}")
-            if s.get("agency"):
-                lines.append(f"  🏛 발주: {s['agency']}")
+            block = _format_announcement_block(s, include_body=True)
+            if sum(len(l) + 1 for l in current) + len(block) > 3500:
+                messages.append("\n".join(current))
+                current = [f"⭐ A 등급 (계속)"]
+            current.append(block)
+            current.append("")
 
     if b_tier:
-        lines.append("")
-        lines.append(f"📋 B - 검토 ({len(b_tier)}건, 상위 10건)")
-        for s in b_tier[:10]:
-            lines.append(f"• [{s['score']}] {s['title'][:60]}")
+        if current and sum(len(l) + 1 for l in current) > 2500:
+            messages.append("\n".join(current))
+            current = []
+        current.append(f"📋 B - 검토 ({len(b_tier)}건, 상위 15건)")
+        for s in b_tier[:15]:
+            current.append(f"• [{s['score']}] {s['title'][:60]} ({s.get('region_label','?')})")
+            if sum(len(l) + 1 for l in current) > 3500:
+                messages.append("\n".join(current))
+                current = ["📋 B 등급 (계속)"]
 
-    if c_tier and len(c_tier) > 0:
-        lines.append("")
-        lines.append(f"📎 C - 참고 {len(c_tier)}건 (시트에서 확인)")
+    if c_tier:
+        if current and sum(len(l) + 1 for l in current) > 3500:
+            messages.append("\n".join(current))
+            current = []
+        current.append("")
+        current.append(f"📎 C - 참고 {len(c_tier)}건 (시트에서 확인)")
 
-    return "\n".join(lines)
+    if current:
+        messages.append("\n".join(current))
+
+    return messages
+
+
+def build_telegram_message(scored_items, stats_l1, count_l2, today_str):
+    """단일 메시지 (호환성 유지). 신규 코드는 build_telegram_messages 사용."""
+    msgs = build_telegram_messages(scored_items, stats_l1, count_l2, today_str)
+    return "\n\n".join(msgs)
 
 
 def save_results(scored_items, today_str):
@@ -223,20 +310,40 @@ def main():
     out_file = save_results(scored, datetime.now(KST).strftime("%Y%m%d"))
     log.info(f"결과 저장: {out_file}")
 
-    # 텔레그램 알림
-    msg = build_telegram_message(scored, stats_l1, len(items_l2), today_str)
+    # 텔레그램 알림 (분할 발송)
+    messages = build_telegram_messages(scored, stats_l1, len(items_l2), today_str)
 
     if args.dry_run:
-        log.info("DRY-RUN - 텔레그램 발송 생략")
+        log.info(f"DRY-RUN - 텔레그램 {len(messages)}개 메시지 생략")
         print("\n" + "=" * 60)
-        print(msg)
+        for i, m in enumerate(messages, 1):
+            print(f"\n--- 메시지 {i}/{len(messages)} ({len(m)}자) ---")
+            print(m)
         print("=" * 60)
     else:
-        try:
-            ok = telegram_client.send_message(msg[:4000])  # 텔레그램 4096 제한
-            log.info(f"텔레그램 발송: {'성공' if ok else '실패'}")
-        except Exception as e:
-            log.error(f"텔레그램 발송 에러: {e}")
+        success_count = 0
+        for i, m in enumerate(messages, 1):
+            try:
+                ok = telegram_client.send_message(m[:4090])
+                if ok:
+                    success_count += 1
+                import time as _time
+                _time.sleep(1)  # rate limit 회피
+            except Exception as e:
+                log.error(f"텔레그램 메시지 {i}/{len(messages)} 에러: {e}")
+        log.info(f"텔레그램 발송: {success_count}/{len(messages)}개 성공")
+
+    # 캘린더 자동 등록 (적합도 ≥ 7 + 마감일 있는 공고)
+    try:
+        from lib import calendar_client
+        calendar_results = calendar_client.sync_announcements(scored, log=log)
+        log.info(f"캘린더 등록: {calendar_results}")
+    except ImportError:
+        log.info("캘린더 모듈 미설치 (정상)")
+    except RuntimeError as e:
+        log.warning(f"캘린더 스킵 (인증키 미설정): {e}")
+    except Exception as e:
+        log.error(f"캘린더 등록 에러: {e}")
 
     log.info("정부지원 레이더 종료")
     return 0
