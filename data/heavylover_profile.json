@@ -1,0 +1,122 @@
+{
+  "_comment": "헤비로버 자격 프로필 — CLAUDE.md §2·§4 ground truth. 공고 자격요건 자동 매칭용.",
+  "_updated": "2026-04-28",
+
+  "company": {
+    "brand": "HeavyLover (헤비로버)",
+    "founded": "2023-07",
+    "years_old_at_2026_07": 3,
+    "co_founders": ["오승현", "박재영"],
+    "business_form": "법인",
+    "is_smb": true,
+    "is_startup_under_3y": true,
+    "is_startup_under_7y": true,
+    "is_pre_startup": false
+  },
+
+  "location": {
+    "headquarters": "경기도 용인시 수지구",
+    "region_metro": "경기도",
+    "region_city": "용인시",
+    "region_district": "수지구"
+  },
+
+  "industry": {
+    "category": "D2C 식품 (냉동 도시락·시리얼)",
+    "primary_product": "운동인 대상 고칼로리·고단백 냉동 완성식",
+    "industry_codes_kssic": ["10792", "10750"],
+    "tags": ["식품제조업", "D2C", "이커머스", "냉동식품", "단백질", "헬스케어"]
+  },
+
+  "certifications": {
+    "haccp": true,
+    "halal": false,
+    "organic": false,
+    "vegan_certified": false,
+    "trademark_registered": false,
+    "patent_held": false
+  },
+
+  "infrastructure": {
+    "manufacturing": "OEM (나비야 / Navia)",
+    "logistics_3pl": "더다이스",
+    "freezing": "IQF 급속냉동",
+    "cooking": "수비드 저온조리",
+    "self_factory": false
+  },
+
+  "financials": {
+    "revenue_2025_krw": 200000000,
+    "revenue_2026_q1_monthly_avg_krw": 22210000,
+    "revenue_2026_04_mtd_krw": 30000000,
+    "revenue_target_2026_krw": 1000000000,
+    "is_export_company": false,
+    "export_amount_usd": 0,
+    "export_planned": true
+  },
+
+  "channels": {
+    "d2c_mall": "Cafe24",
+    "marketplaces": ["네이버 스마트스토어"],
+    "in_amazon": false,
+    "in_coupang": false,
+    "global_marketplace_planned": true
+  },
+
+  "marketing": {
+    "primary_paid_channel": "Meta",
+    "roas_avg": 3.5,
+    "monthly_ad_spend_range_krw": [5000000, 20000000]
+  },
+
+  "team": {
+    "headcount": 2,
+    "founder_age_at_2026_03": 28,
+    "is_youth_business": true,
+    "is_female_business": false,
+    "is_disabled_business": false,
+    "is_veteran_business": false,
+    "is_social_enterprise": false
+  },
+
+  "current_grants_in_progress_2026": [
+    "초기창업패키지 2차 (마지막 자격)",
+    "용인시 온라인 플랫폼 지원사업 (서류 통과)",
+    "KOTRA 내수기업 수출기업화",
+    "지식재산 바우처 (상표)",
+    "상생성장지원자금 1억 (현장실사)"
+  ],
+
+  "exclusion_reasons": {
+    "not_applicable": [
+      "공장 신축·증설 (자체 공장 없음)",
+      "농민·어민 한정 (제조업)",
+      "의료기기·바이오의약 한정",
+      "보육·노인·장애인 시설",
+      "여성기업 한정 (대표자 남성)",
+      "사회적기업 한정",
+      "10년 이상 중견기업 한정 (3년차)",
+      "본사 외 시·군 한정 (용인시 수지구 외)"
+    ]
+  },
+
+  "relevance_keywords_high": [
+    "초기창업", "창업패키지", "예비창업",
+    "수출기업화", "내수기업 수출", "K-Food", "K-FOOD",
+    "농식품", "식품수출", "식품 D2C",
+    "강한 소상공인", "소상공인 도약", "희망리턴패키지",
+    "지식재산 바우처", "IP 바우처",
+    "마케팅", "온라인 플랫폼", "이커머스",
+    "용인시", "경기도", "수지구",
+    "HACCP", "냉동식품"
+  ],
+
+  "relevance_keywords_low": [
+    "공장 신축", "공장 증설",
+    "R&D 단독", "기술개발 단독",
+    "농민·어민",
+    "제약·바이오의약",
+    "여성기업 한정", "장애인기업 한정",
+    "10년 이상", "중견기업 한정"
+  ]
+}

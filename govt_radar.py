@@ -18,6 +18,7 @@ import argparse
 import io
 import json
 import logging
+import os
 import sys
 import traceback
 from datetime import datetime, timedelta, timezone
@@ -267,6 +268,7 @@ def main():
     parser.add_argument("--days-back", type=int, default=2, help="메일 스캔 일수 (기본 2)")
     parser.add_argument("--skip-layer1", action="store_true", help="1차 크롤링 스킵 (메일만)")
     parser.add_argument("--skip-layer2", action="store_true", help="메일 스캔 스킵 (1차만)")
+    parser.add_argument("--skip-eligibility", action="store_true", help="Layer 4 LLM 자격검증 스킵 (비용 절약)")
     args = parser.parse_args()
 
     log = _setup_logging()
@@ -305,6 +307,34 @@ def main():
     b_count = sum(1 for s in scored if 5 <= s["score"] < 7)
     c_count = sum(1 for s in scored if 3 <= s["score"] < 5)
     log.info(f"S {s_count} / A {a_count} / B {b_count} / C {c_count}")
+
+    # Layer 4: 자격 검증 (적합도 ≥5만, ANTHROPIC_API_KEY 살아있을 때만)
+    # 키워드로는 못 잡는 자격 미달(여성기업 한정·농민 한정·10년 이상 등) 필터
+    from dotenv import load_dotenv as _ld
+    _ld(override=True)
+    if not args.skip_eligibility and os.getenv("ANTHROPIC_API_KEY"):
+        try:
+            from lib import eligibility_checker
+            scored = eligibility_checker.batch_check(scored, threshold_score=5.0, limit=80)
+            # 자격 'no' 판정된 공고는 tier 강등 (캘린더·다이제스트에서 제외)
+            no_count = sum(
+                1 for s in scored
+                if (s.get("eligibility") or {}).get("eligible") == "no"
+            )
+            for s in scored:
+                e = (s.get("eligibility") or {}).get("eligible")
+                if e == "no":
+                    s["tier"] = "자격미달 (LLM 판정)"
+                    s["tags"] = (s.get("tags") or []) + ["LLM_INELIGIBLE"]
+            if no_count:
+                log.info(f"자격 미달 강등: {no_count}건")
+        except Exception as e:
+            log.warning(f"자격검증 모듈 실패 (스킵): {type(e).__name__}: {e}")
+    else:
+        if args.skip_eligibility:
+            log.info("자격검증 스킵 (--skip-eligibility)")
+        else:
+            log.info("자격검증 스킵 (ANTHROPIC_API_KEY 없음)")
 
     # 결과 저장
     out_file = save_results(scored, datetime.now(KST).strftime("%Y%m%d"))
