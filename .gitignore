@@ -26,6 +26,7 @@ Thumbs.db
 
 # 데이터 원본 (용량/개인정보)
 data/raw/
+data/meta_ads/raw/
 
 # 엑셀 출력물 (수시 생성)
 *.xlsx

@@ -41,17 +41,26 @@ jobs:
           META_API_VERSION: ${{ vars.META_API_VERSION || 'v21.0' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SMTP_HOST: ${{ vars.SMTP_HOST || 'smtp.gmail.com' }}
+          SMTP_PORT: ${{ vars.SMTP_PORT || '587' }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
         run: python meta_ads_report.py
 
       - name: Commit report
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/meta-ads/reports/ || true
+          git add docs/meta-ads/reports/ data/meta_ads/daily.csv data/meta_ads/daily_campaign.csv 2>/dev/null || true
           if git diff --staged --quiet; then
             echo "변경 사항 없음 — 커밋 스킵"
           else
-            git commit -m "chore(meta-ads): 일일 리포트 자동 생성"
+            git commit -m "chore(meta-ads): 일일 리포트 + 시계열 누적 자동 생성"
             git push
           fi
 

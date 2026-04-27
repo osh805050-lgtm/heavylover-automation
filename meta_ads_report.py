@@ -27,8 +27,14 @@ from meta_ads_client import (
     extract_cost_per_action,
     extract_purchase_roas,
     fetch_account_insights,
+    fetch_campaign_insights,
     validate_insights,
 )
+import meta_ads_history
+import meta_ads_self_benchmark
+import meta_ads_claude_comment
+import email_sender
+from meta_ads_weekly_report import summarize_row as summarize_campaign_row
 import telegram_client
 
 # Windows cp949 콘솔 대비
@@ -49,6 +55,32 @@ BENCHMARK = {
     "frequency_low": 2.0,
     "frequency_high": 4.0,
 }
+
+# 광고 계정 통화: USD. 자사 KRW 벤치마크와 비교 위해 환산.
+# 환율 고정 1,450원/USD (2026-04-28 승인). 변동 환율 미사용 — 추세 일관성 우선.
+CURRENCY_KRW_PER_USD = 1450
+CURRENCY_FIELDS_USD = {"spend", "cpc_krw", "cpm_krw", "cpa_krw", "purchase_value_krw"}
+
+
+def _to_krw(value, currency_unit="USD"):
+    """USD → KRW 환산. None은 None. 이미 KRW면 그대로."""
+    if value is None:
+        return None
+    if currency_unit == "KRW":
+        return value
+    try:
+        return float(value) * CURRENCY_KRW_PER_USD
+    except (TypeError, ValueError):
+        return None
+
+
+def convert_metrics_to_krw(m):
+    """compute_metrics 결과 dict를 KRW 단위로 환산. 비율 지표(CTR·ROAS·Frequency)는 그대로."""
+    out = dict(m)
+    for k in ("spend", "cpc_krw", "cpm_krw", "cpa_krw", "purchase_value_krw"):
+        if out.get(k) is not None:
+            out[k] = _to_krw(out[k])
+    return out
 
 # 구매 액션 타입 후보 (Meta는 픽셀/오프사이트/온사이트 여러 형태로 반환)
 PURCHASE_ACTION_TYPES = [
@@ -177,8 +209,8 @@ def build_flags(m):
     return flags
 
 
-def format_markdown_report(target_date, metrics, flags, validation, raw_data):
-    """발행용 마크다운 리포트"""
+def format_markdown_report(target_date, metrics, flags, validation, raw_data, self_bench=None):
+    """발행용 마크다운 리포트 (정적 벤치 + 자사 P50 듀얼)"""
     lines = []
     lines.append(f"# Meta 광고 일일 리포트 — {target_date}")
     lines.append("")
@@ -191,53 +223,68 @@ def format_markdown_report(target_date, metrics, flags, validation, raw_data):
             lines.append(f"- {i}")
         lines.append("")
 
+    sb = self_bench or {}
+
+    def _self_cell(metric, actual, higher_better=True):
+        b = sb.get(metric)
+        if not b:
+            return "-"
+        return meta_ads_self_benchmark.format_self_bench_cell(
+            metric, actual, b, higher_better=higher_better
+        )
+
     lines.append("## 핵심 지표")
     lines.append("")
-    lines.append("| 지표 | 실측 | 업계 평균 | 대비 |")
-    lines.append("|---|---|---|---|")
+    lines.append("| 지표 | 실측 | 업계 평균 | 정적 대비 | 자사 P50 |")
+    lines.append("|---|---|---|---|---|")
     lines.append(
-        f"| 지출 | {_fmt_num(metrics['spend'], 0, '원')} | - | - |"
+        f"| 지출 | {_fmt_num(metrics['spend'], 0, '원')} | - | - | - |"
     )
     lines.append(
-        f"| 노출 | {_fmt_num(metrics['impressions'], 0)} | - | - |"
+        f"| 노출 | {_fmt_num(metrics['impressions'], 0)} | - | - | - |"
     )
     lines.append(
-        f"| 클릭 | {_fmt_num(metrics['clicks'], 0)} | - | - |"
+        f"| 클릭 | {_fmt_num(metrics['clicks'], 0)} | - | - | - |"
     )
     lines.append(
         f"| CTR | {_fmt_num(metrics['ctr_pct'], 2, '%')} | "
         f"{BENCHMARK['ctr_pct']}% | "
-        f"{_compare(metrics['ctr_pct'], BENCHMARK['ctr_pct'], higher_better=True)} |"
+        f"{_compare(metrics['ctr_pct'], BENCHMARK['ctr_pct'], higher_better=True)} | "
+        f"{_self_cell('ctr_pct', metrics['ctr_pct'], True)} |"
     )
     lines.append(
         f"| CPC | {_fmt_num(metrics['cpc_krw'], 0, '원')} | "
         f"{BENCHMARK['cpc_krw']:,}원 | "
-        f"{_compare(metrics['cpc_krw'], BENCHMARK['cpc_krw'], higher_better=False)} |"
+        f"{_compare(metrics['cpc_krw'], BENCHMARK['cpc_krw'], higher_better=False)} | "
+        f"{_self_cell('cpc_krw', metrics['cpc_krw'], False)} |"
     )
     lines.append(
         f"| Frequency | {_fmt_num(metrics['frequency'], 2)} | "
-        f"{BENCHMARK['frequency_low']}~{BENCHMARK['frequency_high']} | - |"
+        f"{BENCHMARK['frequency_low']}~{BENCHMARK['frequency_high']} | - | "
+        f"{_self_cell('frequency', metrics['frequency'], False)} |"
     )
     lines.append(
-        f"| 구매 수 | {_fmt_num(metrics['purchases'], 0)} | - | - |"
+        f"| 구매 수 | {_fmt_num(metrics['purchases'], 0)} | - | - | - |"
     )
     lines.append(
-        f"| 구매 매출 | {_fmt_num(metrics['purchase_value_krw'], 0, '원')} | - | - |"
+        f"| 구매 매출 | {_fmt_num(metrics['purchase_value_krw'], 0, '원')} | - | - | - |"
     )
     lines.append(
-        f"| 전환율 | {_fmt_num(metrics['conv_rate_pct'], 2, '%')} | - | - |"
+        f"| 전환율 | {_fmt_num(metrics['conv_rate_pct'], 2, '%')} | - | - | - |"
     )
     lines.append(
         f"| CPA | {_fmt_num(metrics['cpa_krw'], 0, '원')} | "
         f"{BENCHMARK['cpa_krw']:,}원 | "
-        f"{_compare(metrics['cpa_krw'], BENCHMARK['cpa_krw'], higher_better=False)} |"
+        f"{_compare(metrics['cpa_krw'], BENCHMARK['cpa_krw'], higher_better=False)} | "
+        f"{_self_cell('cpa_krw', metrics['cpa_krw'], False)} |"
     )
     roas_cell = _fmt_num(metrics['roas'], 2)
     if metrics.get("roas_computed"):
         roas_cell += " (계산치)"
     lines.append(
         f"| ROAS | {roas_cell} | {BENCHMARK['roas']} | "
-        f"{_compare(metrics['roas'], BENCHMARK['roas'], higher_better=True)} |"
+        f"{_compare(metrics['roas'], BENCHMARK['roas'], higher_better=True)} | "
+        f"{_self_cell('roas', metrics['roas'], True)} |"
     )
     lines.append("")
 
@@ -265,7 +312,7 @@ def format_markdown_report(target_date, metrics, flags, validation, raw_data):
     return "\n".join(lines)
 
 
-def format_telegram_summary(target_date, metrics, flags, ok):
+def format_telegram_summary(target_date, metrics, flags, ok, action_text=None):
     """텔레그램 간결 요약 (이모지 정책 준수: 최소)"""
     if not ok:
         return f"[Meta 광고 {target_date}]\n데이터 없음 (API 실패 또는 노출 없음)"
@@ -314,7 +361,158 @@ def format_telegram_summary(target_date, metrics, flags, ok):
         for f in flags:
             lines.append(f"  {f}")
 
+    if action_text:
+        lines.append("")
+        lines.append("[Claude 코멘트]")
+        lines.append(action_text)
+
     return "\n".join(lines)
+
+
+def build_email_html(target_date, metrics, flags, validation, self_bench,
+                     deep_analysis_md, recent_trend, campaign_summaries):
+    """이메일 심층 리포트 — HTML"""
+    bench_table_md = format_markdown_report(
+        target_date, metrics, flags, validation, [], self_bench=self_bench
+    )
+    # 마크다운 표를 그대로 HTML <pre>로 넣지 않고, 간단히 파싱하는 대신
+    # 핵심 표만 별도로 HTML로 작성 + Claude 분석은 마크다운→HTML 간이 변환
+
+    css = """
+    <style>
+      body{font-family:-apple-system,Segoe UI,sans-serif;color:#222;max-width:780px;margin:0 auto;padding:20px}
+      h1{font-size:20px;border-bottom:2px solid #333;padding-bottom:6px}
+      h2{font-size:16px;color:#333;margin-top:24px;border-left:3px solid #555;padding-left:8px}
+      table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+      th,td{border:1px solid #ddd;padding:6px 8px;text-align:right}
+      th{background:#f3f3f3;text-align:center}
+      td.name{text-align:left}
+      .flag{background:#fff4d6;padding:8px;border-radius:4px;margin:6px 0}
+      .meta{color:#666;font-size:12px}
+      .claude{background:#f7f9ff;border-left:3px solid #4a6cf7;padding:12px;margin:12px 0;white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.6}
+      pre.trend{background:#f7f7f7;padding:10px;border-radius:4px;font-size:12px;overflow-x:auto}
+    </style>
+    """
+
+    def cell(actual, bench_static, static_cmp, self_cell):
+        return f"<td>{actual}</td><td>{bench_static}</td><td>{static_cmp}</td><td>{self_cell}</td>"
+
+    def _self_cell(metric, actual, higher_better):
+        b = (self_bench or {}).get(metric)
+        if not b:
+            return "-"
+        return meta_ads_self_benchmark.format_self_bench_cell(metric, actual, b, higher_better=higher_better)
+
+    bench_ctr_static = f"{BENCHMARK['ctr_pct']}%"
+    bench_cpc_static = f"{BENCHMARK['cpc_krw']:,}원"
+    bench_freq_static = f"{BENCHMARK['frequency_low']}~{BENCHMARK['frequency_high']}"
+    bench_cpa_static = f"{BENCHMARK['cpa_krw']:,}원"
+    bench_roas_static = str(BENCHMARK['roas'])
+
+    rows_html = ""
+    rows_html += f"<tr><td class='name'>지출</td><td>{_fmt_num(metrics['spend'], 0, '원')}</td><td>-</td><td>-</td><td>-</td></tr>"
+    rows_html += f"<tr><td class='name'>노출</td><td>{_fmt_num(metrics['impressions'], 0)}</td><td>-</td><td>-</td><td>-</td></tr>"
+    rows_html += f"<tr><td class='name'>클릭</td><td>{_fmt_num(metrics['clicks'], 0)}</td><td>-</td><td>-</td><td>-</td></tr>"
+    rows_html += (
+        "<tr><td class='name'>CTR</td>"
+        + cell(_fmt_num(metrics['ctr_pct'],2,'%'), bench_ctr_static,
+               _compare(metrics['ctr_pct'], BENCHMARK['ctr_pct'], True),
+               _self_cell('ctr_pct', metrics['ctr_pct'], True))
+        + "</tr>"
+    )
+    rows_html += (
+        "<tr><td class='name'>CPC</td>"
+        + cell(_fmt_num(metrics['cpc_krw'],0,'원'), bench_cpc_static,
+               _compare(metrics['cpc_krw'], BENCHMARK['cpc_krw'], False),
+               _self_cell('cpc_krw', metrics['cpc_krw'], False))
+        + "</tr>"
+    )
+    rows_html += (
+        "<tr><td class='name'>Frequency</td>"
+        + cell(_fmt_num(metrics['frequency'],2), bench_freq_static, '-',
+               _self_cell('frequency', metrics['frequency'], False))
+        + "</tr>"
+    )
+    rows_html += f"<tr><td class='name'>구매 수</td><td>{_fmt_num(metrics['purchases'],0)}</td><td>-</td><td>-</td><td>-</td></tr>"
+    rows_html += f"<tr><td class='name'>구매 매출</td><td>{_fmt_num(metrics['purchase_value_krw'],0,'원')}</td><td>-</td><td>-</td><td>-</td></tr>"
+    rows_html += f"<tr><td class='name'>전환율</td><td>{_fmt_num(metrics['conv_rate_pct'],2,'%')}</td><td>-</td><td>-</td><td>-</td></tr>"
+    rows_html += (
+        "<tr><td class='name'>CPA</td>"
+        + cell(_fmt_num(metrics['cpa_krw'],0,'원'), bench_cpa_static,
+               _compare(metrics['cpa_krw'], BENCHMARK['cpa_krw'], False),
+               _self_cell('cpa_krw', metrics['cpa_krw'], False))
+        + "</tr>"
+    )
+    rows_html += (
+        "<tr><td class='name'>ROAS</td>"
+        + cell(_fmt_num(metrics['roas'],2), bench_roas_static,
+               _compare(metrics['roas'], BENCHMARK['roas'], True),
+               _self_cell('roas', metrics['roas'], True))
+        + "</tr>"
+    )
+
+    flags_html = ""
+    if flags:
+        flags_html = "<h2>자동 플래그</h2>" + "".join(f"<div class='flag'>{f}</div>" for f in flags)
+    else:
+        flags_html = "<h2>자동 플래그</h2><p>특이사항 없음</p>"
+
+    claude_html = ""
+    if deep_analysis_md:
+        claude_html = f"<h2>Claude 심층 분석</h2><div class='claude'>{deep_analysis_md}</div>"
+
+    trend_html = ""
+    if recent_trend:
+        trend_rows = "".join(
+            f"<tr><td class='name'>{t.get('date','')}</td>"
+            f"<td>{t.get('spend','') or '-'}</td>"
+            f"<td>{t.get('ctr_pct','') or '-'}</td>"
+            f"<td>{t.get('cpc_krw','') or '-'}</td>"
+            f"<td>{t.get('roas','') or '-'}</td>"
+            f"<td>{t.get('cpa_krw','') or '-'}</td></tr>"
+            for t in recent_trend
+        )
+        trend_html = f"""
+        <h2>직전 7일 추세</h2>
+        <table>
+          <tr><th>날짜</th><th>지출</th><th>CTR%</th><th>CPC</th><th>ROAS</th><th>CPA</th></tr>
+          {trend_rows}
+        </table>
+        """
+
+    camp_html = ""
+    if campaign_summaries:
+        camp_rows_html = ""
+        for c in sorted(campaign_summaries, key=lambda x: (x.get("spend") or 0), reverse=True):
+            camp_rows_html += (
+                f"<tr><td class='name'>{c.get('campaign_name','-')}</td>"
+                f"<td>{_fmt_num(c.get('spend'),0,'원')}</td>"
+                f"<td>{_fmt_num(c.get('ctr_pct'),2,'%')}</td>"
+                f"<td>{_fmt_num(c.get('cpa_krw'),0,'원')}</td>"
+                f"<td>{_fmt_num(c.get('roas'),2)}</td>"
+                f"<td>{_fmt_num(c.get('purchases'),0)}</td></tr>"
+            )
+        camp_html = f"""
+        <h2>캠페인별 ({target_date})</h2>
+        <table>
+          <tr><th>캠페인</th><th>지출</th><th>CTR</th><th>CPA</th><th>ROAS</th><th>구매</th></tr>
+          {camp_rows_html}
+        </table>
+        """
+
+    return f"""<!doctype html><html><head>{css}</head><body>
+    <h1>Meta 광고 일일 심층 리포트 — {target_date}</h1>
+    <div class='meta'>생성: {datetime.now(KST).isoformat(timespec='seconds')} KST</div>
+    <h2>핵심 지표 (정적 벤치 + 자사 P50 듀얼)</h2>
+    <table>
+      <tr><th>지표</th><th>실측</th><th>업계 평균</th><th>정적 대비</th><th>자사 P50</th></tr>
+      {rows_html}
+    </table>
+    {flags_html}
+    {trend_html}
+    {camp_html}
+    {claude_html}
+    </body></html>"""
 
 
 def save_report(target_date, content):
@@ -358,16 +556,103 @@ def run():
         return 1
 
     row = raw["data"][0]
-    metrics = compute_metrics(row)
+    metrics_usd = compute_metrics(row)
+    metrics = convert_metrics_to_krw(metrics_usd)
+    print(f"통화 환산: USD spend={metrics_usd.get('spend')} → KRW spend={metrics.get('spend')}")
     flags = build_flags(metrics)
 
-    content = format_markdown_report(target_date, metrics, flags, validation, raw["data"])
+    # 캠페인별 fetch (해당 일자만, 시계열 누적용) — KRW 환산 포함
+    campaign_summaries = []
+    try:
+        camp_raw = fetch_campaign_insights(target_date, target_date)
+        if camp_raw["ok"]:
+            for r in camp_raw.get("data", []):
+                c = summarize_campaign_row(r)
+                # USD → KRW (단가성 필드만)
+                for k in ("spend", "purchase_value", "cpa_krw"):
+                    if c.get(k) is not None:
+                        c[k] = float(c[k]) * CURRENCY_KRW_PER_USD
+                campaign_summaries.append(c)
+            print(f"캠페인별 데이터 수집: {len(campaign_summaries)}건 (KRW 환산)")
+        else:
+            print(f"캠페인별 fetch 실패: {camp_raw.get('error')}")
+    except Exception as e:
+        print(f"캠페인별 fetch 예외 (계속 진행): {e}")
+
+    # 시계열 누적 (CSV + Google Sheets) — 자사 벤치 계산 전에 먼저 누적
+    try:
+        hist = meta_ads_history.append_daily(
+            target_date, raw, metrics, campaign_summaries
+        )
+        print(f"history append: daily={hist['daily_rows']}, campaign={hist['campaign_rows']}")
+        print(f"  sheet daily: {hist['sheet'].get('daily', '')}")
+        if hist['sheet'].get('campaign'):
+            print(f"  sheet campaign: {hist['sheet']['campaign']}")
+    except Exception as e:
+        print(f"history 누적 실패 (리포트는 계속): {e}")
+
+    # 자사 동적 벤치 (14일 미만이면 ok=False, 정적 벤치만 사용)
+    try:
+        self_bench = meta_ads_self_benchmark.compute_all(window=30)
+        n_ok = sum(1 for b in self_bench.values() if b.get("ok"))
+        print(f"자사 벤치: {n_ok}/{len(self_bench)} 지표 활성화")
+    except Exception as e:
+        self_bench = {}
+        print(f"자사 벤치 계산 실패: {e}")
+
+    # 마크다운 리포트 (자사 벤치 듀얼 포함)
+    content = format_markdown_report(
+        target_date, metrics, flags, validation, raw["data"], self_bench=self_bench
+    )
     path = save_report(target_date, content)
     print(f"리포트 저장: {path}")
 
-    summary = format_telegram_summary(target_date, metrics, flags, ok=True)
+    # Claude 액션 코멘트 (텔레그램용 짧은 + 이메일용 심층)
+    metrics_with_date = dict(metrics)
+    metrics_with_date["_target_date"] = target_date
+    recent_trend = []
+    try:
+        recent_trend = meta_ads_claude_comment.load_recent_trend(target_date, days=7)
+    except Exception as e:
+        print(f"recent_trend 로드 실패: {e}")
+
+    winner_patterns = []
+    try:
+        winner_patterns = meta_ads_claude_comment.load_winner_patterns()
+    except Exception as e:
+        print(f"winner_patterns 로드 실패: {e}")
+
+    short_text, short_err = meta_ads_claude_comment.generate_short(
+        metrics_with_date, self_bench, flags, recent_trend, winner_patterns
+    )
+    if short_err:
+        print(f"Claude 짧은 코멘트 skip: {short_err}")
+    deep_text, deep_err = meta_ads_claude_comment.generate_deep(
+        metrics_with_date, self_bench, flags, recent_trend, winner_patterns
+    )
+    if deep_err:
+        print(f"Claude 심층 분석 skip: {deep_err}")
+
+    # 텔레그램 (요약 + 짧은 코멘트)
+    summary = format_telegram_summary(
+        target_date, metrics, flags, ok=True, action_text=short_text
+    )
     sent = telegram_client.send_message(summary)
     print(f"텔레그램 전송: {sent}")
+
+    # 이메일 (심층)
+    try:
+        html = build_email_html(
+            target_date, metrics, flags, validation, self_bench,
+            deep_text, recent_trend, campaign_summaries
+        )
+        text_fallback = (deep_text or "Claude 분석 미생성") + "\n\n" + summary
+        subject = f"[Meta 광고 일일 심층 리포트] {target_date}"
+        email_sender.send_email(subject, text_fallback, html)
+        print("이메일 전송 완료")
+    except Exception as e:
+        print(f"이메일 전송 실패 (텔레그램은 발송됨): {e}")
+
     return 0
 
 
