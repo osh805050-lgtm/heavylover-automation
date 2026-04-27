@@ -36,13 +36,14 @@ def _get_env():
     }
 
 
-def send_email(subject, text_body, html_body=None):
+def send_email(subject, text_body, html_body=None, inline_images=None):
     """이메일 발송. 성공 시 True, 실패 시 예외.
 
     Args:
         subject: 제목
         text_body: 일반 텍스트 본문 (폴백)
         html_body: HTML 본문 (선택)
+        inline_images: dict[cid, png_bytes] — HTML 본문에서 <img src="cid:키"> 로 참조
     """
     env = _get_env()
     if not env["user"] or not env["password"]:
@@ -57,6 +58,19 @@ def send_email(subject, text_body, html_body=None):
     msg.set_content(text_body)
     if html_body:
         msg.add_alternative(html_body, subtype="html")
+
+    if inline_images and html_body:
+        html_part = msg.get_payload()[-1]
+        for cid, png_bytes in inline_images.items():
+            if not png_bytes:
+                continue
+            html_part.add_related(
+                png_bytes,
+                maintype="image",
+                subtype="png",
+                cid=f"<{cid}>",
+                filename=f"{cid}.png",
+            )
 
     context = ssl.create_default_context()
     with smtplib.SMTP(env["host"], env["port"], timeout=30) as smtp:

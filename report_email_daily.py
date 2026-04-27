@@ -29,6 +29,7 @@ from repurchase_report import build_ground_truth
 from email_sender import send_email
 from lib.historical_data import enrich
 from lib import recommendation_log
+from lib.charts import generate_daily_charts
 
 KST = timezone(timedelta(hours=9))
 ENV_PATH = Path(__file__).parent / ".env"
@@ -166,8 +167,36 @@ def _md_to_html(md: str) -> str:
     return "\n".join(out)
 
 
-def _wrap_html(body_html: str, gt: dict) -> str:
+def _render_charts_block(chart_cids: list[str]) -> str:
+    """차트 cid 리스트를 받아 모바일/데스크톱 양쪽 호환 그리드 HTML 반환."""
+    if not chart_cids:
+        return ""
+    cells = "".join(
+        f"<td style='padding:6px;width:50%;vertical-align:top;'>"
+        f"<img src='cid:{cid}' style='width:100%;max-width:380px;height:auto;display:block;border-radius:4px;'>"
+        f"</td>"
+        for cid in chart_cids
+    )
+    rows = []
+    cells_per_row = 2
+    chunks = [chart_cids[i:i + cells_per_row] for i in range(0, len(chart_cids), cells_per_row)]
+    for chunk in chunks:
+        row_cells = "".join(
+            f"<td style='padding:6px;width:50%;vertical-align:top;'>"
+            f"<img src='cid:{cid}' style='width:100%;max-width:380px;height:auto;display:block;border-radius:4px;'>"
+            f"</td>"
+            for cid in chunk
+        )
+        if len(chunk) < cells_per_row:
+            row_cells += "<td style='width:50%;'></td>" * (cells_per_row - len(chunk))
+        rows.append(f"<tr>{row_cells}</tr>")
+    table = f"<table style='width:100%;border-collapse:collapse;margin:16px 0;'>{''.join(rows)}</table>"
+    return f"<h2 style='color:#2c3e50;border-bottom:2px solid #3498db;padding-bottom:4px;'>📈 시각화 요약</h2>{table}"
+
+
+def _wrap_html(body_html: str, gt: dict, chart_cids: list[str] | None = None) -> str:
     today = datetime.now(KST).strftime("%Y-%m-%d (%a)")
+    charts_html = _render_charts_block(chart_cids or [])
     return f"""<!DOCTYPE html>
 <html><head><meta charset='utf-8'><title>HeavyLover 재구매 일일 리포트</title></head>
 <body style='font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;max-width:760px;margin:0 auto;padding:20px;color:#333;line-height:1.55;'>
@@ -175,6 +204,7 @@ def _wrap_html(body_html: str, gt: dict) -> str:
   <h1 style='margin:0 0 6px 0;color:#1a73e8;'>📊 HeavyLover 재구매 일일 심층</h1>
   <div style='color:#666;'>{today} · 4역할 페르소나 분석</div>
 </div>
+{charts_html}
 {body_html}
 <hr style='margin-top:30px;'>
 <div style='font-size:12px;color:#888;'>
@@ -234,12 +264,19 @@ def main() -> int:
 
         analysis = call_claude(enriched, rec_block=rec_block)
 
+        try:
+            charts = generate_daily_charts(gt, enriched)
+        except Exception as e:
+            print(f"차트 생성 실패: {e}")
+            charts = {}
+
         if analysis:
-            html = _wrap_html(_md_to_html(analysis), enriched)
+            html = _wrap_html(_md_to_html(analysis), enriched, chart_cids=list(charts.keys()))
             send_email(
                 subject=f"📊 HeavyLover 재구매 일일 — {today}",
                 text_body=analysis,
                 html_body=html,
+                inline_images=charts,
             )
             # 의사결정자 액션을 추출해 recommendations.jsonl에 저장
             # (간단 휴리스틱: "## 4. 의사결정자" 섹션 텍스트)
@@ -255,10 +292,13 @@ def main() -> int:
             return 0
         else:
             text, html = fallback_email_body(enriched, "Anthropic API 401 또는 호출 실패")
+            # fallback도 차트는 포함 (분석 텍스트 없어도 시각화는 가치)
+            html_with_charts = _wrap_html(_md_to_html(text), enriched, chart_cids=list(charts.keys()))
             send_email(
                 subject=f"⚠️ HeavyLover 재구매 일일 (fallback) — {today}",
                 text_body=text,
-                html_body=html,
+                html_body=html_with_charts,
+                inline_images=charts,
             )
             print(f"일일 이메일 fallback 발송 ({today})")
             return 0

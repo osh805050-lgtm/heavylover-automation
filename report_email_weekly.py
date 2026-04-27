@@ -31,6 +31,7 @@ from repurchase_report import build_ground_truth
 from email_sender import send_email
 from lib.historical_data import enrich, load_recent_gt
 from lib import recommendation_log
+from lib.charts import generate_weekly_charts
 from report_email_daily import _md_to_html, _wrap_html
 
 KST = timezone(timedelta(hours=9))
@@ -239,12 +240,19 @@ def main() -> int:
 
         analysis = run_multi_agent(weekly, rec_block)
 
+        try:
+            charts = generate_weekly_charts(gt, enriched, history)
+        except Exception as e:
+            print(f"주간 차트 생성 실패: {e}")
+            charts = {}
+
         if analysis:
-            html = _wrap_html(_md_to_html(analysis), enriched)
+            html = _wrap_html(_md_to_html(analysis), enriched, chart_cids=list(charts.keys()))
             send_email(
                 subject=f"📊 HeavyLover 주간 심층 (멀티 에이전트) — {today}",
                 text_body=analysis,
                 html_body=html,
+                inline_images=charts,
             )
             # 다음주 우선순위를 recommendations에 저장
             if "다음 주 우선순위" in analysis or "우선순위 3개" in analysis:
@@ -265,7 +273,8 @@ def main() -> int:
             send_email(
                 subject=f"⚠️ HeavyLover 주간 (fallback) — {today}",
                 text_body=txt,
-                html_body=_wrap_html(_md_to_html(txt), enriched),
+                html_body=_wrap_html(_md_to_html(txt), enriched, chart_cids=list(charts.keys())),
+                inline_images=charts,
             )
             return 0
     except Exception as e:
