@@ -321,13 +321,22 @@ def main():
                 1 for s in scored
                 if (s.get("eligibility") or {}).get("eligible") == "no"
             )
+            unverifiable_count = 0
             for s in scored:
                 e = (s.get("eligibility") or {}).get("eligible")
+                body = s.get("body_excerpt") or ""
                 if e == "no":
                     s["tier"] = "자격미달 (LLM 판정)"
                     s["tags"] = (s.get("tags") or []) + ["LLM_INELIGIBLE"]
+                elif e == "unsure" and len(body.strip()) < 50:
+                    # 본문 없어 LLM이 판단 못 한 항목 → 강등 (검증 불가)
+                    s["tier"] = "검증불가 (본문 없음)"
+                    s["tags"] = (s.get("tags") or []) + ["UNVERIFIABLE_NO_BODY"]
+                    unverifiable_count += 1
             if no_count:
                 log.info(f"자격 미달 강등: {no_count}건")
+            if unverifiable_count:
+                log.info(f"검증 불가 강등 (본문 없음): {unverifiable_count}건")
         except Exception as e:
             log.warning(f"자격검증 모듈 실패 (스킵): {type(e).__name__}: {e}")
     else:

@@ -93,6 +93,24 @@ RESTRICTION_PATTERNS = [
     "소재 기업만",
 ]
 
+# 비공고 패턴 — 제목에 들어가면 헤비로버가 신청할 수 없는 항목
+# (협약·평가결과·채용·메뉴 텍스트·입찰공고 등)
+NON_ANNOUNCEMENT_PATTERNS = [
+    # 협약·뉴스 (보도자료, 신청 대상 아님)
+    "업무협약", "MOU 체결", "협약 체결", "협약식",
+    # 결과 보도 (사업 종료, 모집 끝)
+    "평가 결과", "선정 결과", "최종 결과", "선정자 발표",
+    "합격자 발표", "합격자 안내", "면접전형 안내", "면접 안내",
+    "직원 채용", "신규 채용", "채용 공고", "채용공고",
+    # 메뉴·소개 텍스트 (게시글이 아닌 안내 페이지)
+    "을 소개합니다", "센터를 소개", "사업 소개", "을소개합니다",
+    # 입찰·용역 (지원사업이 아닌 행정 발주, 헤비로버 입찰 자격 없음)
+    "입찰공고", "용역 입찰", "용역 제안서", "제안서 평가",
+    "재공고)",  # "용역 입찰공고(재공고)" 같은 패턴
+    # 단순 운영 안내·홍보
+    "설명회 후기", "운영 보고", "월간 동향",
+]
+
 # 타지역 약칭 ↔ 정식 명칭 매핑 (둘 다 매칭)
 REGION_ALIASES = {
     "충남": ["충청남도"],
@@ -180,6 +198,32 @@ def score_announcement(item):
         }
 
     text = f"{title} {body} {agency}"
+
+    # 비공고 패턴 (협약·평가결과·채용·입찰공고 등) → 즉시 0점
+    if any(p in title for p in NON_ANNOUNCEMENT_PATTERNS):
+        return {
+            **item,
+            "score": 0,
+            "matched": [],
+            "tier": "비공고 (뉴스/협약/메뉴)",
+            "deadline_days": _days_until_deadline(item.get("deadline")),
+            "tags": ["NON_ANNOUNCEMENT"],
+        }
+
+    # 메뉴·카테고리 텍스트 차단 — 본문 없고 제목 12자 미만 + 공고형 키워드 없음
+    if not body.strip() and len(title) < 12:
+        if not _has_any(
+            title,
+            STRONG_MATCH_KEYWORDS + ["모집", "공고", "신청", "지원사업", "참여기업"],
+        ):
+            return {
+                **item,
+                "score": 0,
+                "matched": [],
+                "tier": "메뉴/소개 (제외)",
+                "deadline_days": _days_until_deadline(item.get("deadline")),
+                "tags": ["MENU_LIKE"],
+            }
 
     # 강한 제외 → 즉시 0점
     if _has_any(text, EXCLUDE_KEYWORDS):

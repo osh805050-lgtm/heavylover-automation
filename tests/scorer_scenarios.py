@@ -142,6 +142,53 @@ CASES = [
         },
         "expect_tier_in": ["S", "A", "B"],
     },
+
+    # ---------- 비공고 차단 (협약·평가결과·채용·메뉴) ----------
+    {
+        "name": "무안군 업무협약 보도 — 비공고 (헤비로버 신청 불가)",
+        "input": {
+            "title": "무안군과 농수산식품 수출확대·저탄소 식생활 확산 업무협약",
+            "agency": "한국농수산식품유통공사",
+            "body_excerpt": "",
+        },
+        "expect_tier_starts": "비공고",
+    },
+    {
+        "name": "직원 채용 면접전형 안내 — 비공고",
+        "input": {
+            "title": "2026년 제3차 직원 채용 필기전형 합격자 및 면접전형 안내 공고",
+            "agency": "용인시산업진흥원",
+            "body_excerpt": "",
+        },
+        "expect_tier_starts": "비공고",
+    },
+    {
+        "name": "용역 제안서 평가 결과 — 비공고",
+        "input": {
+            "title": "2026년 판로개척 역량강화 교육 운영 용역 제안서 평가 결과",
+            "agency": "용인시산업진흥원",
+            "body_excerpt": "",
+        },
+        "expect_tier_starts": "비공고",
+    },
+    {
+        "name": "센터 소개 페이지 — 비공고",
+        "input": {
+            "title": "용인시산업진흥원 창업지원센터를 소개합니다.",
+            "agency": "용인시산업진흥원",
+            "body_excerpt": "",
+        },
+        "expect_tier_starts": "비공고",
+    },
+    {
+        "name": "메뉴 텍스트 (마케팅·판로지원) — 메뉴/소개",
+        "input": {
+            "title": "마케팅·판로지원",
+            "agency": "용인시산업진흥원",
+            "body_excerpt": "",
+        },
+        "expect_tier_starts": "메뉴",
+    },
 ]
 
 
