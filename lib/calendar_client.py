@@ -95,12 +95,12 @@ def _get_calendar_id():
 def _make_event_id(announcement_id, kind):
     """deterministic event_id — 같은 공고+kind 재실행 시 중복 방지.
 
-    Google Calendar event_id 규칙: 영소문자+숫자+`-`+`_`, 5~1024자.
-    md5 → base32 lowercase 변환 (32자).
+    Google Calendar event_id 규칙: base32hex 알파벳 (0-9, a-v)만 허용, 5~1024자.
+    md5 → base32hex lowercase 변환 (26자).
     """
     base = f"hlradar-{announcement_id}-{kind}"
     digest = hashlib.md5(base.encode("utf-8")).digest()
-    encoded = base64.b32encode(digest).decode("ascii").rstrip("=").lower()
+    encoded = base64.b32hexencode(digest).decode("ascii").rstrip("=").lower()
     return f"hlr{encoded}"
 
 
