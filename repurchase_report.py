@@ -782,40 +782,32 @@ def _format_fallback(gt: dict, issues: list[str]) -> str:
 
 
 def run() -> dict:
-    _log("=== 재구매 리포트 시작 ===")
+    """09:00 메인: 마트 4종 시트 갱신 + ground_truth 저장만 담당.
+
+    텔레그램·이메일 발송은 별도 스크립트가 책임:
+    - 09:05 report_telegram_brief.py  → 텔레그램 30초 요약
+    - 09:10 report_email_daily.py     → 이메일 4역할 심층
+    - 일21:00 report_email_weekly.py  → 이메일 멀티 에이전트 주간
+    """
+    _log("=== 재구매 리포트 (마트 갱신) 시작 ===")
     ss = _open_sheet()
     gt = build_ground_truth(ss)
 
-    # 마트 4종 갱신 (Looker Studio 데이터 소스). 실패해도 리포트는 계속 진행.
+    # 마트 4종 갱신 (Looker Studio 데이터 소스)
     try:
         _log("마트 탭 갱신 중...")
         write_marts(ss, gt, _classify_tabs(ss))
         _log("✅ 마트 탭 갱신 완료")
     except Exception as e:
-        _log(f"⚠️ 마트 탭 갱신 실패 (리포트는 계속): {e}")
+        _log(f"⚠️ 마트 탭 갱신 실패: {e}")
 
-    # GT를 로그 저장 (감사 목적)
+    # GT 저장 (감사 + 후속 스크립트들이 비교용으로 사용)
     date_str = datetime.now(KST).strftime("%Y-%m-%d")
     gt_log = ANALYSIS_LOG_DIR / f"gt_{date_str}.json"
     gt_log.write_text(json.dumps(gt, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     _log(f"ground_truth 저장: {gt_log}")
 
-    report, issues = generate_report_with_retry(gt)
-
-    if report:
-        header = f"📊 재구매 리포트 {date_str}\n\n"
-        send_message(header + report)
-        _log("✅ 리포트 텔레그램 발송 완료")
-        # 성공 로그
-        (ANALYSIS_LOG_DIR / f"report_{date_str}.md").write_text(
-            header + report, encoding="utf-8"
-        )
-        return {"status": "success", "issues": []}
-
-    fallback = _format_fallback(gt, issues)
-    send_message(fallback)
-    _log("⚠️ 분석 실패, fallback 발송")
-    return {"status": "failed", "issues": issues}
+    return {"status": "success", "issues": []}
 
 
 if __name__ == "__main__":
