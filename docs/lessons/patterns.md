@@ -44,8 +44,11 @@
 3. **식별자·인코딩 포맷은 공식 문서 확인**: 추측 금지. 예) Google Calendar event_id는 base32hex(0-9, a-v)만 허용 → `b32hexencode` 사용. 일반 `base64.b32encode`(a-z, 2-7)는 거부됨.
 4. **새 외부 API 첫 통합 시 에러 메시지 보고 즉시 다른 인코딩·포맷 후보 시도**.
 5. **Claude 메모리 시스템 (사용자 환경 박제 인덱스) 코드 작성 전 1회 훑기**: 명칭 변경·본사 위치·발신자 화이트리스트 등 박제 정보 누락 방지. 메모리는 시스템 프롬프트 `auto memory` 섹션이 자동 로드.
+6. **토큰 종류·수명은 공식 문서로 확인**: short-lived/long-lived/system-user 등 종류별 만료 시간 다름. Meta User Access Token (Graph API Explorer)은 수 시간, long-lived는 60일 (`fb_exchange_token` + 앱 시크릿). 자동화 일정은 토큰 수명 검증 후 설계.
+7. **토큰 만료 자동 감지 + 텔레그램 안내 박제**: 만료 키워드(`Session has expired`, `OAuthException`, `code:190/463`, `401`) 감지 시 명확한 재발급 단계 안내 메시지 자동 발송. fallback이 침묵하면 안 됨.
+8. **외부 API 첫 응답에서 통화·시간대·단위 즉시 확인**: 광고 계정 통화(USD vs KRW), 응답 시간대(UTC vs 로컬), 금액 단위(원 vs 달러 vs 1/100) 가정 금지. KRW 외 계정이면 환산 함수를 단가성 필드에 일관 적용 — 환율은 변동값 안 쓰고 고정 상수(`CURRENCY_KRW_PER_USD`)로 단일 출처 관리.
 
-**연관 실패**: failures.md ②(paymentDate 키 경로), ⑨(memory 미참조), ⑩(100건 샘플 결론), ⑫(Calendar event_id 인코딩)
+**연관 실패**: failures.md ②(paymentDate 키 경로), ⑨(memory 미참조), ⑩(100건 샘플 결론), ⑫(Calendar event_id 인코딩), ⑭(memory 경로 박제), ⑮(Meta 토큰 수명 가정), ⑯(통화 단위 가정)
 
 ---
 

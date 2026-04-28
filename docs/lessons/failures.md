@@ -14,8 +14,8 @@
 
 | 카테고리 | 적용 작업 | 본 파일 항목 번호 |
 |---|---|---|
-| §자동화점검 (Pre-flight) | API·cron·.env 의존 작업 시작 전 | ⑤, ⑪ |
-| §외부API다루기 | 카페24·SS·Meta·Anthropic 등 통합 | ②, ⑨, ⑩, ⑫, ⑭ |
+| §자동화점검 (Pre-flight) | API·cron·.env 의존 작업 시작 전 | ⑤, ⑪, ⑮ |
+| §외부API다루기 | 카페24·SS·Meta·Anthropic 등 통합 | ②, ⑨, ⑩, ⑫, ⑭, ⑮, ⑯ |
 | §시간중복처리 | 시간 윈도우·dedupe 로직 | ①, ④ |
 | §데이터범위와분석분리 | 시트·DB 데이터 이전 정책 | ③ |
 | §엑셀편집 | openpyxl·xlsx 작업 | ⑦ |
@@ -29,6 +29,8 @@
 
 ## 로그
 
+- **2026-04-28** ⑯ | Meta 광고 계정이 USD 통화인데 분석 코드는 KRW 가정으로 작성. 첫 실행에서 `지출 84원`(실제 84 USD = 약 12만원), `CPC 0원`(실제 405원) 표시되어 모든 벤치 비교 무의미. 광고 계정 통화 사전 확인 누락. | **하지 말 것**: 외부 API 통합 첫 응답에서 `currency`·`account_currency`·통화 단위 필드 즉시 확인. KRW 외 계정이면 환산 함수(`convert_metrics_to_krw`)를 모든 단가성 필드에 일관 적용 — 환율은 변동 안 쓰고 고정값(1,450원/USD) 박제 후 단일 출처(`CURRENCY_KRW_PER_USD`)로 관리.
+- **2026-04-28** ⑮ | Meta User Access Token (Graph API Explorer 발급) 만료 시간을 60일로 가정하고 자동화 일정 설계. 실제 short-lived token은 **수 시간**만 유효. 백필 도중 만료, 일일 자동화도 가동 못 함. long-lived 60일은 `fb_exchange_token` API + 앱 시크릿 필요. | **하지 말 것**: 외부 API 토큰 종류·수명을 공식 문서로 확인 후 자동화 설계. 토큰 만료 가능성을 자동화 헬스체크에 박제 — `meta_ads_report.py`에 만료 키워드(`Session has expired`, `OAuthException`, `code:190/463`) 감지 시 텔레그램에 명확한 재발급 안내 메시지 자동 발송.
 - **2026-04-28** ⑭ | CLAUDE.md·patterns.md 리팩터링 시 `memory/...` 상대경로를 검증 없이 그대로 옮겨 6곳에서 깨진 링크 발생. 실제 메모리 위치는 `~/.claude/projects/{프로젝트}/memory/`로 시스템 프롬프트 `auto memory` 섹션이 절대경로를 자동 주입. 본문에 박힌 상대경로는 동작하지 않음. | **하지 말 것**: 외부 파일·디렉터리 경로를 문서에 박제할 때 표기 직후 `ls`/`Read`로 실재 검증. 시스템이 자동 로드하는 자원(메모리·skills 등)은 경로 박제 대신 추상 명칭("Claude 메모리 시스템") 사용.
 - **2026-04-28** ① | 11시 발주 엑셀에서 SS 33건 통째 누락 (당일 발주 못 한 7건은 발송기한 초과로 전환, 판매자 점수 차감 위험). 원인: `orders_by_status(PAYED, hours_back=24)` + 평일 cron(`1-5`) 조합 — 금 11시~일 23:59 결제분이 변경 윈도우 밖, 며칠 전 결제 후 가만히 있던 주문도 24h 윈도우에 안 잡힘. 카페24는 N20 상태 기반이라 안전. 해결: `orders_pending_dispatch(days_back=14)` 신설 — sheets_sync 패턴(1일 분할 N회 + dedupe) 재사용, 상세 후 `productOrderStatus=='PAYED'`만 반환. `shippingDueDate < now` = 발송기한 초과 별도 카운트. | **하지 말 것**: 시간 윈도우 방식은 cron 갭과 만나면 누락 영구화. 채널이 상태 기반 조회를 지원하면 그걸 우선. 변경 윈도우 강제면 cron 주기보다 충분히 넓게(14일+) + dedupe + 상세 응답 상태 재필터 3중 안전망.
 - **2026-04-28** ② | SS sync 코드가 `productOrder.paymentDate`를 보고 있었는데 실제 결제일은 `order.paymentDate`에 있어서, 4월 신규 행 전체가 결제일 컬럼 비어있는 채로 들어감. 시트 진단 전엔 발견 못 함. | **하지 말 것**: 외부 API 응답 매핑 코드는 작성 직후 raw JSON 1건 출력해서 키 경로 검증. 한 달 가동된 자동화도 실제 시트 데이터가 비어있는지 점검할 것.

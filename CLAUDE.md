@@ -218,26 +218,39 @@
 > 상세 — 벤치마크 표, 자동 플래그, CBO/ABO 전략, ASC 활성화 조건, 스케일업 정책 전부: **`docs/context/ads.md`**
 > 자동화 코드 동기 정본: `docs/meta-ads/benchmarks.md` (`meta_ads_report.py` 상수와 동기). 작업 시: meta-ads-analyst 서브에이전트 호출.
 
-### 자동화 (2026-04-28 가동, 4역할 심층 격상 완료)
-- 매일 09:00 KST GitHub Actions cron — `meta_ads_report.py`
-- 데이터 흐름: Graph API → 일일 metrics 계산 → KRW 환산 (1,450원/USD 고정) → CSV+Sheets 누적 → 자사 P50 계산 (14일+ 누적 시 활성) → Claude 분석 → 텔레그램 요약 + 이메일 4역할 심층
-- **텔레그램 prefix `📈 [Meta광고]`** + 구분선 — 다른 자동화(발주·재구매·정부지원)와 명확히 구분
-- **이메일 = 재구매 일일 리포트와 동일 수준** (`meta_ads_email_daily.py`):
-  - 4역할 페르소나 (분석가/전략가/회의주의자/의사결정자) 1회 호출, claude-opus-4-7
-  - 차트 PNG 3개 인라인 (`lib/charts_meta.py`): 7일 추세, 벤치 비교, 캠페인 ROAS
-  - Anthropic 401 시 fallback (원시 숫자 표)
-- 매주 월요일 09:00 KST — 위너 광고 패턴 식별(`meta_ads_winner_patterns.py`) + Meta 토큰 자동 갱신(`refresh_meta_token.py`, 60일 만료 회피)
-- 광고 계정: `act_445075134545178` (HEAVY ROVER, 통화 USD → 1,450원/USD 환산)
-- 토큰: User Access Token (60일 만료, 주간 자동 연장 — `META_APP_ID`/`META_APP_SECRET` 등록 후 가동)
-- 데이터 저장:
-  - `data/meta_ads/daily.csv` (계정 합계, 1일 1행)
-  - `data/meta_ads/daily_campaign.csv` (캠페인별, 1일 N행)
-  - `data/meta_ads/raw/{date}.json` (감사용 원본, .gitignore)
-  - `data/meta_ads/winner_patterns.jsonl` (위너 광고 누적)
-  - Google Sheets — **재구매 시트와 공유** (`GOOGLE_SHEETS_ID=REPURCHASE_SHEET_ID`):
-    - `Meta_Ads_Daily` (계정 합계 워크시트)
-    - `Meta_Ads_Daily_Campaign` (캠페인별 워크시트)
-    - `Meta_Ads_Winners` (위너 패턴, 30일+ 데이터 누적 후 활성)
+### 자동화 (2026-04-28 가동, 가독성 개선판 + 5개월 백필 완료)
+
+**3가지 cron**:
+- 매일 09:00 KST — `meta_ads_report.py` (일일 + 텔레그램 + 이메일 4역할)
+- 매주 월요일 09:00 KST — `meta_ads_winner_patterns.py` (위너 패턴) + `refresh_meta_token.py` (60일 자동 갱신, 앱 시크릿 후 가동)
+- **매주 일요일 09:00 KST — `meta_ads_yearly_report.py` (1년 종합 4역할 + 퍼널 이탈 + 계절성)** ⭐
+
+**데이터 흐름**: Graph API → metrics 계산 → KRW 환산(1,450원/USD 고정) → CSV+Sheets 누적 → 자사 P50(14일+) → Claude 4역할(opus-4-7, 4000토큰) → 텔레그램 + 이메일 4역할 심층 + 차트 4종 인라인
+
+**가독성 표준 (2026-04-28 v2)**:
+- 텔레그램: 2단 구조 (헤드라인 → 효율 → 플래그 → 퍼널 → Claude 액션) + 색상 이모지 판정 (🟢🔵🟡🔴) + ◆ 섹션 헤더
+- 이메일: KPI 카드 4개(지출·매출·ROAS·CPA, 배경색이 판정값) + 약점/강점 경고 박스(빨강/초록 좌측바) + 본문 흰 카드 격리
+
+**광고 계정**: `act_445075134545178` (HEAVY ROVER, 통화 USD → KRW 환산)
+**토큰**: User Access Token (Graph API Explorer, 수 시간 만료) → long-lived 60일 갱신은 `META_APP_ID`/`META_APP_SECRET` 등록 후
+**수신자 (EMAIL_TO)**: `osh805050@gmail.com`, `ohkm8050@naver.com`, `musclecipe@naver.com` (3명, 이메일 멀티 발송)
+
+**데이터 저장**:
+- `data/meta_ads/daily.csv` — 계정 합계 (현재 106일 누적, 2025-11-27~2026-04-27)
+- `data/meta_ads/daily_campaign.csv` — 캠페인별 (현재 204행 / 13개 캠페인)
+- `data/meta_ads/raw/{date}.json` — 감사용 원본 230개 (퍼널 분석 입력, .gitignore)
+- `data/meta_ads/winner_patterns.jsonl` — 위너 광고 누적
+- Google Sheets — 재구매 시트와 공유 (`GOOGLE_SHEETS_ID=REPURCHASE_SHEET_ID`):
+  - `Meta_Ads_Daily` / `Meta_Ads_Daily_Campaign` / `Meta_Ads_Winners`
+
+### 5개월 베이스라인 (2026-04-28 검증)
+- 누적 ROAS 3.77 (벤치 2.5 대비 +51%)
+- 5개월 지출 1,313만원 / 매출 4,944만원 / 구매 732건
+- 평균 CTR 1.70% / CPC 367원 / CPA 17,932원 — 모든 지표 벤치 우수
+- **퍼널 약점 1순위**: 콘텐츠→장바구니 1.94% (98% 이탈, 상세페이지 개선)
+- **퍼널 약점 2순위**: 결제→구매 49.85% (결제 마찰 — 배송비·결제수단·회원가입)
+- 위너: 26.2.21 테스트 abo (ROAS 6.20), 25.10.25 슬라이드+릴스 (4.31, 42일 장수)
+- 패배: 26.3.7 중간과정 abo (ROAS 0), 26.4.2 스케일 abo (3.02 / 113만원)
 
 ### 필수 비교 지표
 - CPC·CTR·전환율·ROAS·CPA — 각 지표 업계 평균 대비 + 자사 P50 듀얼 표기
@@ -339,11 +352,11 @@ heavylover-automation/
 4. 같은 키워드 3회+ → `patterns.md` 카테고리 보강 또는 신설
 
 ### 최근 5건 (전체는 failures.md)
+- **2026-04-28** ⑯ | Meta 광고 계정 USD 통화인데 KRW 가정 코드 작성 — 외부 API 첫 응답에서 통화 필드 즉시 확인 + 단가성 필드에 환산 함수 일관 적용
+- **2026-04-28** ⑮ | Meta User Access Token 60일 가정했으나 실제 수 시간 — 외부 API 토큰 수명 공식 문서 확인 후 만료 키워드 자동 감지 + 재발급 안내 박제
 - **2026-04-28** ⑭ | 리팩터링 시 `memory/...` 상대경로를 검증 없이 옮겨 6곳 깨진 링크 — 시스템 자동 로드 자원은 추상명 사용 + 표기 직후 실재 검증
 - **2026-04-28** ⑬ | govt-radar 시·군 한정 19건 통과 — 광역+산하 모두 차단 필요
 - **2026-04-28** ⑤ | 카페24 OAuth refresh_token 만료 사람이 매번 재발급 — 04:00 자동 갱신 cron 신설
-- **2026-04-28** ④ | sync_cafe24 매 실행 9건 누적 중복 — cutoff에 ` 00:00` 명시 + 자연키 dedupe
-- **2026-04-28** ③ | SS sync가 PURCHASE_DECIDED만 시트 저장 — 5상태 모두 보관 + 분석 시 컬럼 필터
 
 ---
 
