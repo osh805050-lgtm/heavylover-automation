@@ -727,7 +727,7 @@ def send_telegram_summary(report):
 
     lines.append("📧 이메일에 4역할 심층 분석 + 차트 4종 도착")
 
-    return telegram_client.send_message("\n".join(lines))
+    return telegram_client.send_message("\n".join(lines), channel="ads")
 
 
 def main():
@@ -738,7 +738,7 @@ def main():
         msg = f"📈 [Meta광고 종합] 생성 실패\n사유: {report['reason']}"
         print(msg)
         try:
-            telegram_client.send_message(msg)
+            telegram_client.send_message(msg, channel="ads")
         except Exception:
             pass
         return 1
