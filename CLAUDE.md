@@ -313,11 +313,12 @@ heavylover-automation/
 │   └── skills/          ← heavylover-voice 등
 ├── *.py                 ← 자동화 스크립트 (run_automation, cafe24_client, naver_client 등)
 ├── apps_script_main.gs / repurchase_v5_4.gs
-├── .github/workflows/   ← Meta 광고 일일·주간 리포트
+├── .github/workflows/   ← Meta 광고 cron + **deploy-vultr.yml (자동 배포)**
 ├── data/{raw,reports}/
 └── docs/
     ├── context/         ← 영역별 상세 컨텍스트 (infra, blog, ads)
     ├── lessons/         ← 실수 누적·승격 (failures.md, patterns.md)
+    ├── incidents/       ← 종합 사고 리포트 (날짜-주제.md 형식)
     ├── brand-guide/blog-history.md  ← 미존재 (첫 발행 시 신설)
     ├── blog-drafts/
     ├── meta-ads/{benchmarks.md, reports/, weekly/, SETUP.md}
@@ -352,12 +353,12 @@ heavylover-automation/
 3. 신규 실수 발생 시 → `failures.md` 상단에 한 줄 추가 + 사용자에게 "failures.md에 기록했습니다" 보고
 4. 같은 키워드 3회+ → `patterns.md` 카테고리 보강 또는 신설
 
-### 최근 5건 (전체는 failures.md)
-- **2026-04-28** ⑱ | Vultr `/root/heavylover-automation/`이 git clone 아닌 단순 복사 폴더라 git pull 불가 → 어제 SS 패치가 서버 미반영, 오늘 11시 26건 누락 재발. .git 이식 + `deploy-vultr.yml` 자동 배포 신설 — 신규 서버 폴더는 처음부터 git clone, push 후 원격·서버 SHA 이중 검증
-- **2026-04-28** ⑰ | "git push 완료" 보고 후 origin/main 미검증 — push 직후 `git log origin/main`+`서버 git log -1` 이중 실측
+### 최근 5건 (전체는 failures.md, 자세한 사고 리포트는 docs/incidents/)
+- **2026-04-28** ㉑ | E2E 검증 가설3 발견: `is_shipping_overdue`가 `placeOrderStatus` 미체크 → PAYED+CANCEL 7건을 "발송기한초과"로 오판정. OK 체크 추가 + detect_special_orders에 PAYED+CANCEL 분기 — **외부 API 상태 enum 두 종류 이상이면 둘 다 함께 평가**
+- **2026-04-28** ⑱ | Vultr `/root/heavylover-automation/`이 git clone 아닌 단순 복사 폴더 → 어제 패치 미반영 → 오늘 11시 26건 누락 재발. .git 이식 + deploy-vultr.yml 자동 배포 신설
+- **2026-04-28** ⑰ | "git push 완료" 보고 후 origin/main 미검증 — push 직후 `git log origin/main` + 서버 `git log -1` 이중 실측
 - **2026-04-28** ⑯ | Meta USD vs KRW 가정 — 첫 응답에서 통화 필드 확인, 환산 함수 일관 적용
-- **2026-04-28** ⑮ | Meta User Token 수 시간 만료 — 토큰 수명 공식 문서 확인 + 만료 키워드 자동 감지
-- **2026-04-28** ① | SS hours_back=24 + 평일 cron(1-5)로 금~일 결제분 영구 누락 — 상태 기반(orders_pending_dispatch 14일 PAYED 전수)으로 전환, shippingDueDate<now 별도 카운트
+- **2026-04-28** ① | SS hours_back=24 + 평일 cron(1-5)로 금~일 결제분 영구 누락 — orders_pending_dispatch 14일 PAYED 전수로 전환
 
 ---
 

@@ -29,6 +29,7 @@
 
 ## 로그
 
+- **2026-04-28** ㉑ | E2E 3회 검증 가설3에서 발견: `is_shipping_overdue`가 `placeOrderStatus`를 안 봐서 PAYED+CANCEL(취소 요청 중) 주문 7건이 "발송기한 초과"로 잘못 카운트. 텔레그램 알림에 "발송기한초과 7건" 표시되어 사용자가 발송 못 한 걸로 오인 가능. 보강: `placeOrderStatus=='OK'` 체크 추가 + `detect_special_orders`에 PAYED+CANCEL 분기 추가. | **하지 말 것**: 외부 API 상태 enum이 두 종류(`productOrderStatus`, `placeOrderStatus`) 이상이면 둘 다 함께 평가. 한쪽만 보고 판정하면 의미 왜곡 발생.
 - **2026-04-28** ⑳ | 11시 발주 자동화 알림은 텔레그램 봇만 인식. 콘솔 직접 입력 `/cancel`은 bash가 명령어로 해석해 `No such file or directory`. | **하지 말 것**: 봇 승인 플로우는 항상 텔레그램 메시지로 응답. 콘솔에서 강제 중단할 일 있으면 `Ctrl+C` 사용.
 - **2026-04-28** ⑲ | Vultr 서버 `run.sh`엔 `./venv/bin/python`로 잘 들어가지만, 사람이 콘솔에서 직접 실행 시 `python` 명령이 없어 실패. 서버 기본 PATH에 `python` 미존재 (Ubuntu 22.04는 `python3`만). | **하지 말 것**: 서버 디버그 명령 안내 시 `source venv/bin/activate && python ...` 또는 `./venv/bin/python ...` 형식 우선. 운영 cron의 venv 호출 방식과 동일하게.
 - **2026-04-28** ⑱ | Vultr `/root/heavylover-automation/`이 git clone이 아닌 단순 복사 폴더라 `git pull` 자체가 불가능. 그래서 어제 패치 GitHub push 후에도 서버 코드 갱신 안 됨 → 오늘 11시 cron이 옛 코드로 SS 26건 누락. 해결: `/tmp`에 git clone → `.git` 폴더만 본 디렉터리로 이식 (`mv /tmp/heavylover-tmp/.git ./.git`) → `git fetch + reset --hard origin/main` → 자동 배포 워크플로우(`deploy-vultr.yml`) 신설. | **하지 말 것**: 신규 서버에 코드 배포 시 처음부터 `git clone`. scp/rsync 단순 복사는 코드 갱신 추적 불가 + 자동 배포 차단. 같은 패턴 적용 후보: 향후 신규 워크로드 폴더는 모두 GitHub 원격에서 clone.
