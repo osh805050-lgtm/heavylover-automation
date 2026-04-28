@@ -175,7 +175,12 @@ def orders_pending_dispatch(days_back=14):
 
 
 def is_shipping_overdue(product_order):
-    """productOrder.shippingDueDate < now 이면 발송기한 초과."""
+    """발주확인 완료(OK)된 주문 중 shippingDueDate < now 인 것만 발송기한 초과로 판정.
+
+    placeOrderStatus가 CANCEL/NOT_YET이면 발송 의무 없거나 다른 단계라 제외.
+    """
+    if product_order.get("placeOrderStatus") != "OK":
+        return False
     due = product_order.get("shippingDueDate", "")
     if not due:
         return False
@@ -252,7 +257,17 @@ def detect_special_orders(orders):
     for wrap in orders:
         po = wrap.get("productOrder", {})
         status = po.get("productOrderStatus", "")
-        # 정상 처리(PAYED)는 스킵
+        place_status = po.get("placeOrderStatus", "")
+
+        # PAYED + CANCEL placeOrderStatus = 취소 요청된 주문 (특이사항)
+        if status == "PAYED" and place_status == "CANCEL":
+            specials.append({
+                "order_id": po.get("productOrderId"),
+                "order_status": status,
+                "reason": "취소 요청 (placeOrderStatus=CANCEL)",
+            })
+            continue
+        # 정상 처리(PAYED + OK or NOT_YET)는 스킵
         if status == "PAYED":
             continue
         # 이미 처리된 것도 스킵
