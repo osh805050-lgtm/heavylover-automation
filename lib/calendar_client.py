@@ -152,10 +152,11 @@ def _build_description(item):
 
 
 def _create_or_update_event(service, calendar_id, event_id, summary, date_iso, description):
-    """이벤트 생성 또는 업데이트 (멱등).
+    """이벤트 생성 또는 업데이트 (멱등). Rate limit 시 자동 재시도.
 
     date_iso: "YYYY-MM-DD" (종일 이벤트)
     """
+    import time as _time
     body = {
         "id": event_id,
         "summary": summary,
@@ -169,23 +170,49 @@ def _create_or_update_event(service, calendar_id, event_id, summary, date_iso, d
             ],
         },
     }
-    try:
-        service.events().insert(calendarId=calendar_id, body=body).execute()
-        return "created"
-    except Exception as e:
-        # 이미 존재하면 업데이트 시도
-        msg = str(e).lower()
-        if "already exists" in msg or "duplicate" in msg or "409" in msg:
-            try:
-                service.events().update(
-                    calendarId=calendar_id, eventId=event_id, body=body
-                ).execute()
-                return "updated"
-            except Exception as e2:
-                log.warning(f"이벤트 업데이트 실패: {e2}")
-                return "skipped"
-        log.warning(f"이벤트 생성 실패 ({event_id}): {e}")
-        return "error"
+
+    def _insert():
+        return service.events().insert(calendarId=calendar_id, body=body).execute()
+
+    def _update():
+        return service.events().update(
+            calendarId=calendar_id, eventId=event_id, body=body
+        ).execute()
+
+    # 1차: insert (rate limit 시 최대 3회 재시도, 지수 백오프)
+    for attempt in range(3):
+        try:
+            _insert()
+            _time.sleep(0.15)  # 다음 호출까지 150ms 갭 — 초당 6~7건 이하
+            return "created"
+        except Exception as e:
+            err = str(e)
+            err_lower = err.lower()
+            # 이미 존재 → update로 분기
+            if "already exists" in err_lower or "duplicate" in err_lower or "409" in err_lower:
+                break
+            # rate limit → 재시도
+            if "ratelimitexceeded" in err_lower or "rate limit" in err_lower:
+                _time.sleep(2 ** attempt)  # 1, 2, 4초
+                continue
+            log.warning(f"이벤트 생성 실패 ({event_id}): {err[:120]}")
+            return "error"
+
+    # 2차: update (rate limit 시 최대 3회 재시도)
+    for attempt in range(3):
+        try:
+            _update()
+            _time.sleep(0.15)
+            return "updated"
+        except Exception as e:
+            err_lower = str(e).lower()
+            if "ratelimitexceeded" in err_lower or "rate limit" in err_lower:
+                _time.sleep(2 ** attempt)
+                continue
+            log.warning(f"이벤트 업데이트 실패: {str(e)[:120]}")
+            return "skipped"
+
+    return "error"
 
 
 def sync_announcements(scored_items, log=None):
@@ -200,15 +227,31 @@ def sync_announcements(scored_items, log=None):
         dict: {"eligible": int, "created": int, "updated": int, "skipped": int, "errors": int}
     """
     log = log or logging.getLogger(__name__)
-    stats = {"eligible": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    stats = {"eligible": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0, "deleted": 0}
 
+    # 강등된 공고(자격미달·검증불가) → 기존 등록 이벤트 자동 삭제
+    # 점수 ≥7 + 마감일 있던 공고만 (등록됐을 가능성 있는 것). Rate limit 회피.
+    # 타지역/제외/비공고/메뉴는 처음부터 점수 0이라 등록 안 됐으므로 delete 시도 불필요.
+    LLM_DEMOTED_TIER_PREFIX = ("자격미달", "검증불가")
+    demoted = [
+        s for s in scored_items
+        if (s.get("tier") or "").startswith(LLM_DEMOTED_TIER_PREFIX)
+        and s.get("deadline")
+        and (s.get("score") or 0) >= CALENDAR_THRESHOLD  # 등록 가능성 있던 것만
+    ]
+
+    # 등록 대상: 점수 ≥7 + 마감일 + 자격미달·검증불가·타지역 등 강등 안 된 것
+    EXCLUDE_FROM_CALENDAR = (
+        "타지역", "제외", "비공고", "메뉴", "자격미달", "검증불가",
+    )
     eligible = [
         s for s in scored_items
         if s.get("score", 0) >= CALENDAR_THRESHOLD and s.get("deadline")
+        and not (s.get("tier") or "").startswith(EXCLUDE_FROM_CALENDAR)
     ]
     stats["eligible"] = len(eligible)
 
-    if not eligible:
+    if not eligible and not demoted:
         log.info("캘린더 등록 대상 없음 (적합도 ≥ 7 + 마감일 있는 공고)")
         return stats
 
@@ -225,6 +268,27 @@ def sync_announcements(scored_items, log=None):
         )
 
     today = datetime.now(KST).date()
+
+    # 강등 공고 자동 삭제 (이전 등록 이벤트 정리) — rate limit 보호용 sleep 포함
+    import time as _time
+    for item in demoted:
+        announcement_id = _get_announcement_id(item)
+        for kind in ["d7", "d3", "deadline"]:
+            event_id = _make_event_id(announcement_id, kind)
+            try:
+                service.events().delete(
+                    calendarId=calendar_id, eventId=event_id
+                ).execute()
+                stats["deleted"] += 1
+                _time.sleep(0.1)  # 100ms — 초당 10 요청 이하로 제한
+            except Exception as e:
+                err = str(e)
+                if "404" not in err and "Not Found" not in err and "deleted" not in err:
+                    if "rateLimitExceeded" in err:
+                        _time.sleep(2)  # rate limit 시 2초 대기 (한 번만)
+
+    if stats["deleted"]:
+        log.info(f"강등 공고 자동 삭제: {stats['deleted']}건")
 
     for item in eligible:
         try:
