@@ -1,0 +1,49 @@
+name: Deploy to Vultr
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.py'
+      - '.env.example'
+      - 'requirements.txt'
+      - '.github/workflows/deploy-vultr.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-vultr
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH로 Vultr 접속해서 git pull
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VULTR_HOST }}
+          username: ${{ secrets.VULTR_USER }}
+          key: ${{ secrets.VULTR_SSH_KEY }}
+          port: ${{ secrets.VULTR_PORT }}
+          script: |
+            set -e
+            cd /root/heavylover-automation
+            echo "=== 배포 전 SHA ==="
+            git rev-parse --short HEAD
+            git fetch origin main
+            git reset --hard origin/main
+            echo "=== 배포 후 SHA ==="
+            git rev-parse --short HEAD
+            echo "=== 배포 완료: $(date '+%Y-%m-%d %H:%M:%S') ==="
+
+      - name: 텔레그램 알림
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            MSG="✅ [배포] heavylover-automation @ Vultr 갱신 완료 (${GITHUB_SHA::7})"
+          else
+            MSG="❌ [배포] heavylover-automation 갱신 실패 — Actions 로그 확인 필요"
+          fi
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "text=${MSG}"
