@@ -132,16 +132,16 @@ def run(skip_weekend_check=False):
         summary_parts.append("/done → 처리 완료, 엑셀 생성")
         summary_parts.append("/cancel → 오늘 자동화 취소")
 
-        telegram_client.send_message("\n".join(summary_parts))
+        telegram_client.send_message("\n".join(summary_parts), channel="ops")
 
         print("  - 사장님 응답 대기 중 (최대 2시간)...")
-        cmd = telegram_client.wait_for_command(["/done", "/cancel"], timeout_seconds=7200)
+        cmd = telegram_client.wait_for_command(["/done", "/cancel"], timeout_seconds=7200, channel="ops")
         if cmd == "/cancel":
-            telegram_client.send_message("❌ 자동화 취소됨. 오늘은 엑셀 생성 안 함.")
+            telegram_client.send_message("❌ 자동화 취소됨. 오늘은 엑셀 생성 안 함.", channel="ops")
             print("  - 취소됨")
             return None, True
         if cmd is None:
-            telegram_client.send_message("⏰ 2시간 대기 타임아웃. 엑셀 생성 건너뜀.")
+            telegram_client.send_message("⏰ 2시간 대기 타임아웃. 엑셀 생성 건너뜀.", channel="ops")
             print("  - 타임아웃")
             return None, True
         print(f"  - 승인 받음 ({cmd})")
@@ -165,7 +165,7 @@ def run(skip_weekend_check=False):
     combined = combined[DADA_COLUMNS]
 
     if len(combined) == 0:
-        telegram_client.send_message("⚠️ 처리할 주문이 없어서 엑셀 생성 안 함.")
+        telegram_client.send_message("⚠️ 처리할 주문이 없어서 엑셀 생성 안 함.", channel="ops")
         print("  - 주문 0건, 종료")
         return None, True
 
@@ -227,7 +227,7 @@ def run(skip_weekend_check=False):
         f"- 검증: {'통과' if is_valid else '실패 - 확인 필요'}\n"
         f"- OneDrive: {'✓ 업로드 완료' if onedrive_ok else '✗ 실패 (텔레그램만 전송)'}"
     )
-    telegram_client.send_document(str(output_path), caption=result_msg)
+    telegram_client.send_document(str(output_path), caption=result_msg, channel="ops")
     print("  - 텔레그램 전송 완료")
 
     print(f"\n=== 완료 ===")

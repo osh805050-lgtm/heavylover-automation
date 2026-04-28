@@ -617,7 +617,7 @@ def run():
         else:
             tg_msg = f"📈 [Meta광고] {target_date}\n─────────────\n데이터 없음 (API 실패)\n사유: {err_msg}"
 
-        telegram_client.send_message(tg_msg)
+        telegram_client.send_message(tg_msg, channel="ads")
         return 1
 
     row = raw["data"][0]
@@ -718,7 +718,7 @@ def run():
     summary = format_telegram_summary(
         target_date, metrics, flags, ok=True, action_text=short_text
     )
-    sent = telegram_client.send_message(summary)
+    sent = telegram_client.send_message(summary, channel="ads")
     print(f"텔레그램 전송: {sent}")
 
     # 이메일 — 4역할 페르소나 심층 + 차트 인라인 (재구매 일일 리포트와 동일 수준)

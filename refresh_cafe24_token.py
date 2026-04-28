@@ -34,7 +34,7 @@ def main():
         msg = f"🚨 카페24 OAuth 자동 갱신 실패 ({now})\n{e}\n→ 수동 재발급 필요"
         print(msg)
         try:
-            send_message(msg)
+            send_message(msg, channel="ops")
         except Exception:
             pass
         return 1

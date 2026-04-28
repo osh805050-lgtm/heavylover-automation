@@ -46,7 +46,7 @@ GRAPH_BASE = "https://graph.facebook.com/v21.0"
 def _notify_telegram(msg):
     try:
         import telegram_client
-        telegram_client.send_message(msg)
+        telegram_client.send_message(msg, channel="ops")
     except Exception:
         print(f"[telegram skip] {msg}")
 

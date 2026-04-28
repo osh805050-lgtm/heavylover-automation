@@ -818,7 +818,7 @@ if __name__ == "__main__":
     except Exception as e:
         _log(f"치명적 오류: {e}")
         try:
-            send_message(f"🚨 재구매 리포트 치명적 오류: {e}")
+            send_message(f"🚨 재구매 리포트 치명적 오류: {e}", channel="ops")
         except Exception:
             pass
         sys.exit(2)

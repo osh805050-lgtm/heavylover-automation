@@ -560,7 +560,7 @@ def main():
         success_count = 0
         for i, m in enumerate(messages, 1):
             try:
-                ok = telegram_client.send_message(m[:4090])
+                ok = telegram_client.send_message(m[:4090], channel="govt")
                 if ok:
                     success_count += 1
                 import time as _time

@@ -35,18 +35,52 @@ def _format_kr_money(v) -> str:
         return "—"
 
 
-def _trend_icon(pp_or_pct, higher_is_better=True) -> str:
-    if pp_or_pct is None:
+def _flag_emoji(value, target: float, lower_is_better: bool = False, severity_pct: float = 20) -> str:
+    """벤치 대비 색상 플래그. severity_pct 이상 차이는 🔴, 그 미만은 🟡, 충족은 🟢."""
+    if value is None:
+        return "—"
+    try:
+        v = float(value)
+    except (ValueError, TypeError):
+        return "—"
+    diff_pct = ((target - v) / target * 100) if not lower_is_better else ((v - target) / target * 100)
+    if diff_pct <= 0:
+        return "🟢"
+    if diff_pct < severity_pct:
+        return "🟡"
+    return "🔴"
+
+
+def _delta_arrow(value, higher_is_better: bool = True) -> str:
+    if value is None:
         return ""
     try:
-        v = float(pp_or_pct)
+        v = float(value)
     except (ValueError, TypeError):
         return ""
     if v > 0:
-        return "↑" if higher_is_better else "↓⚠️"
+        return "↑" if higher_is_better else "↓"
     if v < 0:
-        return "↓⚠️" if higher_is_better else "↑"
-    return "—"
+        return "↓" if higher_is_better else "↑"
+    return "→"
+
+
+def _build_headline(cur_sales, mom, m1, rate_1to2, flags) -> str:
+    """가장 큰 신호를 헤드라인 1줄로."""
+    candidates = []
+    if m1 is not None and m1 < 14:
+        candidates.append((20 - m1, f"🔴 M+1 리텐션 {m1}% — 벤치 20% 대비 {round(20-m1, 1)}%pp 미달"))
+    if rate_1to2 is not None and rate_1to2 < 20:
+        candidates.append((30 - rate_1to2, f"🔴 1→2 전환 {rate_1to2}% — 목표 30% 대비 {round(30-rate_1to2, 1)}%pp 미달"))
+    if mom is not None and mom < -30:
+        candidates.append((abs(mom), f"🔴 당월 매출 MoM {mom}% — 큰 폭 하락 점검 필요"))
+    if flags:
+        f = flags[0]
+        candidates.append((10, f"⚠️ 이상치 — {f.get('지표')} {f.get('방향')} (z={f.get('z_score')})"))
+    if not candidates:
+        return "🟢 핵심 KPI 정상 범위 — 큰 변화 없음"
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
 
 
 def build_brief(gt: dict) -> str:
@@ -57,12 +91,13 @@ def build_brief(gt: dict) -> str:
 
     stages = gt.get("단계별_전환율_현재", {}).get("통합") or []
     stage_1to2 = next((s for s in stages if s.get("단계") == "1→2"), {}) or {}
+    rate_1to2 = stage_1to2.get("전환율")
 
     mn = gt.get("M+N_리텐션_통합") or []
     m1 = mn[-1].get("M+1") if mn else None
 
     interval = gt.get("재구매_간격") or {}
-    p50 = interval.get("P50") or interval.get("중앙값") or "?"
+    p50 = interval.get("P50") or interval.get("중앙값") or "—"
 
     wow = enriched.get("WoW_비교") or {}
     matrix_wow = wow.get("당월_매출_WoW_pct")
@@ -70,32 +105,51 @@ def build_brief(gt: dict) -> str:
     flags = enriched.get("이상치_플래그") or []
 
     today = datetime.now(KST).strftime("%Y-%m-%d")
+    headline = _build_headline(cur.get("매출"), mom, m1, rate_1to2, flags)
+
+    # 색상 플래그
+    flag_sales = "🔴" if (mom is not None and mom < -30) else ("🟡" if (mom is not None and mom < 0) else "🟢")
+    flag_1to2 = _flag_emoji(rate_1to2, 30, severity_pct=15)
+    flag_m1 = _flag_emoji(m1, 20, severity_pct=15)
+    flag_p50 = "🟢"  # 정상 범위 14~16일
+
     lines = [
-        f"📊 재구매 요약 {today}",
+        f"📊 헤비로버 재구매 {today}",
         "",
-        f"당월 매출: {_format_kr_money(cur.get('매출'))} (MoM {mom}% {_trend_icon(mom)})",
+        f"핵심: {headline}",
+        "",
+        "━━━ KPI 현황 ━━━",
+        f"{flag_sales} 당월 매출",
+        f"   {_format_kr_money(cur.get('매출'))}",
+        f"   MoM {mom}% {_delta_arrow(mom)}" if mom is not None else "   MoM —",
     ]
     if matrix_wow is not None:
-        lines.append(f"WoW(7일전 대비): {matrix_wow}% {_trend_icon(matrix_wow)}")
+        lines.append(f"   WoW {matrix_wow}% {_delta_arrow(matrix_wow)}")
+    lines.append("")
 
-    rate_1to2 = stage_1to2.get("전환율")
     rate_str = f"{rate_1to2}%" if rate_1to2 is not None else "—"
-    lines.append(f"1→2 전환: {rate_str} (목표 30%)")
-
-    if m1 is not None:
-        lines.append(f"M+1 리텐션: {m1}% (벤치 20%)")
-
-    p50_str = p50 if p50 else "—"
-    lines.append(f"재구매 간격 P50: {p50_str}")
+    lines.extend([
+        f"{flag_1to2} 1→2 전환",
+        f"   {rate_str} (목표 30%)",
+        "",
+        f"{flag_m1} M+1 리텐션",
+        f"   {m1 if m1 is not None else '—'}% (벤치 20%)",
+        "",
+        f"{flag_p50} 재구매 간격 P50",
+        f"   {p50}",
+        "",
+    ])
 
     if flags:
-        lines.append("")
-        lines.append("⚠️ 이상치:")
+        lines.append("⚠️ 이상치(±2σ):")
         for f in flags[:3]:
-            lines.append(f"  - {f.get('지표')} {f.get('방향')} (z={f.get('z_score')})")
+            direction = "급등" if f.get("방향") in ("급등", "개선") else "급락"
+            lines.append(f"  • {f.get('지표')} {direction} (z={f.get('z_score')})")
+    else:
+        lines.append("✓ 이상치(±2σ) 없음")
 
     lines.append("")
-    lines.append("상세 분석은 이메일 확인.")
+    lines.append("📧 4역할 심층 분석 → 메일 확인")
 
     return "\n".join(lines)
 
@@ -105,14 +159,14 @@ def main() -> int:
         ss = _open_sheet()
         gt = build_ground_truth(ss)
         msg = build_brief(gt)
-        send_message(msg)
+        send_message(msg, channel="report")
         print(f"[{datetime.now(KST).strftime('%H:%M:%S')}] 텔레그램 요약 발송 완료")
         return 0
     except Exception as e:
         err = f"🚨 텔레그램 요약 실패: {e}"
         print(err)
         try:
-            send_message(err)
+            send_message(err, channel="ops")
         except Exception:
             pass
         return 1

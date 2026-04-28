@@ -204,15 +204,15 @@ def run():
         f"/done → 카페24/스마트스토어 송장 자동 등록\n"
         f"/cancel → 오늘 등록 취소 (수동 처리)"
     )
-    telegram_client.send_message(msg)
+    telegram_client.send_message(msg, channel="ops")
 
     print("[3/4] 응답 대기 중 (최대 8시간)...")
-    cmd = telegram_client.wait_for_command(["/done", "/cancel"], timeout_seconds=28800)
+    cmd = telegram_client.wait_for_command(["/done", "/cancel"], timeout_seconds=28800, channel="ops")
     if cmd == "/cancel":
-        telegram_client.send_message("❌ 송장 등록 취소됨. 수동으로 처리해주세요.")
+        telegram_client.send_message("❌ 송장 등록 취소됨. 수동으로 처리해주세요.", channel="ops")
         return
     if cmd is None:
-        telegram_client.send_message("⏰ 응답 대기 타임아웃. 송장 등록 건너뜀.")
+        telegram_client.send_message("⏰ 응답 대기 타임아웃. 송장 등록 건너뜀.", channel="ops")
         return
     print(f"  - 승인 받음 ({cmd})")
 
@@ -267,7 +267,7 @@ def run():
     if naver_fail:
         result_msg += "\n실패:\n" + "\n".join(f"  - {e}" for e in naver_fail[:5])
 
-    telegram_client.send_message(result_msg)
+    telegram_client.send_message(result_msg, channel="ops")
     print(result_msg)
 
 
