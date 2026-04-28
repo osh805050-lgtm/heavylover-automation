@@ -405,22 +405,125 @@ def _render_charts_block(chart_cids):
     return f"<h2 style='color:#2c3e50;border-bottom:2px solid #667eea;padding-bottom:4px;'>📊 시각화 요약</h2>{table}"
 
 
+def _kpi_card(label, value, sub, color):
+    return (
+        f"<td style='width:25%;padding:14px;background:{color};color:white;border-radius:6px;text-align:center;'>"
+        f"<div style='font-size:11px;opacity:0.85;letter-spacing:0.5px;'>{label}</div>"
+        f"<div style='font-size:22px;font-weight:700;margin-top:6px;'>{value}</div>"
+        f"<div style='font-size:11px;opacity:0.85;margin-top:4px;'>{sub}</div>"
+        f"</td>"
+    )
+
+
+def _verdict_color(actual, bench, higher_better):
+    if actual is None or bench is None or bench == 0:
+        return "#7f8c8d"
+    ratio = actual / bench
+    if higher_better:
+        if ratio >= 1.5: return "#1abc9c"
+        if ratio >= 1.0: return "#3498db"
+        if ratio >= 0.7: return "#f39c12"
+        return "#e74c3c"
+    else:
+        if ratio <= 0.7: return "#1abc9c"
+        if ratio <= 1.0: return "#3498db"
+        if ratio <= 1.5: return "#f39c12"
+        return "#e74c3c"
+
+
+def _build_yearly_kpi(ctx):
+    o = ctx.get("overall", {})
+    spend = o.get("spend_total_krw")
+    pv = o.get("purchase_value_total_krw")
+    pur = o.get("purchases_total")
+    roas = o.get("roas_avg")
+    cpa = o.get("cpa_avg_krw")
+
+    spend_str = f"{int(spend/10000):,}만원" if spend and spend >= 10000 else (f"{int(spend):,}원" if spend else "—")
+    pv_str = f"{int(pv/10000):,}만원" if pv and pv >= 10000 else (f"{int(pv):,}원" if pv else "—")
+    pur_str = f"{int(pur):,}건" if pur else "—"
+    roas_str = f"{roas:.2f}" if roas else "—"
+    roas_color = _verdict_color(roas, 2.5, True)
+    cpa_str = f"{int(cpa):,}원" if cpa else "—"
+    cpa_color = _verdict_color(cpa, 30000, False)
+
+    cards = [
+        _kpi_card("총 지출", spend_str, "누적", "#34495e"),
+        _kpi_card("총 매출", pv_str, "누적", "#2c3e50"),
+        _kpi_card("ROAS", roas_str, f"벤치 2.5 · {pur_str}", roas_color),
+        _kpi_card("CPA", cpa_str, "벤치 30,000원", cpa_color),
+    ]
+    return (
+        "<table style='width:100%;border-collapse:separate;border-spacing:8px;margin:0 0 22px 0;'>"
+        "<tr>" + "".join(cards) + "</tr></table>"
+    )
+
+
+def _build_funnel_alert(ctx):
+    f = ctx.get("funnel", {})
+    diag = f.get("diagnosis") or []
+    drops = f.get("drop_offs") or []
+
+    # 가장 큰 이탈 단계
+    big_items = []
+    valid = [d for d in drops if d.get("drop_off_pct") is not None and 0 <= d["drop_off_pct"] <= 100]
+    if valid:
+        biggest = max(valid, key=lambda d: d["drop_off_pct"])
+        big_items.append(
+            f"<li style='margin:6px 0;'>최대 이탈: <b>{biggest['from']} → {biggest['to']}</b> "
+            f"<b style='color:#c0392b;'>{biggest['drop_off_pct']:.1f}%</b> 이탈 "
+            f"({biggest['from_count']:,}→{biggest['to_count']:,})</li>"
+        )
+
+    danger = [d for d in diag if d.startswith("🔴") or "악화" in d or "이탈" in d]
+    success = [d for d in diag if d.startswith("✅") or "우수" in d or "강함" in d]
+
+    if not (big_items or danger or success):
+        return ""
+
+    out = []
+    if danger or big_items:
+        items = big_items + [f"<li style='margin:6px 0;'>{d}</li>" for d in danger]
+        out.append(
+            "<div style='background:#fdf2f2;border-left:4px solid #e74c3c;padding:14px 18px;border-radius:6px;margin:0 0 14px 0;'>"
+            "<div style='font-weight:700;color:#c0392b;margin-bottom:8px;font-size:14px;'>🔴 약점 — 즉시 개선 필요</div>"
+            f"<ul style='margin:0;padding-left:20px;color:#7d2828;'>{''.join(items)}</ul>"
+            "</div>"
+        )
+    if success:
+        items = [f"<li style='margin:6px 0;'>{d}</li>" for d in success]
+        out.append(
+            "<div style='background:#e8f8f5;border-left:4px solid #1abc9c;padding:14px 18px;border-radius:6px;margin:0 0 22px 0;'>"
+            "<div style='font-weight:700;color:#0e6655;margin-bottom:8px;font-size:14px;'>✅ 강점 — 응용·확장 검토</div>"
+            f"<ul style='margin:0;padding-left:20px;color:#0e6655;'>{''.join(items)}</ul>"
+            "</div>"
+        )
+    return "".join(out)
+
+
 def _wrap_html(body_html, ctx, chart_cids=None):
     period = ctx.get("period_label", "")
-    n_days = ctx.get("overall", {}).get("n_days", "?")
+    n_days = ctx.get("n_days_data", "?")
+    coverage = ctx.get("data_coverage_pct", "?")
     charts_html = _render_charts_block(chart_cids or [])
+    kpi_html = _build_yearly_kpi(ctx)
+    alerts_html = _build_funnel_alert(ctx)
     return f"""<!DOCTYPE html>
 <html><head><meta charset='utf-8'><title>HeavyLover Meta 광고 종합 심층</title></head>
-<body style='font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;max-width:800px;margin:0 auto;padding:20px;color:#333;line-height:1.55;'>
-<div style='background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:18px 20px;border-radius:6px;margin-bottom:20px;'>
+<body style='font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;max-width:800px;margin:0 auto;padding:20px;color:#333;line-height:1.6;background:#fafbfc;'>
+<div style='background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:20px 22px;border-radius:8px;margin-bottom:22px;box-shadow:0 2px 8px rgba(102,126,234,0.25);'>
   <h1 style='margin:0 0 6px 0;font-size:22px;'>📈 HeavyLover Meta 광고 종합 심층</h1>
-  <div style='opacity:0.95;font-size:13px;'>{period} ({n_days}일 누적) · 4역할 페르소나 + 퍼널 + 계절성 분석</div>
+  <div style='opacity:0.95;font-size:13px;'>{period} · {n_days}일 누적 (커버리지 {coverage}%) · 4역할 + 퍼널 + 계절성</div>
 </div>
+{kpi_html}
+{alerts_html}
 {charts_html}
+<div style='background:white;padding:22px;border-radius:8px;border:1px solid #e1e4e8;'>
 {body_html}
-<hr style='margin-top:30px;'>
-<div style='font-size:12px;color:#888;'>
-  <p>자동 발송 · 종합 리포트 (수동 또는 주간 cron) · meta_ads_yearly_report.py</p>
+</div>
+<hr style='margin-top:30px;border:none;border-top:1px solid #e1e4e8;'>
+<div style='font-size:12px;color:#888;text-align:center;padding-top:8px;'>
+  <p>자동 발송 · 매주 일요일 KST 09:00 · meta_ads_yearly_report.py</p>
 </div>
 </body></html>"""
 
@@ -553,30 +656,76 @@ def send_telegram_summary(report):
     n_days = ctx["n_days_data"]
     period = ctx.get("period_label", "")
 
-    lines = [
-        f"📈 [Meta광고 종합] {period}",
-        "─" * 18,
-        f"누적: {n_days}일 (커버리지 {ctx['data_coverage_pct']}%)",
-        f"총 지출: {int(overall['spend_total_krw']):,}원",
-        f"총 구매: {int(overall['purchases_total'])}건",
-    ]
-    if overall.get("roas_avg"):
-        lines.append(f"평균 ROAS: {overall['roas_avg']:.2f} (벤치 2.5)")
-    if overall.get("cpa_avg_krw"):
-        lines.append(f"평균 CPA: {int(overall['cpa_avg_krw']):,}원 (벤치 30,000원)")
-    if overall.get("ctr_avg_pct"):
-        lines.append(f"평균 CTR: {overall['ctr_avg_pct']:.2f}% (벤치 1.2%)")
+    def _verdict(actual, bench, higher_better):
+        if actual is None or bench is None or bench == 0:
+            return "—"
+        ratio = actual / bench
+        if higher_better:
+            if ratio >= 1.5: return "🟢"
+            if ratio >= 1.0: return "🔵"
+            if ratio >= 0.7: return "🟡"
+            return "🔴"
+        else:
+            if ratio <= 0.7: return "🟢"
+            if ratio <= 1.0: return "🔵"
+            if ratio <= 1.5: return "🟡"
+            return "🔴"
 
+    lines = []
+    lines.append(f"📈 [Meta광고 종합 리포트]")
+    lines.append("━━━━━━━━━━━━━━━━━━")
+    lines.append(f"기간: {period}")
+    lines.append(f"누적: {n_days}일  (커버리지 {ctx['data_coverage_pct']}%)")
+    lines.append("")
+
+    # 핵심 성과
+    lines.append("◆ 핵심 성과")
+    lines.append(f"  총 지출   {int(overall['spend_total_krw']):,}원")
+    if overall.get("purchase_value_total_krw"):
+        lines.append(f"  총 매출   {int(overall['purchase_value_total_krw']):,}원")
+    lines.append(f"  총 구매   {int(overall['purchases_total']):,}건")
+
+    if overall.get("roas_avg") is not None:
+        em = _verdict(overall['roas_avg'], 2.5, True)
+        lines.append(f"  ROAS     {overall['roas_avg']:.2f}  {em}  (벤치 2.5)")
+    lines.append("")
+
+    # 효율
+    lines.append("◆ 효율")
+    if overall.get("ctr_avg_pct") is not None:
+        em = _verdict(overall['ctr_avg_pct'], 1.2, True)
+        lines.append(f"  CTR      {overall['ctr_avg_pct']:.2f}%  {em}  (벤치 1.2%)")
+    if overall.get("cpc_avg_krw") is not None:
+        em = _verdict(overall['cpc_avg_krw'], 700, False)
+        lines.append(f"  CPC      {int(overall['cpc_avg_krw']):,}원  {em}  (벤치 700원)")
+    if overall.get("cpa_avg_krw") is not None:
+        em = _verdict(overall['cpa_avg_krw'], 30000, False)
+        lines.append(f"  CPA      {int(overall['cpa_avg_krw']):,}원  {em}  (벤치 30,000원)")
+    lines.append("")
+
+    # 퍼널 진단
     funnel = ctx.get("funnel", {})
     diag = funnel.get("diagnosis") or []
     if diag:
-        lines.append("")
-        lines.append("[퍼널 진단]")
+        lines.append("◆ 퍼널 진단")
         for d in diag[:5]:
             lines.append(f"  {d}")
+        lines.append("")
 
-    lines.append("")
-    lines.append("이메일 심층 리포트 도착 — 받은편지함 확인")
+    # 위너 / 패배 캠페인 한 줄씩
+    top = ctx.get("campaigns_top_roas") or []
+    bot = ctx.get("campaigns_bottom_roas") or []
+    if top or bot:
+        lines.append("◆ 캠페인")
+        if top:
+            t = top[0]
+            lines.append(f"  🟢 위너 ROAS {t['roas']:.2f} — {(t.get('campaign_name') or '?')[:30]}")
+        if bot:
+            b = bot[0]
+            lines.append(f"  🔴 패배 ROAS {b['roas']:.2f} — {(b.get('campaign_name') or '?')[:30]}")
+        lines.append("")
+
+    lines.append("📧 이메일에 4역할 심층 분석 + 차트 4종 도착")
 
     return telegram_client.send_message("\n".join(lines))
 

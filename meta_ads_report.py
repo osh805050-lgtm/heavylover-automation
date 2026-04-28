@@ -314,65 +314,103 @@ def format_markdown_report(target_date, metrics, flags, validation, raw_data, se
 
 
 def format_telegram_summary(target_date, metrics, flags, ok, action_text=None):
-    """텔레그램 간결 요약 (이모지 정책 준수: 최소)"""
+    """텔레그램 간결 요약 — 2단 구조 (헤드라인 / 상세 / 플래그 / 액션)."""
     if not ok:
-        return f"📈 [Meta광고] {target_date}\n─────────────\n데이터 없음 (API 실패 또는 노출 없음)"
+        return (
+            f"📈 [Meta광고]  {target_date}\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"⚠️ 데이터 없음 (API 실패 또는 노출 없음)"
+        )
 
-    def _line(label, actual_str, bench_str=None, cmp_str=None):
-        parts = [f"{label}: {actual_str}"]
-        if bench_str:
-            parts.append(f"(벤치 {bench_str})")
-        if cmp_str:
-            parts.append(f"→ {cmp_str}")
-        return " ".join(parts)
+    def _verdict_emoji(actual, bench, higher_better):
+        """벤치 대비 판정 → 이모지 (모바일에서 한눈에)."""
+        if actual is None or bench is None or bench == 0:
+            return "—"
+        ratio = actual / bench
+        if higher_better:
+            if ratio >= 1.5:
+                return "🟢"  # 우수
+            if ratio >= 1.0:
+                return "🔵"  # 평균 이상
+            if ratio >= 0.7:
+                return "🟡"  # 평균 미달
+            return "🔴"
+        else:  # 낮을수록 좋음
+            if ratio <= 0.7:
+                return "🟢"
+            if ratio <= 1.0:
+                return "🔵"
+            if ratio <= 1.5:
+                return "🟡"
+            return "🔴"
 
-    # 텔레그램 식별 prefix 강화 — 다른 자동화(발주·재구매·정부지원)와 명확히 구분
-    lines = [f"📈 [Meta광고] {target_date}", "─" * 18]
-    lines.append(_line("지출", _fmt_num(metrics['spend'], 0, '원')))
-    lines.append(
-        _line("CTR", _fmt_num(metrics['ctr_pct'], 2, '%'),
-              f"{BENCHMARK['ctr_pct']}%",
-              _compare(metrics['ctr_pct'], BENCHMARK['ctr_pct'], True))
-    )
-    lines.append(
-        _line("CPC", _fmt_num(metrics['cpc_krw'], 0, '원'),
-              f"{BENCHMARK['cpc_krw']:,}원",
-              _compare(metrics['cpc_krw'], BENCHMARK['cpc_krw'], False))
-    )
-    lines.append(
-        _line("ROAS", _fmt_num(metrics['roas'], 2),
-              str(BENCHMARK['roas']),
-              _compare(metrics['roas'], BENCHMARK['roas'], True))
-    )
-    lines.append(
-        _line("CPA", _fmt_num(metrics['cpa_krw'], 0, '원'),
-              f"{BENCHMARK['cpa_krw']:,}원",
-              _compare(metrics['cpa_krw'], BENCHMARK['cpa_krw'], False))
-    )
-    lines.append(
-        f"전환: {_fmt_num(metrics['purchases'], 0)}건 / "
-        f"전환율 {_fmt_num(metrics['conv_rate_pct'], 2, '%')}"
-    )
-    lines.append(
-        f"Frequency: {_fmt_num(metrics['frequency'], 2)}"
-    )
+    spend = metrics.get("spend")
+    roas = metrics.get("roas")
+    purchases = metrics.get("purchases")
+    purchase_value = metrics.get("purchase_value_krw")
+    ctr = metrics.get("ctr_pct")
+    cpc = metrics.get("cpc_krw")
+    cpa = metrics.get("cpa_krw")
+    freq = metrics.get("frequency")
 
+    lines = []
+    # ═══ 헤더
+    lines.append(f"📈 [Meta광고]  {target_date}")
+    lines.append("━━━━━━━━━━━━━━━━━━")
+
+    # ═══ 헤드라인 (가장 중요한 3개 — 매출·구매·ROAS)
+    lines.append("◆ 핵심 성과")
+    lines.append(f"  지출   {_fmt_num(spend, 0, '원')}")
+    lines.append(f"  매출   {_fmt_num(purchase_value, 0, '원')}")
+    lines.append(f"  구매   {_fmt_num(purchases, 0)}건")
+    roas_em = _verdict_emoji(roas, BENCHMARK['roas'], True)
+    lines.append(f"  ROAS   {_fmt_num(roas, 2)}  {roas_em}  (벤치 {BENCHMARK['roas']})")
+    lines.append("")
+
+    # ═══ 효율 지표 (한 블록에)
+    lines.append("◆ 효율")
+    ctr_em = _verdict_emoji(ctr, BENCHMARK['ctr_pct'], True)
+    lines.append(f"  CTR    {_fmt_num(ctr, 2, '%')}  {ctr_em}  (벤치 {BENCHMARK['ctr_pct']}%)")
+    cpc_em = _verdict_emoji(cpc, BENCHMARK['cpc_krw'], False)
+    lines.append(f"  CPC    {_fmt_num(cpc, 0, '원')}  {cpc_em}  (벤치 {BENCHMARK['cpc_krw']:,}원)")
+    cpa_em = _verdict_emoji(cpa, BENCHMARK['cpa_krw'], False)
+    lines.append(f"  CPA    {_fmt_num(cpa, 0, '원')}  {cpa_em}  (벤치 {BENCHMARK['cpa_krw']:,}원)")
+    # Frequency는 별도 — 범위 안이면 OK
+    freq_em = "🔵"
+    if freq is not None:
+        if freq > 5:
+            freq_em = "🔴"
+        elif freq > BENCHMARK['frequency_high']:
+            freq_em = "🟡"
+    lines.append(f"  Freq   {_fmt_num(freq, 2)}  {freq_em}  (적정 {BENCHMARK['frequency_low']}~{BENCHMARK['frequency_high']})")
+    lines.append("")
+
+    # ═══ 플래그 (있을 때만, 시선 끌도록 ▶ 사용)
     if flags:
-        lines.append("")
-        lines.append("플래그:")
+        lines.append("◆ 자동 플래그")
         for f in flags:
+            # 기존 flag에 이미 ⚠️가 있으면 그대로, 없으면 ▶ 추가
+            if not f.startswith(("⚠️", "🔴", "▶")):
+                f = f"▶ {f}"
             lines.append(f"  {f}")
-
-    if action_text:
         lines.append("")
-        lines.append("[Claude 코멘트]")
-        lines.append(action_text)
 
-    # 퍼널 한 줄 (가장 큰 drop-off)
+    # ═══ 퍼널 (가장 큰 drop-off — 행동 가능한 인사이트)
     funnel_line = metrics.get("_funnel_summary")
     if funnel_line:
+        lines.append("◆ 퍼널 약점")
+        lines.append(f"  {funnel_line}")
         lines.append("")
-        lines.append(funnel_line)
+
+    # ═══ Claude 액션 코멘트 (마지막 — 읽으면 즉시 행동 가능)
+    if action_text:
+        lines.append("◆ Claude 액션")
+        # 들여쓰기 통일 — 기존 텍스트의 줄들 앞에 2칸 공백
+        for line in action_text.splitlines():
+            if line.strip():
+                lines.append(f"  {line}")
+            else:
+                lines.append("")
 
     return "\n".join(lines)
 

@@ -225,23 +225,128 @@ def _render_charts_block(chart_cids):
     return f"<h2 style='color:#2c3e50;border-bottom:2px solid #3498db;padding-bottom:4px;'>📊 시각화 요약</h2>{table}"
 
 
-def _wrap_html(body_html, target_date, chart_cids=None, sheet_url=""):
+def _kpi_card(label, value, sub, color):
+    """KPI 카드 1개 — 모바일에서 한눈에."""
+    return (
+        f"<td style='width:25%;padding:12px;background:{color};color:white;border-radius:6px;text-align:center;'>"
+        f"<div style='font-size:11px;opacity:0.85;letter-spacing:0.5px;'>{label}</div>"
+        f"<div style='font-size:20px;font-weight:700;margin-top:4px;'>{value}</div>"
+        f"<div style='font-size:11px;opacity:0.85;margin-top:4px;'>{sub}</div>"
+        f"</td>"
+    )
+
+
+def _verdict_color(actual, bench, higher_better, palette=None):
+    """벤치 대비 색상 — 카드 배경에 사용."""
+    palette = palette or {
+        "good": "#1abc9c", "ok": "#3498db", "warn": "#f39c12", "bad": "#e74c3c", "neutral": "#7f8c8d"
+    }
+    if actual is None or bench is None or bench == 0:
+        return palette["neutral"]
+    ratio = actual / bench
+    if higher_better:
+        if ratio >= 1.5: return palette["good"]
+        if ratio >= 1.0: return palette["ok"]
+        if ratio >= 0.7: return palette["warn"]
+        return palette["bad"]
+    else:
+        if ratio <= 0.7: return palette["good"]
+        if ratio <= 1.0: return palette["ok"]
+        if ratio <= 1.5: return palette["warn"]
+        return palette["bad"]
+
+
+def _build_kpi_cards(ctx):
+    """일일 핵심 지표 4개 카드 (지출/구매/ROAS/CPA)."""
+    m = ctx.get("metrics", {})
+    bench = ctx.get("static_benchmark_2026_kr_food", {})
+
+    spend = m.get("spend")
+    purchases = m.get("purchases")
+    roas = m.get("roas")
+    cpa = m.get("cpa_krw")
+
+    spend_str = f"{int(spend):,}원" if spend else "—"
+    pur_str = f"{int(purchases):,}건" if purchases else "—"
+    pur_value = m.get("purchase_value_krw")
+    pur_value_str = f"매출 {int(pur_value):,}원" if pur_value else ""
+
+    roas_str = f"{roas:.2f}" if roas else "—"
+    roas_color = _verdict_color(roas, bench.get("roas", 2.5), True)
+    roas_sub = f"벤치 {bench.get('roas', 2.5)}"
+
+    cpa_str = f"{int(cpa):,}원" if cpa else "—"
+    cpa_color = _verdict_color(cpa, bench.get("cpa_krw", 30000), False)
+    cpa_sub = f"벤치 {bench.get('cpa_krw', 30000):,}원"
+
+    cards = [
+        _kpi_card("지출", spend_str, "오늘", "#34495e"),
+        _kpi_card("구매", pur_str, pur_value_str or "오늘", "#2c3e50"),
+        _kpi_card("ROAS", roas_str, roas_sub, roas_color),
+        _kpi_card("CPA", cpa_str, cpa_sub, cpa_color),
+    ]
+    return (
+        "<table style='width:100%;border-collapse:separate;border-spacing:8px;margin:0 0 20px 0;'>"
+        "<tr>" + "".join(cards) + "</tr></table>"
+    )
+
+
+def _build_alerts_box(ctx):
+    """플래그·퍼널 약점을 경고 박스로."""
+    flags = ctx.get("auto_flags") or []
+    funnel = ctx.get("funnel_today") or {}
+    drops = funnel.get("drop_offs") or []
+    big_drop = None
+    if drops:
+        valid = [d for d in drops if d.get("drop_off_pct") is not None]
+        if valid:
+            big_drop = max(valid, key=lambda d: d["drop_off_pct"])
+
+    items = []
+    for f in flags:
+        items.append(f"<li style='margin:4px 0;'>{f}</li>")
+    if big_drop:
+        items.append(
+            f"<li style='margin:4px 0;'>퍼널 최대 이탈: "
+            f"<b>{big_drop['from']} → {big_drop['to']}</b> "
+            f"<b>{big_drop['drop_off_pct']:.1f}%</b> 이탈 "
+            f"({big_drop['from_count']:,}→{big_drop['to_count']:,})</li>"
+        )
+
+    if not items:
+        return ""
+
+    return (
+        "<div style='background:#fff8e1;border-left:4px solid #f39c12;padding:14px 18px;border-radius:6px;margin:0 0 20px 0;'>"
+        "<div style='font-weight:700;color:#b8770e;margin-bottom:8px;font-size:14px;'>⚠️ 즉시 확인 필요</div>"
+        f"<ul style='margin:0;padding-left:20px;color:#5d4204;'>{''.join(items)}</ul>"
+        "</div>"
+    )
+
+
+def _wrap_html(body_html, target_date, chart_cids=None, sheet_url="", ctx=None):
     today_label = target_date
     charts_html = _render_charts_block(chart_cids or [])
     sheet_link_html = (
         f"<p>시트: <a href='{sheet_url}'>HeavyLover Meta Ads</a></p>" if sheet_url else ""
     )
+    kpi_html = _build_kpi_cards(ctx) if ctx else ""
+    alerts_html = _build_alerts_box(ctx) if ctx else ""
     return f"""<!DOCTYPE html>
 <html><head><meta charset='utf-8'><title>HeavyLover Meta 광고 일일 심층</title></head>
-<body style='font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;max-width:760px;margin:0 auto;padding:20px;color:#333;line-height:1.55;'>
-<div style='background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:18px 20px;border-radius:6px;margin-bottom:20px;'>
+<body style='font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;max-width:760px;margin:0 auto;padding:20px;color:#333;line-height:1.6;background:#fafbfc;'>
+<div style='background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:20px 22px;border-radius:8px;margin-bottom:22px;box-shadow:0 2px 8px rgba(102,126,234,0.25);'>
   <h1 style='margin:0 0 6px 0;font-size:22px;'>📈 HeavyLover Meta 광고 일일 심층</h1>
   <div style='opacity:0.95;font-size:13px;'>{today_label} · 4역할 페르소나 분석 + 시각화</div>
 </div>
+{kpi_html}
+{alerts_html}
 {charts_html}
+<div style='background:white;padding:20px;border-radius:8px;border:1px solid #e1e4e8;'>
 {body_html}
-<hr style='margin-top:30px;'>
-<div style='font-size:12px;color:#888;'>
+</div>
+<hr style='margin-top:30px;border:none;border-top:1px solid #e1e4e8;'>
+<div style='font-size:12px;color:#888;text-align:center;padding-top:8px;'>
   <p>자동 발송 · GitHub Actions cron (KST 09:00) · 매일 자동</p>
   {sheet_link_html}
 </div>
@@ -292,14 +397,14 @@ def send_daily_email(target_date, metrics, self_bench, flags,
     if analysis:
         body_html = _md_to_html(analysis)
         html = _wrap_html(body_html, target_date, chart_cids=list(charts.keys()),
-                          sheet_url=sheet_url)
+                          sheet_url=sheet_url, ctx=ctx)
         text_body = analysis
         subject = f"📈 HeavyLover Meta 광고 일일 심층 — {target_date}"
     else:
         text_body = _fallback_text(target_date, metrics, flags, err or "분석 실패")
         body_html = _md_to_html(text_body)
         html = _wrap_html(body_html, target_date, chart_cids=list(charts.keys()),
-                          sheet_url=sheet_url)
+                          sheet_url=sheet_url, ctx=ctx)
         subject = f"⚠️ HeavyLover Meta 광고 일일 (fallback) — {target_date}"
 
     try:
