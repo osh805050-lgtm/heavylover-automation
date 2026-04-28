@@ -164,11 +164,12 @@
 ### 자동화 상태 (한눈에)
 | 기능 | 상태 |
 |---|---|
-| 11시 엑셀 생성 + OneDrive + 텔레그램 | ✅ 평일 |
+| 11시 엑셀 생성 + OneDrive + 텔레그램 | ✅ 평일 (SS는 `orders_pending_dispatch` 14일 PAYED 전수 — 누락 0건) |
 | 13시 PlusCL 송장 → 카페24/SS 등록 | ⏳ PlusCL 인증 5개 대기 |
 | 04:00 카페24 OAuth 자동 갱신 | ✅ 매일 |
 | 08:30 시트 sync (카페24 + SS 5상태) | ✅ 매일 |
 | 09:00 재구매 리포트 + 마트 4종 + 텔레그램 | ✅ 매일 (Anthropic 401 시 fallback) |
+| **GitHub push → Vultr 자동 배포** (`.github/workflows/deploy-vultr.yml`) | ✅ `*.py` push 시 SSH→`git reset --hard origin/main`→텔레그램 알림. 콘솔 진입 불필요 |
 | 카페24 N10→N20 / SS 신규→발주확인 | 수동 (API 한계) |
 
 ### 위치 요약
@@ -352,11 +353,11 @@ heavylover-automation/
 4. 같은 키워드 3회+ → `patterns.md` 카테고리 보강 또는 신설
 
 ### 최근 5건 (전체는 failures.md)
-- **2026-04-28** ⑯ | Meta 광고 계정 USD 통화인데 KRW 가정 코드 작성 — 외부 API 첫 응답에서 통화 필드 즉시 확인 + 단가성 필드에 환산 함수 일관 적용
-- **2026-04-28** ⑮ | Meta User Access Token 60일 가정했으나 실제 수 시간 — 외부 API 토큰 수명 공식 문서 확인 후 만료 키워드 자동 감지 + 재발급 안내 박제
-- **2026-04-28** ⑭ | 리팩터링 시 `memory/...` 상대경로를 검증 없이 옮겨 6곳 깨진 링크 — 시스템 자동 로드 자원은 추상명 사용 + 표기 직후 실재 검증
-- **2026-04-28** ⑬ | govt-radar 시·군 한정 19건 통과 — 광역+산하 모두 차단 필요
-- **2026-04-28** ⑤ | 카페24 OAuth refresh_token 만료 사람이 매번 재발급 — 04:00 자동 갱신 cron 신설
+- **2026-04-28** ⑱ | Vultr `/root/heavylover-automation/`이 git clone 아닌 단순 복사 폴더라 git pull 불가 → 어제 SS 패치가 서버 미반영, 오늘 11시 26건 누락 재발. .git 이식 + `deploy-vultr.yml` 자동 배포 신설 — 신규 서버 폴더는 처음부터 git clone, push 후 원격·서버 SHA 이중 검증
+- **2026-04-28** ⑰ | "git push 완료" 보고 후 origin/main 미검증 — push 직후 `git log origin/main`+`서버 git log -1` 이중 실측
+- **2026-04-28** ⑯ | Meta USD vs KRW 가정 — 첫 응답에서 통화 필드 확인, 환산 함수 일관 적용
+- **2026-04-28** ⑮ | Meta User Token 수 시간 만료 — 토큰 수명 공식 문서 확인 + 만료 키워드 자동 감지
+- **2026-04-28** ① | SS hours_back=24 + 평일 cron(1-5)로 금~일 결제분 영구 누락 — 상태 기반(orders_pending_dispatch 14일 PAYED 전수)으로 전환, shippingDueDate<now 별도 카운트
 
 ---
 
