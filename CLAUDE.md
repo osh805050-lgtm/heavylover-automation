@@ -6,7 +6,7 @@
 > - 작업 종류별 회피 규칙: `docs/lessons/patterns.md`
 > - 과거 실수 시간순 로그: `docs/lessons/failures.md`
 > - 영역별 상세 컨텍스트: `docs/context/{infra,blog,ads}.md`
-> - 사용자 환경 박제: `memory/MEMORY.md` 인덱스
+> - 사용자 환경 박제: Claude 메모리 시스템 (시스템 프롬프트 자동 로드 — `auto memory` 섹션)
 
 ---
 
@@ -56,7 +56,7 @@
 
 ### 안전 규칙 요약 (상세는 patterns.md)
 - **§자동화점검** (Pre-flight): API·cron·.env 작업 전 키 존재·토큰 만료·디렉터리 실재·`crontab -l` 실측 확인. 문서 신뢰 금지. → `patterns.md §자동화점검`
-- **§외부API다루기**: raw JSON 1건 출력 후 키 검증 / 페이지네이션 끝까지 / 식별자 인코딩은 공식 문서 / memory/MEMORY.md 사전 훑기. → `patterns.md §외부API다루기`
+- **§외부API다루기**: raw JSON 1건 출력 후 키 검증 / 페이지네이션 끝까지 / 식별자 인코딩은 공식 문서 / Claude 메모리 인덱스(시스템 자동 로드) 사전 훑기. → `patterns.md §외부API다루기`
 - **§엑셀편집**: 색상·폰트·테두리·열너비만 건드림. 수식·freeze panes·숨김·셀 타입 금지. 편집 후 `openpyxl.load_workbook()` 검증. → `patterns.md §엑셀편집`
 - **§출력관리**: 5,000자 초과 우려 시 분할 제안. 분석 리포트는 표+요약 우선. → `patterns.md §출력관리`
 - **§환경컨텍스트**: 메일 분리(Naver=정부지원수신, Gmail=업무발송), Windows 11 + Git Bash/PowerShell, 활성 세션 안 `claude -c`/`-r` 안 먹힘. → `patterns.md §환경컨텍스트`
@@ -65,7 +65,8 @@
 - 승현님이 실수·오류·잘못된 판단·금지사항 위반을 지적하면 → **즉시 `docs/lessons/failures.md` 상단(시간 역순)에 한 줄 누적 기록**
 - 형식: `- **YYYY-MM-DD** ⓝ | {무엇을 잘못했는지} | **하지 말 것**: {회피 규칙}`
 - 추가 시 사용자에게 "failures.md에 기록했습니다" 한 줄 보고
-- 매 세션 시작 시 `patterns.md` 카테고리 인덱스 훑고 작업 종류 매칭. 같은 키워드 3회+ 반복 시 `patterns.md` 카테고리 보강.
+- **작업 시작 전** patterns.md 카테고리 인덱스(8개)와 §0 안전규칙 요약 5개 매칭. hook이 키워드 기반으로 patterns.md 해당 섹션 자동 주입함 (`.claude/hooks/inject-patterns.py`). 같은 키워드 3회+ 반복 시 patterns.md 카테고리 보강.
+- **트리거 어휘 감지**: 사용자 발화에 "실수", "잘못됐어", "오류", "금지", "하지 말랬는데", "또 같은", "왜 또" 등 포함 시 → 즉시 `docs/lessons/failures.md` 상단에 한 줄 append + 사용자에게 "failures.md에 기록했습니다" 보고 (사전 승인 없이 박제. 부정확하면 사용자가 수정 요청).
 
 ---
 
@@ -292,6 +293,8 @@ heavylover-automation/
 ├── CLAUDE.md            ← 본 파일 (코어 컨텍스트만)
 ├── .claude/
 │   ├── agents/          ← 서브에이전트 8개 (blog-writer, meta-ads-analyst, automation-debugger 등)
+│   ├── hooks/           ← UserPromptSubmit hook (inject-patterns.py + test)
+│   ├── settings.json    ← hook 등록 / settings.local.json (권한)과 분리
 │   ├── commands/        ← 슬래시 커맨드 (현재 미생성, 다음 작업)
 │   └── skills/          ← heavylover-voice 등
 ├── *.py                 ← 자동화 스크립트 (run_automation, cafe24_client, naver_client 등)
@@ -330,17 +333,17 @@ heavylover-automation/
 > 회피 패턴 — 작업 종류별 카테고리 8개 (§자동화점검·§외부API다루기·§시간중복처리·§데이터범위와분석분리·§엑셀편집·§출력관리·§지역자격필터·§환경컨텍스트): **`docs/lessons/patterns.md`**
 
 ### 활용 흐름
-1. 작업 시작 전 → 작업 종류 매칭으로 `patterns.md` 카테고리 1~3개 Read
+1. **작업 시작 전** patterns.md 카테고리 인덱스(8개)와 §0 안전규칙 요약 5개 매칭. hook이 키워드 기반으로 해당 섹션 자동 주입 (`.claude/hooks/inject-patterns.py`)
 2. 깊게 들어갈 필요 시 → `failures.md` grep (예: `grep "SS sync" docs/lessons/failures.md`)
 3. 신규 실수 발생 시 → `failures.md` 상단에 한 줄 추가 + 사용자에게 "failures.md에 기록했습니다" 보고
 4. 같은 키워드 3회+ → `patterns.md` 카테고리 보강 또는 신설
 
 ### 최근 5건 (전체는 failures.md)
+- **2026-04-28** ⑭ | 리팩터링 시 `memory/...` 상대경로를 검증 없이 옮겨 6곳 깨진 링크 — 시스템 자동 로드 자원은 추상명 사용 + 표기 직후 실재 검증
 - **2026-04-28** ⑬ | govt-radar 시·군 한정 19건 통과 — 광역+산하 모두 차단 필요
 - **2026-04-28** ⑤ | 카페24 OAuth refresh_token 만료 사람이 매번 재발급 — 04:00 자동 갱신 cron 신설
 - **2026-04-28** ④ | sync_cafe24 매 실행 9건 누적 중복 — cutoff에 ` 00:00` 명시 + 자연키 dedupe
 - **2026-04-28** ③ | SS sync가 PURCHASE_DECIDED만 시트 저장 — 5상태 모두 보관 + 분석 시 컬럼 필터
-- **2026-04-28** ② | SS sync `productOrder.paymentDate` 오매핑 — raw JSON 1건 출력 후 키 검증
 
 ---
 
