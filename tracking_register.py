@@ -228,6 +228,8 @@ def run_from_excel():
             r = register_tracking_cafe24(order_id, item_codes, tracking, CAFE24_LOGEN)
             if r.status_code in (200, 201):
                 cafe24_success += 1
+            elif r.status_code == 422 and "cannot change" in r.text:
+                cafe24_success += 1  # 이미 배송중 등록된 건 — 성공으로 처리
             else:
                 cafe24_fail.append(f"{order_id}: {r.text[:80]}")
         except Exception as e:
@@ -256,20 +258,34 @@ def run_from_excel():
         if fixed_id not in seen_naver:
             seen_naver[fixed_id] = tracking
 
+    import time as _time
     for product_order_id, tracking in seen_naver.items():
-        try:
-            r = register_tracking_naver(product_order_id, tracking, NAVER_LOGEN)
-            if r.status_code == 200:
-                result = r.json().get("data", {})
-                if result.get("successProductOrderIds"):
-                    naver_success += 1
+        for attempt in range(3):  # RATE_LIMIT 시 최대 3회 재시도
+            try:
+                r = register_tracking_naver(product_order_id, tracking, NAVER_LOGEN)
+                if r.status_code == 200:
+                    result = r.json().get("data", {})
+                    if result.get("successProductOrderIds"):
+                        naver_success += 1
+                        break
+                    else:
+                        fail_info = result.get("failProductOrderInfos", [{}])
+                        msg = fail_info[0].get("message", "fail") if fail_info else "fail"
+                        if "RATE_LIMIT" in str(r.text) and attempt < 2:
+                            _time.sleep(3)
+                            continue
+                        naver_fail.append(f"{product_order_id}: {msg}")
+                        break
+                elif "RATE_LIMIT" in r.text and attempt < 2:
+                    _time.sleep(3)
+                    continue
                 else:
-                    fail_info = result.get("failProductOrderInfos", [{}])
-                    naver_fail.append(f"{product_order_id}: {fail_info[0].get('message','fail')}")
-            else:
-                naver_fail.append(f"{product_order_id}: {r.text[:80]}")
-        except Exception as e:
-            naver_fail.append(f"{product_order_id}: {e}")
+                    naver_fail.append(f"{product_order_id}: {r.text[:80]}")
+                    break
+            except Exception as e:
+                naver_fail.append(f"{product_order_id}: {e}")
+                break
+        _time.sleep(0.5)  # 호출 간격
 
     # 5) 완료 알림
     result_msg = (
