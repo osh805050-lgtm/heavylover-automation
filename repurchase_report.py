@@ -573,6 +573,37 @@ def write_marts(spreadsheet, gt: dict, tabs: dict):
     ws.update(values=[MART_SUMMARY_HEADER] + summary_rows, range_name="A1")
     _log(f"  mart_summary: {len(summary_rows)}행")
 
+    # mart_* 탭 구분 처리: 탭 색상 회색 설정 (내부용임을 시각적으로 표시)
+    _style_mart_tabs(spreadsheet)
+
+
+_MART_TAB_NAMES = ["mart_monthly", "mart_cohort", "mart_stage", "mart_summary"]
+# 회색 탭 색상 (RGB 0~1)
+_MART_TAB_COLOR = {"red": 0.6, "green": 0.6, "blue": 0.6}
+
+
+def _style_mart_tabs(spreadsheet):
+    """mart_* 탭을 회색으로 표시해 내부용 탭임을 구분."""
+    requests = []
+    for ws in spreadsheet.worksheets():
+        if ws.title in _MART_TAB_NAMES:
+            requests.append({
+                "updateSheetProperties": {
+                    "properties": {
+                        "sheetId": ws.id,
+                        "tabColor": _MART_TAB_COLOR,
+                        "tabColorStyle": {"rgbColor": _MART_TAB_COLOR},
+                    },
+                    "fields": "tabColor,tabColorStyle",
+                }
+            })
+    if requests:
+        try:
+            spreadsheet.batch_update({"requests": requests})
+            _log(f"  mart 탭 색상 회색 처리 ({len(requests)}개)")
+        except Exception as e:
+            _log(f"  ⚠️ mart 탭 색상 실패: {e}")
+
 
 # ============================================================
 # 탭 정리 (채널별 중복 탭 숨김)
@@ -788,8 +819,11 @@ def write_dashboard(spreadsheet, gt: dict):
     for a in actions:
         rows.append([a])
 
-    # 시트에 쓰기
+    # ── 시트에 쓰기 ─────────────────────────────────────────
     ws.update(values=rows, range_name="A1")
+
+    # ── 셀 포맷 적용 ─────────────────────────────────────────
+    _apply_dashboard_formats(ws, spreadsheet, rows, conv_rate, m1_recent, p50_num, mom_pct)
     _log(f"  [📊 대시보드] 갱신 완료 ({len(rows)}행)")
 
 
@@ -852,6 +886,144 @@ def _build_action_points(conv_rate, m1_recent, p50_num, mom_pct, cohort_trend) -
         points.append("현재 주요 이상 신호 없음. 정기 모니터링 유지.")
 
     return points
+
+
+# 색상 상수 (RGB 0~1)
+_COLOR_GREEN  = {"red": 0.851, "green": 0.918, "blue": 0.827}  # 연초록
+_COLOR_YELLOW = {"red": 1.0,   "green": 0.949, "blue": 0.8}    # 연노랑
+_COLOR_RED    = {"red": 0.957, "green": 0.8,   "blue": 0.8}    # 연빨강
+_COLOR_HEADER = {"red": 0.235, "green": 0.522, "blue": 0.776}  # 헤비로버 블루
+_COLOR_WHITE  = {"red": 1.0,   "green": 1.0,   "blue": 1.0}
+
+
+def _rgb_for_status(value, good, warn, higher_is_better=True):
+    """KPI 값 → 배경색 RGB dict."""
+    if value is None:
+        return _COLOR_WHITE
+    try:
+        v = float(str(value).replace("%", "").replace("일", "").strip())
+    except (TypeError, ValueError):
+        return _COLOR_WHITE
+    if higher_is_better:
+        if v >= good:
+            return _COLOR_GREEN
+        if v >= warn:
+            return _COLOR_YELLOW
+        return _COLOR_RED
+    else:
+        if v <= good:
+            return _COLOR_GREEN
+        if v <= warn:
+            return _COLOR_YELLOW
+        return _COLOR_RED
+
+
+def _cell_fmt(bg: dict, bold=False, font_size=10) -> dict:
+    fmt = {
+        "backgroundColor": bg,
+        "textFormat": {"bold": bold, "fontSize": font_size},
+    }
+    return fmt
+
+
+def _apply_dashboard_formats(ws, spreadsheet, rows: list, conv_rate, m1_recent, p50_num, mom_pct):
+    """대시보드 셀 배경색·볼드·폰트 크기 일괄 적용."""
+    sheet_id = ws.id
+    requests = []
+
+    def _row_range(row_idx: int, col_start=0, col_end=9):
+        """0-indexed row, 0-indexed col → GridRange dict."""
+        return {
+            "sheetId": sheet_id,
+            "startRowIndex": row_idx,
+            "endRowIndex": row_idx + 1,
+            "startColumnIndex": col_start,
+            "endColumnIndex": col_end + 1,
+        }
+
+    def _fmt_req(row_idx, bg, bold=False, font_size=10, col_start=0, col_end=9):
+        return {
+            "repeatCell": {
+                "range": _row_range(row_idx, col_start, col_end),
+                "cell": {"userEnteredFormat": _cell_fmt(bg, bold, font_size)},
+                "fields": "userEnteredFormat(backgroundColor,textFormat)",
+            }
+        }
+
+    # 행 1 (0-idx=0): 제목 — 블루 배경 + 흰 볼드
+    requests.append({
+        "repeatCell": {
+            "range": _row_range(0),
+            "cell": {"userEnteredFormat": {
+                "backgroundColor": _COLOR_HEADER,
+                "textFormat": {"bold": True, "fontSize": 13, "foregroundColor": _COLOR_WHITE},
+            }},
+            "fields": "userEnteredFormat(backgroundColor,textFormat)",
+        }
+    })
+
+    # 행 3 (0-idx=2): KPI 테이블 헤더 — 진회색 배경 볼드
+    requests.append(_fmt_req(2, {"red": 0.9, "green": 0.9, "blue": 0.9}, bold=True))
+
+    # KPI 카드 행 4~7 (0-idx=3~6): 상태 컬럼(D, col=3)에 색상
+    kpi_colors = [
+        # 당월 재구매 매출 — MoM 기준
+        _rgb_for_status(mom_pct, 0, -10, True),
+        # 1→2 전환율
+        _rgb_for_status(conv_rate, 30, 20, True),
+        # M+1 리텐션
+        _rgb_for_status(m1_recent, 20, 14, True),
+        # P50 간격
+        _rgb_for_status(p50_num, 15, 25, False),
+    ]
+    for i, color in enumerate(kpi_colors):
+        row_idx = 3 + i
+        # 상태 컬럼(D=col 3)만 색상
+        requests.append(_fmt_req(row_idx, color, col_start=3, col_end=3))
+        # 지표명 컬럼(A=col 0)은 연한 회색
+        requests.append(_fmt_req(row_idx, {"red": 0.97, "green": 0.97, "blue": 0.97}, col_start=0, col_end=0))
+
+    # 섹션 헤더 행들 찾아서 볼드 처리 (rows에서 "──" 포함 행)
+    for idx, row in enumerate(rows):
+        if row and isinstance(row[0], str) and "──" in row[0]:
+            requests.append(_fmt_req(idx, {"red": 0.933, "green": 0.933, "blue": 0.933}, bold=True))
+
+    # 코호트 전환율 상태 컬럼 (E=col 4) 색상
+    # rows 순서: 제목(0), 빈(1), KPI헤더(2), KPI×4(3~6), 빈(7), 월별헤더(8), 월별컬럼(9), 월별data, 빈, 코호트헤더, 코호트컬럼, 코호트data...
+    cohort_header_idx = None
+    for idx, row in enumerate(rows):
+        if row and isinstance(row[0], str) and "코호트 전환율" in row[0]:
+            cohort_header_idx = idx
+            break
+    if cohort_header_idx is not None:
+        # 컬럼 헤더 행 다음부터 데이터 행
+        col_hdr_idx = cohort_header_idx + 1
+        requests.append(_fmt_req(col_hdr_idx, {"red": 0.9, "green": 0.9, "blue": 0.9}, bold=True))
+        # 데이터 행: 빈 행 또는 "──" 나올 때까지
+        r = col_hdr_idx + 1
+        while r < len(rows):
+            row = rows[r]
+            if not row or not row[0] or (isinstance(row[0], str) and "──" in row[0]):
+                break
+            # E 컬럼(col=4) 상태
+            status_text = row[4] if len(row) > 4 else None
+            if isinstance(status_text, str):
+                if "🟢" in status_text or "양호" in status_text:
+                    color = _COLOR_GREEN
+                elif "🟡" in status_text or "주의" in status_text:
+                    color = _COLOR_YELLOW
+                elif "🔴" in status_text or "위험" in status_text:
+                    color = _COLOR_RED
+                else:
+                    color = _COLOR_WHITE
+                requests.append(_fmt_req(r, color, col_start=4, col_end=4))
+            r += 1
+
+    if requests:
+        try:
+            spreadsheet.batch_update({"requests": requests})
+        except Exception as e:
+            _log(f"  ⚠️ 포맷 적용 실패: {e}")
 
 
 # ============================================================
