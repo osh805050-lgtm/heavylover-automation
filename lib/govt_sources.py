@@ -625,7 +625,86 @@ def fetch_gyeonggi():
     return items
 
 
-# ==================== 통합 (15개 소스) ====================
+# ==================== 16. 경기테크노파크 (GTEK) ====================
+def fetch_gtek():
+    """경기테크노파크 — 경기도 입주공간·장비지원·스마트공장"""
+    url = "https://www.gtek.or.kr/gtek/board/list.do?bbsId=BBSMSTR_000000000027"
+    r = _safe_get(url)
+    if not r:
+        return []
+
+    soup = BeautifulSoup(r.text, "lxml")
+    items = []
+
+    for row in soup.select("table tbody tr"):
+        title_el = row.select_one("a")
+        if not title_el:
+            continue
+        title = title_el.get_text(" ", strip=True)
+        if not title or len(title) < 5:
+            continue
+        href = title_el.get("href", "")
+        full_url = urljoin(url, href) if href else url
+
+        text = row.get_text(" ", strip=True)
+        deadline = _parse_date(text)
+
+        items.append({
+            "source": "경기테크노파크",
+            "title": title,
+            "url": full_url,
+            "agency": "경기테크노파크",
+            "deadline": deadline,
+            "posted_date": None,
+            "raw": {},
+        })
+
+    return items[:30]
+
+
+# ==================== 17. 중소기업유통센터 (SBDC/KODMA) ====================
+def fetch_sbdc():
+    """중소기업유통센터 — D2C 온라인유통·판로개척 전문"""
+    url = "https://www.kodma.or.kr/usr/pbancInfo/selectPbancInfoList.do"
+    r = _safe_get(url)
+    if not r:
+        # 메인 페이지 폴백
+        url = "https://www.kodma.or.kr"
+        r = _safe_get(url)
+        if not r:
+            return []
+
+    soup = BeautifulSoup(r.text, "lxml")
+    items = []
+
+    for link in soup.select("a"):
+        text = link.get_text(strip=True)
+        if not text or len(text) < 8:
+            continue
+        if not any(k in text for k in ["지원", "모집", "공고", "신청", "판로", "유통"]):
+            continue
+        href = link.get("href", "")
+        if not href or href.startswith("#"):
+            continue
+        full_url = urljoin(url, href)
+
+        items.append({
+            "source": "중소기업유통센터",
+            "title": text,
+            "url": full_url,
+            "agency": "중소기업유통센터",
+            "deadline": None,
+            "posted_date": None,
+            "raw": {},
+        })
+
+        if len(items) >= 30:
+            break
+
+    return items
+
+
+# ==================== 통합 (17개 소스) ====================
 ALL_SOURCES = [
     ("기업마당", fetch_bizinfo),                # 1
     ("K-Startup", fetch_kstartup),              # 2
@@ -642,6 +721,8 @@ ALL_SOURCES = [
     ("농림축산식품부", fetch_mafra),             # 13
     ("aT(농수산식품유통공사)", fetch_at),         # 14
     ("경기도", fetch_gyeonggi),                  # 15
+    ("경기테크노파크", fetch_gtek),              # 16
+    ("중소기업유통센터", fetch_sbdc),            # 17
 ]
 
 

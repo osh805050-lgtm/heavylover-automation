@@ -82,7 +82,7 @@ def collect_layer2(log, days_back=2):
                 "source": f"메일({it['sender'][:30]})",
                 "title": it["subject"],
                 "url": (it["links"][0] if it["links"] else ""),
-                "agency": None,
+                "agency": _agency_from_sender(it["sender"]),
                 "deadline": it.get("deadline"),
                 "posted_date": it.get("received_at", "").split(" ")[0] if it.get("received_at") else None,
                 "body_excerpt": it.get("body_excerpt", ""),
@@ -94,6 +94,33 @@ def collect_layer2(log, days_back=2):
         log.error(f"Layer 2 실패: {e}")
         log.error(traceback.format_exc())
         return []
+
+
+_SENDER_AGENCY_MAP = [
+    ("ypa.or.kr", "용인시산업진흥원"),
+    ("gbsa.or.kr", "경기도경제과학진흥원"),
+    ("gtek.or.kr", "경기테크노파크"),
+    ("at.or.kr", "농수산식품유통공사"),
+    ("bizinfo.go.kr", "중소벤처기업부"),
+    ("mss.go.kr", "중소벤처기업부"),
+    ("kised.or.kr", "창업진흥원"),
+    ("kotra.or.kr", "KOTRA"),
+    ("mafra.go.kr", "농림축산식품부"),
+    ("sbiz.or.kr", "소상공인시장진흥공단"),
+    ("sbc.or.kr", "소상공인시장진흥공단"),
+    ("nipa.kr", "정보통신산업진흥원"),
+    ("smtech.go.kr", "중소기업기술정보진흥원"),
+    ("gg.go.kr", "경기도"),
+]
+
+
+def _agency_from_sender(sender: str) -> str | None:
+    """메일 발신자 주소에서 발주기관명 추정."""
+    s = sender.lower()
+    for domain, name in _SENDER_AGENCY_MAP:
+        if domain in s:
+            return name
+    return None
 
 
 def _clean_body(text, max_len=180):
@@ -521,8 +548,9 @@ def main():
                 if e == "no":
                     s["tier"] = "자격미달 (LLM 판정)"
                     s["tags"] = (s.get("tags") or []) + ["LLM_INELIGIBLE"]
-                elif e == "unsure" and len(body.strip()) < 50:
+                elif e == "unsure" and len(body.strip()) < 50 and not (s.get("source") or "").startswith("메일"):
                     # 본문 없어 LLM이 판단 못 한 항목 → 강등 (검증 불가)
+                    # 단, 이메일 소스는 원문 링크 클릭 유도 — 강등 제외
                     s["tier"] = "검증불가 (본문 없음)"
                     s["tags"] = (s.get("tags") or []) + ["UNVERIFIABLE_NO_BODY"]
                     unverifiable_count += 1
