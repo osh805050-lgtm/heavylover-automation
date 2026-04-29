@@ -26,10 +26,10 @@ import cafe24_client
 import naver_client
 import telegram_client
 
-# 더다 송장 엑셀 OneDrive 경로 (rclone remote 기준)
+# 더다 송장 엑셀 OneDrive 경로 (rclone remote 기준) — 바탕화면
 ONEDRIVE_TRACKING_DIR = os.getenv(
     "ONEDRIVE_TRACKING_DIR",
-    "heavylover_onedrive:바탕 화면/사업/더다 3pl/3PL/",
+    "heavylover_onedrive:바탕 화면/",
 )
 # 서버 로컬 다운로드 위치
 LOCAL_TRACKING_DIR = Path(os.getenv("LOCAL_TRACKING_DIR", "/tmp/tracking_excel"))
