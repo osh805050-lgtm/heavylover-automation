@@ -108,9 +108,8 @@ def read_tracking_excel(path: Path):
         # Decimal로 파싱해야 부동소수점 오차 없이 정확한 정수 복원 가능
         if "E" in s.upper() and "." in s:
             try:
-                from decimal import Decimal, ROUND_HALF_UP
-                d = Decimal(s).to_integral_value(rounding=ROUND_HALF_UP)
-                return str(d)
+                from decimal import Decimal
+                return str(int(Decimal(s)))
             except Exception:
                 pass
         # 일반 숫자 (float → int)
