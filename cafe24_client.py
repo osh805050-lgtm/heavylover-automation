@@ -12,6 +12,12 @@ from dotenv import load_dotenv, set_key
 ENV_PATH = Path(__file__).parent / ".env"
 API_VERSION = "2026-03-01"
 
+# 토큰 갱신 시 동기화할 추가 .env 경로 (두 폴더가 각각 cafe24_client.py를 갖고 있으므로)
+_EXTRA_ENV_PATHS = [
+    Path("/root/heavylover-automation/.env"),
+    Path("/root/heavylover-repurchase/.env"),
+]
+
 
 def _get_env():
     load_dotenv(ENV_PATH, override=True)
@@ -47,9 +53,16 @@ def refresh_access_token():
         raise RuntimeError(f"토큰 갱신 실패: {r.text}")
 
     result = r.json()
-    set_key(str(ENV_PATH), "CAFE24_ACCESS_TOKEN", result["access_token"])
-    set_key(str(ENV_PATH), "CAFE24_REFRESH_TOKEN", result["refresh_token"])
-    return result["access_token"]
+    access = result["access_token"]
+    refresh = result["refresh_token"]
+
+    # 현재 폴더 .env + 알려진 모든 경로에 동기화 (두 폴더 분리 구조 대응)
+    targets = {ENV_PATH} | {p for p in _EXTRA_ENV_PATHS if p.exists()}
+    for p in targets:
+        set_key(str(p), "CAFE24_ACCESS_TOKEN", access)
+        set_key(str(p), "CAFE24_REFRESH_TOKEN", refresh)
+
+    return access
 
 
 def _api_get(path, params=None):
