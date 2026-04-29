@@ -1,6 +1,6 @@
 # CLAUDE.md — HeavyLover 운영 컨텍스트
 
-**최종 업데이트**: 2026-04-28 (rev. 7) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
+**최종 업데이트**: 2026-04-29 (rev. 9) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
 
 > **외부 컨텍스트 우선 참조 규칙**: 정보 부족 시 추측 금지. 다음 위치를 먼저 Glob/Read 후 결정한다.
 > - 작업 종류별 회피 규칙: `docs/lessons/patterns.md`
@@ -132,26 +132,30 @@
 - 2026 Q1 월평균: 약 2,221만 원
 - 2025 연매출: 약 2.0억 원
 - 2026 목표: 연 10억 (자본 조달이 병목)
+- **흑자 진입선: 월 5,000만 원** (현재 3,800만 → 갭 1,200만)
 
-### 재구매 (CRM 실측, repurchase_v5_4.gs)
-- 1→2회 전환: 23~30%
-- 2→3회 전환: 약 40%
-- 90일 전환 (3개월 평균): 35.0%
-- 재구매 간격 P50: 약 15일
-- 재구매 간격 P90: 31~62일
-- 재구매 AOV: 초구매 대비 약 2배
-- M+1 코호트 리텐션: 약 14% (벤치 20~30% 미달, **개선 1순위**)
-- 1회 후 이탈률: 약 76.6%
+### 재구매 (CRM 실측 — 2026-04-29 분석 기준)
+- 1→2회 전환: **23.2%** (실측)
+- 재구매 간격 P50: **10일** (기존 15일 수정 — unit_economics.json 실측)
+- 재구매 AOV: 신규 67,420원 / 재구매 86,529원 (×1.28)
+- M+1 코호트 리텐션: **실측 평균 12.8%** (가정치 14% 아님. 2026-03 코호트 9.8% — K2 경계)
+- 1회 후 이탈률: 76.8%
+- 카페24 정착 고객(2회+): 평균 3.4회 구매
+- LTV: 31,687원 / CAC: 17,717원 / LTV/CAC: 1.79
+- **이상치**: 2026-02 코호트 M+1 29.5% — 원인 미분석, 재현 가능성 高 → 분석 선행 필요
 
-### 광고·채널
-- Meta ROAS: 약 3.5 (글로벌 F&B 평균 1.85~2.0 상회)
-- Cafe24 유입: 100% Meta 광고 (오가닉 미미)
-- 스마트스토어: 오가닉, 광고 없음
-- 브랜드 검색량: 월 약 260 → 파워링크 집중
+### 광고·채널 (2026-04-29 실측)
+- Meta ROAS: 3.77 lifetime / **3.51 last30** (하락 추세 주의)
+- 위너: 26.2.21 abo ROAS 6.20, AOV 81,918원
+- 최하위: ROAS 2.33 → 위너 대비 3.68배 격차
+- 26.4.2 스케일 abo: ROAS **3.02** → K1 기준선(2.8)까지 22bp 여유
+- **퍼널 최대 병목: 결제→구매 49.85%** — 광고비 절반이 결제 단계에서 소실
+- SS 재구매율 43% vs 카페24 21% — SS가 Meta 광고 지연 효과일 가능성 미검증
+- 브랜드 검색량: 월 약 260
 
 ### 단위 경제학
-- 신규 획득: 손익분기 근처
-- 마진 회수: 재구매 (LTV 기반)
+- 마진율: 31~33% (가중평균 판매가 8,993원 / COGS 5,697원)
+- LTV 1회 구매 기여 69% → 1회 구매만으로 광고비 부분 회수
 - ROAS 3.3+ 유지 시 광고 스케일업 타당
 
 ---
@@ -164,11 +168,11 @@
 ### 자동화 상태 (한눈에)
 | 기능 | 상태 |
 |---|---|
-| 11시 엑셀 생성 + OneDrive + 텔레그램 | ✅ 평일 (SS는 `orders_pending_dispatch` 14일 PAYED 전수 — 누락 0건) |
-| 13시 PlusCL 송장 → 카페24/SS 등록 | ⏳ PlusCL 인증 5개 대기 |
+| 11시 엑셀 생성 + OneDrive + 텔레그램 | ✅ 평일 (SS는 `orders_pending_dispatch` 14일 PAYED 전수 — 누락 0건, 알림은 전화번호 기준 N명) |
+| 송장 등록 (`/tracking` 명령) | ✅ 바탕화면 xls → rclone → 카페24/SS 자동 등록 (PlusCL 인증 발급 시 병행 가능) |
 | 04:00 카페24 OAuth 자동 갱신 | ✅ 매일 |
 | 08:30 시트 sync (카페24 + SS 5상태) | ✅ 매일 |
-| 09:00 재구매 리포트 + 마트 4종 + 텔레그램 | ✅ 매일 (Anthropic 401 시 fallback) |
+| 09:00 재구매 리포트 + 마트 4종 + 📊대시보드 + 텔레그램 | ✅ 매일 (Anthropic 401 시 fallback) |
 | **GitHub push → Vultr 자동 배포** (`.github/workflows/deploy-vultr.yml`) | ✅ `*.py` push 시 SSH→`git reset --hard origin/main`→텔레그램 알림. 콘솔 진입 불필요 |
 | 카페24 N10→N20 / SS 신규→발주확인 | 수동 (API 한계) |
 
@@ -219,27 +223,34 @@
 > 상세 — 벤치마크 표, 자동 플래그, CBO/ABO 전략, ASC 활성화 조건, 스케일업 정책 전부: **`docs/context/ads.md`**
 > 자동화 코드 동기 정본: `docs/meta-ads/benchmarks.md` (`meta_ads_report.py` 상수와 동기). 작업 시: meta-ads-analyst 서브에이전트 호출.
 
-### 자동화 (2026-04-28 가동, 가독성 개선판 + 5개월 백필 완료)
+### 자동화 (2026-04-29 E2E 검증 완료)
 
 **3가지 cron**:
-- 매일 09:00 KST — `meta_ads_report.py` (일일 + 텔레그램 + 이메일 4역할)
-- 매주 월요일 09:00 KST — `meta_ads_winner_patterns.py` (위너 패턴) + `refresh_meta_token.py` (60일 자동 갱신, 앱 시크릿 후 가동)
+- 매일 09:00 KST — `meta_ads_report.py` (일일 + 텔레그램 ads채널 + 이메일 4역할)
+- 매주 월요일 09:00 KST — `meta_ads_winner_patterns.py` (위너 패턴) + `refresh_meta_token.py` (토큰 상태 체크)
 - **매주 일요일 09:00 KST — `meta_ads_yearly_report.py` (1년 종합 4역할 + 퍼널 이탈 + 계절성)** ⭐
 
-**데이터 흐름**: Graph API → metrics 계산 → KRW 환산(1,450원/USD 고정) → CSV+Sheets 누적 → 자사 P50(14일+) → Claude 4역할(opus-4-7, 4000토큰) → 텔레그램 + 이메일 4역할 심층 + 차트 4종 인라인
+**데이터 흐름**: Graph API → metrics 계산 → KRW 환산(1,450원/USD 고정) → CSV+Sheets 누적 → 자사 P50(14일+) → Claude 4역할(opus-4-7, 4000토큰) → 텔레그램 ads채널 + 이메일 4역할 심층 + 차트 4종 인라인
 
 **가독성 표준 (2026-04-28 v2)**:
 - 텔레그램: 2단 구조 (헤드라인 → 효율 → 플래그 → 퍼널 → Claude 액션) + 색상 이모지 판정 (🟢🔵🟡🔴) + ◆ 섹션 헤더
 - 이메일: KPI 카드 4개(지출·매출·ROAS·CPA, 배경색이 판정값) + 약점/강점 경고 박스(빨강/초록 좌측바) + 본문 흰 카드 격리
 
 **광고 계정**: `act_445075134545178` (HEAVY ROVER, 통화 USD → KRW 환산)
-**토큰**: User Access Token (Graph API Explorer, 수 시간 만료) → long-lived 60일 갱신은 `META_APP_ID`/`META_APP_SECRET` 등록 후
+**토큰**: System User Token (무기한, 만료 없음) ✅ — 2026-04-29 발급 완료. `META_APP_ID`/`META_APP_SECRET` 미등록이므로 `refresh_meta_token.py`는 상태 체크만
 **수신자 (EMAIL_TO)**: `osh805050@gmail.com`, `ohkm8050@naver.com`, `musclecipe@naver.com` (3명, 이메일 멀티 발송)
 
+**텔레그램 4채널 분리 (2026-04-29 완료)**:
+- ops: 발주·송장·OAuth 갱신·자동화 오류 (기존 단일 봇 역할 유지 + 채널 분리)
+- report: 재구매 09:05 요약
+- ads: Meta 광고 일일/주간/종합 KPI ← 광고 리포트 수신 채널
+- govt: 정부지원 적합 공고
+- `.env` + GitHub Secrets 9개 키 모두 등록 완료
+
 **데이터 저장**:
-- `data/meta_ads/daily.csv` — 계정 합계 (현재 106일 누적, 2025-11-27~2026-04-27)
-- `data/meta_ads/daily_campaign.csv` — 캠페인별 (현재 204행 / 13개 캠페인)
-- `data/meta_ads/raw/{date}.json` — 감사용 원본 230개 (퍼널 분석 입력, .gitignore)
+- `data/meta_ads/daily.csv` — 계정 합계 (107일 누적, 2025-11-27~2026-04-28)
+- `data/meta_ads/daily_campaign.csv` — 캠페인별 (205행 / 13개 캠페인)
+- `data/meta_ads/raw/{date}.json` — 감사용 원본 (퍼널 분석 입력, .gitignore)
 - `data/meta_ads/winner_patterns.jsonl` — 위너 광고 누적
 - Google Sheets — 재구매 시트와 공유 (`GOOGLE_SHEETS_ID=REPURCHASE_SHEET_ID`):
   - `Meta_Ads_Daily` / `Meta_Ads_Daily_Campaign` / `Meta_Ads_Winners`
@@ -279,7 +290,10 @@
    - 지식재산바우처 (상표)
 5. M+1 리텐션 14% → 20~25% 개선 (자본 효율 최고 레버)
 6. 등기사항전부증명서 리뷰
-7. ~~Meta Ads API → Apps Script 자동 수집~~ ✅ 완료 (2026-04-28, GitHub Actions cron 가동)
+7. ~~Meta Ads API 자동화~~ ✅ 완료 (2026-04-29 E2E 검증)
+   - System User Token (무기한) 발급 + GitHub Secrets 등록
+   - 텔레그램 4채널 분리 완료 (ops/report/ads/govt)
+   - 매일 09:00 KST 일일 리포트 + 매주 일요일 종합 리포트 자동 가동
 
 ### 검토 (2순위)
 - 모두의 아이디어 경진대회 — 전세 사기 방지 시스템 지원
@@ -307,14 +321,20 @@ heavylover-automation/
 ├── CLAUDE.md            ← 본 파일 (코어 컨텍스트만)
 ├── .claude/
 │   ├── agents/          ← 서브에이전트 8개 (blog-writer, meta-ads-analyst, automation-debugger 등)
+│   │   └── proposal/    ← 사업계획서 7역할 (drafter, rubric-mapper, consistency, budget-auditor, competitor, fact-checker, devil)
 │   ├── hooks/           ← UserPromptSubmit hook (inject-patterns.py + test)
 │   ├── settings.json    ← hook 등록 / settings.local.json (권한)과 분리
-│   ├── commands/        ← 슬래시 커맨드 (현재 미생성, 다음 작업)
+│   ├── commands/        ← 슬래시 커맨드 (proposal.md = /proposal 사업명)
 │   └── skills/          ← heavylover-voice 등
 ├── *.py                 ← 자동화 스크립트 (run_automation, cafe24_client, naver_client 등)
 ├── apps_script_main.gs / repurchase_v5_4.gs
 ├── .github/workflows/   ← Meta 광고 cron + **deploy-vultr.yml (자동 배포)**
 ├── data/{raw,reports}/
+├── proposals/           ← 사업계획서 시스템 (PSST 7역할 2라운드)
+│   ├── README.md
+│   ├── knowledge/{psst-rubric.json, heavylover-skeleton.md, precedents/, legacy/, submissions-log/}
+│   ├── tools/{parse_legacy_docs.py, crawl_precedents.py, extract_kised_list.py}
+│   └── outputs/         ← v0~final 산출물
 └── docs/
     ├── context/         ← 영역별 상세 컨텍스트 (infra, blog, ads)
     ├── lessons/         ← 실수 누적·승격 (failures.md, patterns.md)
