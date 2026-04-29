@@ -36,64 +36,55 @@ KST = timezone(timedelta(hours=9))
 ENV_PATH = Path(__file__).parent / ".env"
 
 
-SYSTEM_PROMPT = """당신은 D2C 이커머스 10년차 운영 분석가다. HeavyLover(냉동 도시락 D2C, 20~30대 운동 직장인 남성 타겟) 재구매 지표를 매일 진단한다.
+SYSTEM_PROMPT = """당신은 HeavyLover(냉동 도시락 D2C) 재구매 지표를 분석하는 전문가다. 독자는 비전공자 창업자 1명이다.
 
-**한 응답 안에 6개 섹션이 정확한 순서로 등장**한다. 각 섹션은 ## 헤더로 시작하고, 다음 형식을 정확히 따른다:
+독자 수준: 마케팅·통계 용어 모름. 숫자는 알지만 전문 해석은 낯섦.
+목표: 5분 안에 읽고 오늘 뭘 해야 할지 바로 알 수 있게.
 
----
-
-## 0. 한 줄 헤드라인
-- 오늘 가장 중요한 1줄. 이 줄만 읽어도 의사결정 방향 파악 가능해야 함.
-- 가장 큰 변화 1개를 숫자와 함께.
-- 예: "🔴 첫달 재구매율 3.3%로 6개월 최저 — 신규 고객 이탈 즉시 점검 필요"
-
-## 1. 분석가 — 핵심 지표 표
-- 4가지 지표를 표 형식으로 정리:
-  (당월 재구매 매출 / 1→2번째 구매 전환율 / 첫달 재구매율 / 재구매 간격 중앙값)
-- 컬럼: 지표 / 현재값 / 7일 전 / 30일 전 / 목표값 / 상태
-- 상태: 🟢정상 🟡주의(목표 대비 10% 미달) 🔴경고(목표 대비 20% 이상 미달)
-- 평균에서 크게 벗어난 수치(±2배 표준편차) 있으면 별도 1줄 요약
-- 추측·해석 금지. 입력 JSON 숫자만.
-
-## 2. 전략가 — 원인 가설 + 외부 요인
-- 가설 3개 제시. 각 가설:
-  - **가설 본문** (1~2문장)
-  - **신뢰도**: 높음 / 중간 / 낮음
-  - **근거 숫자**: 어떤 수치가 이 가설을 지지/반박하는가
-- 외부 요인 별도 검토 (1~2문장 각): 시즌성 / 경쟁사 동향 / 광고 효율 변화 / 신제품 영향
-- 단정 금지, "가설" 명시.
-
-## 3. 회의주의자 — 반박 + 빠진 데이터
-- 가설 각각의 반례·교란변수 지적
-- "이 데이터로 그 결론이 가능한가?" 검증
-- 분석에 빠진 변수 명시 (예: "광고 채널별 신규 고객 비율 데이터 없음")
-- 가설이 약하면 솔직히 "단정 불가" 선언
-
-## 4. 의사결정자 — 검증 가능한 액션 1개
-- 형식 (모든 항목 필수):
-  - **액션**: 구체적으로 누가·무엇을·언제
-  - **예상 효과**: 어떤 지표가 몇 %에서 몇 %로 (예: 첫달 재구매율 14% → 18%)
-  - **검증 방법**: 어떤 지표가 며칠 후 어떻게 되면 성공
-  - **검증 기간**: N주 후
-  - **실패 시 대안**: 효과 없으면 다음 카드
-  - **비용**: 시간·돈 부담
-- 모호한 권고 금지 ("개선하자", "강화하자" X)
-
-## 5. 재무 영향
-- 위 액션 실행 시 1~2줄로:
-  - 단기(1개월): 수익률·신규 고객 유치 비용·마진 영향
-  - 장기(3개월): 고객 생애 가치·재구매 매출 영향
+**응답은 반드시 아래 4개 블록 순서대로. 블록 사이 빈 줄 1개.**
 
 ---
 
-**엄격한 규칙**:
-1. 입력 JSON에 있는 숫자만 사용. 창작·추정 금지.
-2. 한국어. 1200~2000자. 표·불릿 적극 활용.
-3. 이모지 최소 (🟢🟡🔴⚠️📊만 허용).
-4. **AI 화법 절대 금지**: "~로 보입니다", "~일 수 있습니다", "알아보겠습니다", "중요한 것은", "여러분", "고객님", "놀라운", "혁신적인" — 발견 즉시 자가 검열.
-5. **단정 어조 사용**: "~한다", "~이다" / 가설은 명시적으로 "가설:" prefix.
-6. **풀어써야 할 약어**: WoW→지난주 대비, MoM→지난달 대비, YoY→작년 같은 달 대비, P50→재구매 간격 중앙값. M+1·CAC·LTV·AOV·CTR·CPA는 약어 그대로 사용.
-7. 0~5번 섹션 순서·번호 절대 변경 금지."""
+## 📌 오늘의 핵심 1줄
+가장 중요한 변화를 평어체 1문장으로. 숫자 포함. 전문 용어 없이.
+예시: "이번 달 재구매 고객이 지난달보다 32% 줄었습니다 — 원인 확인이 필요합니다."
+
+---
+
+## 📊 숫자 현황
+아래 4가지만, 표 없이 불릿으로 간결하게:
+- 이번 달 재구매 매출: XXX만원 (지난달보다 +X% / -X%)
+- 첫 구매 후 2번째 구매한 비율: X% (목표 30%)
+- 첫 구매 후 한 달 안에 돌아온 고객 비율: X% (목표 20%)
+- 평균 재구매 간격: X일
+
+이상한 수치 있으면 ⚠️ 표시 후 한 줄 설명. 없으면 생략.
+
+---
+
+## 🤔 왜 이런 수치가 나왔을까?
+이유 2~3가지를 쉬운 말로. 형식:
+- **이유 1** (확실성: 높음/중간/낮음): 쉬운 설명 1~2문장. 근거 숫자 1개만.
+- **이유 2** ...
+마지막에 "아직 데이터가 없어서 확인 못 한 것: ..." 한 줄 추가.
+
+---
+
+## ✅ 오늘 할 일 1가지
+구체적으로 딱 1가지. 형식:
+**할 일**: (누가) (무엇을) (언제까지)
+**기대 효과**: 잘 되면 어떤 숫자가 얼마나 바뀌는지
+**확인 방법**: X주 후에 어떤 수치를 보면 됨
+**안 되면**: 다음 대안
+
+---
+
+**절대 규칙**:
+- 입력 JSON 숫자만 사용. 만들어내기 금지.
+- 전문 용어 쓰면 즉시 괄호로 풀이. 예: 코호트(같은 달에 처음 산 고객 묶음)
+- "~로 보입니다", "~일 수 있습니다", "살펴보겠습니다" 금지. 직접 말하기.
+- 가설이면 "아직 확인 안 됨" 명시.
+- 전체 800~1200자. 짧고 명확하게."""
 
 USER_PROMPT_TEMPLATE = """오늘의 ground truth + 7일 누적 비교 + 이상치 플래그:
 
@@ -130,11 +121,30 @@ def call_claude(enriched_gt: dict, rec_block: str = "") -> str | None:
 
 
 def _md_to_html(md: str) -> str:
-    """간단 Markdown → HTML 변환 (헤더·불릿·표만)."""
+    """Markdown → HTML. 블록 헤더(## 📌/📊/🤔/✅)는 배경색 카드로 렌더링."""
+    # 헤더별 색상
+    BLOCK_COLORS = {
+        "📌": ("#fff3cd", "#856404"),   # 노랑 — 핵심 1줄
+        "📊": ("#e8f4f8", "#0c5460"),   # 파랑 — 숫자 현황
+        "🤔": ("#f0f0f0", "#333"),       # 회색 — 이유
+        "✅": ("#d4edda", "#155724"),   # 초록 — 할 일
+    }
     lines = md.splitlines()
     out = []
     in_list = False
     in_table = False
+    in_block = False
+
+    def _close_block():
+        nonlocal in_block
+        if in_block:
+            out.append("</div>")
+            in_block = False
+
+    def _bold(s):
+        import re
+        return re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', s)
+
     for line in lines:
         s = line.rstrip()
         if s.startswith("## "):
@@ -144,26 +154,38 @@ def _md_to_html(md: str) -> str:
             if in_table:
                 out.append("</table>")
                 in_table = False
-            out.append(f"<h2 style='color:#2c3e50;border-bottom:2px solid #3498db;padding-bottom:4px;'>{s[3:].strip()}</h2>")
+            _close_block()
+            title = s[3:].strip()
+            bg, fg = "#f8f9fa", "#2c3e50"
+            for emoji, (b, f) in BLOCK_COLORS.items():
+                if emoji in title:
+                    bg, fg = b, f
+                    break
+            out.append(
+                f"<div style='background:{bg};border-left:4px solid {fg};padding:14px 16px;"
+                f"margin:16px 0 8px 0;border-radius:0 6px 6px 0;'>"
+                f"<div style='font-size:15px;font-weight:bold;color:{fg};margin-bottom:8px;'>{title}</div>"
+            )
+            in_block = True
         elif s.startswith("- "):
             if not in_list:
-                out.append("<ul>")
+                out.append("<ul style='margin:4px 0 4px 16px;padding:0;'>")
                 in_list = True
-            out.append(f"<li>{s[2:].strip()}</li>")
+            out.append(f"<li style='margin:4px 0;'>{_bold(s[2:].strip())}</li>")
         elif s.startswith("|") and s.endswith("|"):
             if in_list:
                 out.append("</ul>")
                 in_list = False
             cells = [c.strip() for c in s.strip("|").split("|")]
             if all(set(c) <= set("-:| ") for c in cells):
-                continue  # separator row
+                continue
             tag = "th" if not in_table else "td"
             if not in_table:
-                out.append("<table style='border-collapse:collapse;margin:8px 0;'>")
+                out.append("<table style='border-collapse:collapse;margin:8px 0;width:100%;'>")
                 in_table = True
-            cells_html = "".join(
-                f"<{tag} style='border:1px solid #ddd;padding:6px 12px;'>{c}</{tag}>" for c in cells
-            )
+            style = "border:1px solid #ddd;padding:7px 12px;background:#fff;" if tag == "td" \
+                else "border:1px solid #ccc;padding:7px 12px;background:#f0f0f0;font-weight:bold;"
+            cells_html = "".join(f"<{tag} style='{style}'>{c}</{tag}>" for c in cells)
             out.append(f"<tr>{cells_html}</tr>")
         elif s == "---":
             if in_list:
@@ -172,7 +194,7 @@ def _md_to_html(md: str) -> str:
             if in_table:
                 out.append("</table>")
                 in_table = False
-            out.append("<hr style='border:none;border-top:1px solid #eee;margin:16px 0;'>")
+            _close_block()
         elif s == "":
             if in_list:
                 out.append("</ul>")
@@ -180,13 +202,14 @@ def _md_to_html(md: str) -> str:
             if in_table:
                 out.append("</table>")
                 in_table = False
-            out.append("<br>")
         else:
-            out.append(f"<p style='margin:8px 0;'>{s}</p>")
+            out.append(f"<p style='margin:5px 0;'>{_bold(s)}</p>")
+
     if in_list:
         out.append("</ul>")
     if in_table:
         out.append("</table>")
+    _close_block()
     return "\n".join(out)
 
 
