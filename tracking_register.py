@@ -58,8 +58,8 @@ def find_today_excel():
     # rclone으로 최신 파일 동기화
     r = subprocess.run(
         ["rclone", "copy", ONEDRIVE_TRACKING_DIR, str(LOCAL_TRACKING_DIR),
-         "--include", "일반_*.xls*", "--transfers=4"],
-        capture_output=True, text=True, timeout=60,
+         "--include", "일반_*.xls*", "--max-depth", "1", "--transfers=4"],
+        capture_output=True, text=True, timeout=120,
     )
     if r.returncode != 0:
         print(f"rclone 오류: {r.stderr[:200]}")
