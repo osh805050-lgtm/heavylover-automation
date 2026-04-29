@@ -98,13 +98,26 @@ def read_tracking_excel(path: Path):
         df = pd.read_excel(path)
 
     def _to_str(val):
-        """숫자형 셀값을 문자열로 변환 (과학적 표기 방지)"""
-        if pd.isna(val) or str(val) in ("", "nan"):
+        """숫자형 셀값을 문자열로 변환 (과학적 표기·부동소수점 오차 방지)"""
+        if val is None or (isinstance(val, float) and pd.isna(val)):
             return ""
+        s = str(val).strip()
+        if not s or s == "nan":
+            return ""
+        # xlrd가 과학적 표기 문자열로 반환하는 경우 (예: 2.02604287400767E15)
+        # Decimal로 파싱해야 부동소수점 오차 없이 정확한 정수 복원 가능
+        if "E" in s.upper() and "." in s:
+            try:
+                from decimal import Decimal, ROUND_HALF_UP
+                d = Decimal(s).to_integral_value(rounding=ROUND_HALF_UP)
+                return str(d)
+            except Exception:
+                pass
+        # 일반 숫자 (float → int)
         try:
-            return str(int(float(val)))
+            return str(int(float(s)))
         except Exception:
-            return str(val).strip()
+            return s
 
     df["송장번호"] = df["송장번호"].apply(_to_str)
     df["주문번호"] = df["주문번호"].apply(_to_str)
