@@ -98,22 +98,26 @@ def run(skip_weekend_check=False):
         if naver_client.is_shipping_overdue(w.get("productOrder", {}))
     )
 
-    print(f"  - 카페24 배송준비건: {len(cafe24_df)}행")
-    print(f"  - 스마트스토어 배송준비건: {len(naver_df)}행 (신규 {naver_new_count}건, 발송기한초과 {naver_overdue_count}건)")
+    # 전화번호 기준 구매자 수
+    cafe24_buyers = cafe24_df["받는분전화번호"].nunique() if len(cafe24_df) else 0
+    naver_buyers = naver_df["받는분전화번호"].nunique() if len(naver_df) else 0
+
+    print(f"  - 카페24 배송준비: {cafe24_buyers}명")
+    print(f"  - 스마트스토어 배송준비: {naver_buyers}명 (신규 {naver_new_count}건, 발송기한초과 {naver_overdue_count}건)")
     print(f"  - 특이사항: 카페24 {len(cafe24_specials)}건 / 스마트스토어 {len(naver_specials)}건")
 
     # 2) 신규 주문 or 특이사항 있으면 승인 받기
     need_approval = naver_new_count > 0 or cafe24_specials or naver_specials
     if need_approval:
         print("\n[2/5] 텔레그램으로 승인 요청 중...")
-        ss_line = f"스마트스토어: {len(naver_df)}행 (신규 {naver_new_count}건"
+        ss_line = f"스마트스토어: {naver_buyers}명 (신규 {naver_new_count}건"
         if naver_overdue_count > 0:
             ss_line += f", ⚠️ 발송기한초과 {naver_overdue_count}건"
         ss_line += ")"
         summary_parts = [
             f"📋 주문 자동화 ({now:%Y-%m-%d %H:%M})",
             "",
-            f"카페24 배송준비: {len(cafe24_df)}행",
+            f"카페24 배송준비: {cafe24_buyers}명",
             ss_line,
         ]
         specials_text = _summarize_specials(cafe24_specials, naver_specials)
@@ -155,7 +159,9 @@ def run(skip_weekend_check=False):
             if w.get("productOrder", {}).get("placeOrderStatus") == "OK"
         ]
         naver_df = naver_client.orders_to_dada_rows(naver_ready_orders)
-        print(f"  - 재조회 결과: 카페24 {len(cafe24_df)}행 / 스마트스토어 배송준비 {len(naver_df)}행")
+        cafe24_buyers = cafe24_df["받는분전화번호"].nunique() if len(cafe24_df) else 0
+        naver_buyers = naver_df["받는분전화번호"].nunique() if len(naver_df) else 0
+        print(f"  - 재조회 결과: 카페24 {cafe24_buyers}명 / 스마트스토어 배송준비 {naver_buyers}명")
     else:
         print("\n[2/5] 특이사항 없음 → 승인 생략, 바로 진행")
 
@@ -221,9 +227,9 @@ def run(skip_weekend_check=False):
 
     result_msg = (
         f"✅ 엑셀 생성 완료\n"
-        f"- 카페24: {len(cafe24_df)}행\n"
-        f"- 스마트스토어: {len(naver_df)}행\n"
-        f"- 총: {len(combined)}행\n"
+        f"- 카페24: {cafe24_buyers}명\n"
+        f"- 스마트스토어: {naver_buyers}명\n"
+        f"- 총: {cafe24_buyers + naver_buyers}명\n"
         f"- 검증: {'통과' if is_valid else '실패 - 확인 필요'}\n"
         f"- OneDrive: {'✓ 업로드 완료' if onedrive_ok else '✗ 실패 (텔레그램만 전송)'}"
     )
