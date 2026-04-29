@@ -108,10 +108,19 @@ def _make_event_id(announcement_id, kind):
 def _get_announcement_id(item):
     """공고 고유 ID 추출 (소스 무관)"""
     raw = item.get("raw", {}) or {}
-    pid = raw.get("pblancId") or raw.get("pbanc_sn")
+    pid = raw.get("pblancId") or raw.get("pbanc_sn") or raw.get("pbancSn")
     if pid:
         return str(pid)
-    # fallback: title + deadline 해시
+    # URL에서 pblancId 파라미터 추출 (raw가 비어있어도 URL에 포함된 경우)
+    url = item.get("url", "") or ""
+    if "pblancId=" in url:
+        import urllib.parse as _up
+        qs = _up.urlparse(url).query
+        params = _up.parse_qs(qs)
+        pid = (params.get("pblancId") or [""])[0]
+        if pid:
+            return pid
+    # fallback: title + deadline 해시 (제목이 바뀌면 중복 위험 있음)
     base = f"{item.get('title','')}-{item.get('deadline','')}-{item.get('agency','')}"
     return hashlib.md5(base.encode("utf-8")).hexdigest()[:16]
 
