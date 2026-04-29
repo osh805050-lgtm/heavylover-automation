@@ -116,6 +116,20 @@ def cafe24_order_to_rows(order: dict) -> list[list]:
     except (ValueError, TypeError):
         amount = 0
 
+    # 100% 할인 주문(결제금액 0원) → items[].price 합산으로 정가 대체
+    # embed=items 이미 사용 중이므로 추가 API 호출 없음
+    if amount == 0:
+        fallback = 0
+        for item in (order.get("items") or []):
+            try:
+                unit = int(float(item.get("product_price") or item.get("price") or 0))
+                qty = int(item.get("quantity") or 1)
+                fallback += unit * qty
+            except (ValueError, TypeError):
+                pass
+        if fallback > 0:
+            amount = fallback
+
     # 휴대전화: buyer 또는 billing_name 측에서 찾기
     phone = (
         order.get("buyer_cellphone")

@@ -575,6 +575,286 @@ def write_marts(spreadsheet, gt: dict, tabs: dict):
 
 
 # ============================================================
+# 탭 정리 (채널별 중복 탭 숨김)
+# ============================================================
+
+# 데이터는 통합 탭 + mart_* 로 충분. 채널별 중복 탭은 숨김 처리.
+_REDUNDANT_TABS = [
+    "재구매_카페24_월별",
+    "재구매_SS_월별",
+    "코호트_카페24_전환율",
+    "코호트_SS_전환율",
+    "구매횟수_퍼널_카페24",
+    "구매횟수_퍼널_SS",
+    "구매횟수_퍼널_통합",
+]
+
+
+def hide_redundant_tabs(spreadsheet):
+    """채널별 중복 탭을 숨김 처리 (데이터 보존, 가독성 개선)."""
+    hidden = []
+    for ws in spreadsheet.worksheets():
+        if ws.title in _REDUNDANT_TABS and not ws.isSheetHidden:
+            try:
+                spreadsheet.batch_update({
+                    "requests": [{
+                        "updateSheetProperties": {
+                            "properties": {
+                                "sheetId": ws.id,
+                                "hidden": True,
+                            },
+                            "fields": "hidden",
+                        }
+                    }]
+                })
+                hidden.append(ws.title)
+            except Exception as e:
+                _log(f"  탭 숨김 실패 ({ws.title}): {e}")
+    if hidden:
+        _log(f"  탭 숨김 완료: {hidden}")
+    else:
+        _log("  숨김 대상 탭 없음 (이미 처리됨)")
+
+
+# ============================================================
+# 대시보드 탭
+# ============================================================
+
+_DASH_TAB = "📊 대시보드"
+
+# 상태 판정 (셀 텍스트)
+def _dash_status(value, good: float, warn: float, higher_is_better: bool = True) -> str:
+    if value is None:
+        return "데이터 없음"
+    try:
+        v = float(str(value).replace("%", "").replace("일", "").strip())
+    except (TypeError, ValueError):
+        return str(value)
+    if higher_is_better:
+        label = "양호" if v >= good else ("주의" if v >= warn else "위험")
+    else:
+        label = "양호" if v <= good else ("주의" if v <= warn else "위험")
+    icon = {"양호": "🟢", "주의": "🟡", "위험": "🔴"}[label]
+    return f"{icon} {label}"
+
+
+def write_dashboard(spreadsheet, gt: dict):
+    """[📊 대시보드] 탭을 경영자용 요약 뷰로 매일 갱신.
+
+    탭이 없으면 생성, 있으면 전체 덮어쓰기.
+    구조: KPI 카드 → 월별 추이(6개월) → 코호트 전환(6개월) → M+N 리텐션(3코호트) → 액션 포인트
+    """
+    try:
+        ws = spreadsheet.worksheet(_DASH_TAB)
+    except Exception:
+        ws = spreadsheet.add_worksheet(title=_DASH_TAB, rows=60, cols=10)
+
+    # 기존 내용 초기화 후 시트 맨 앞으로 이동
+    ws.clear()
+    try:
+        spreadsheet.batch_update({
+            "requests": [{"updateSheetProperties": {
+                "properties": {"sheetId": ws.id, "index": 0},
+                "fields": "index",
+            }}]
+        })
+    except Exception:
+        pass
+
+    now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
+
+    # ── 데이터 추출 ──────────────────────────────────────────
+    inm = gt.get("월별_재구매_매출", {}).get("통합", {})
+    cur_m = inm.get("당월", {})
+    prev_m = inm.get("전월", {})
+    mom_pct = inm.get("MoM_변화_pct")
+
+    stage = gt.get("단계별_전환율_현재", {}).get("통합", [])
+    s1_2 = next((s for s in stage if s.get("단계") == "1→2"), {})
+
+    mn_list = gt.get("M+N_리텐션_통합") or []
+    m1_recent = mn_list[-1].get("M+1") if mn_list else None
+
+    interval = gt.get("재구매_간격", {}) or {}
+    p50_raw = interval.get("P50") or interval.get("중앙값") or "—"
+    try:
+        p50_num = float(str(p50_raw).replace("일", "").strip())
+    except (TypeError, ValueError):
+        p50_num = None
+
+    conv_rate = s1_2.get("전환율")
+    cohort_trend = gt.get("코호트_추세_통합", {}).get("1→2_추세", {})
+
+    # 월별 추이 (최근 6개월)
+    tabs = _classify_tabs(spreadsheet)
+    monthly_rows = _extract_monthly(tabs.get("integrated_monthly"))[-6:]
+    cohort_rows = _extract_cohort_stage(tabs.get("integrated_cohort"))
+    cohort_recent = [r for r in cohort_rows if r.get("첫구매자수", 0) >= 5][-6:]
+    mn_recent3 = mn_list[-3:] if len(mn_list) >= 3 else mn_list
+
+    # ── 행 구성 ──────────────────────────────────────────────
+    rows: list[list] = []
+
+    # 제목
+    rows.append(["HeavyLover 재구매 현황", "", "", "", "", "", "", "", "", now_str])
+    rows.append([""])
+
+    # KPI 카드 헤더
+    rows.append(["지표", "현재값", "벤치마크", "상태", ""])
+
+    # KPI 카드 4개
+    rows.append([
+        "당월 재구매 매출",
+        f"{cur_m.get('매출', 0):,}원" if cur_m.get('매출') else "—",
+        "—",
+        f"MoM {'+' if (mom_pct or 0) >= 0 else ''}{mom_pct}%" if mom_pct is not None else "—",
+        "",
+    ])
+    rows.append([
+        "1→2 전환율 (60일)",
+        f"{conv_rate}%" if conv_rate is not None else "—",
+        "30% 이상 양호",
+        _dash_status(conv_rate, 30, 20, True),
+        "",
+    ])
+    rows.append([
+        "M+1 리텐션 (최신 코호트)",
+        f"{m1_recent}%" if m1_recent is not None else "—",
+        "20~30% 양호",
+        _dash_status(m1_recent, 20, 14, True),
+        "",
+    ])
+    rows.append([
+        "재구매 간격 P50",
+        f"{p50_raw}",
+        "15일 이내 양호",
+        _dash_status(p50_num, 15, 25, False) if p50_num is not None else "—",
+        "",
+    ])
+    rows.append([""])
+
+    # 월별 추이 테이블
+    rows.append(["── 월별 재구매 추이 (최근 6개월) ──"])
+    rows.append(["기간", "재구매자(명)", "재구매 매출(원)", "AOV(원)", "재구매율(%)", "MoM"])
+    prev_매출 = None
+    for r in monthly_rows:
+        매출 = r.get("재구매매출") or 0
+        mom = ""
+        if prev_매출 is not None and prev_매출 > 0:
+            delta = round((매출 - prev_매출) / prev_매출 * 100, 1)
+            mom = f"{'+' if delta >= 0 else ''}{delta}%"
+        rows.append([
+            r.get("월", ""),
+            r.get("재구매자수") or 0,
+            f"{매출:,}",
+            f"{r.get('AOV') or 0:,}",
+            r.get("재구매율") or 0,
+            mom,
+        ])
+        prev_매출 = 매출
+    rows.append([""])
+
+    # 코호트 전환율 테이블
+    rows.append(["── 1→2 코호트 전환율 (최근 6개월) ──"])
+    rows.append(["코호트월", "첫구매자(명)", "30일 전환율(%)", "60일 전환율(%)", "상태"])
+    for r in cohort_recent:
+        conv60 = r.get("60일_전환율")
+        rows.append([
+            r.get("코호트월", ""),
+            r.get("첫구매자수") or 0,
+            r.get("30일_전환율") or "—",
+            conv60 if conv60 is not None else "—",
+            _dash_status(conv60, 30, 20, True) if conv60 is not None else "—",
+        ])
+    rows.append([""])
+
+    # M+N 리텐션 테이블
+    rows.append(["── M+N 리텐션 (최근 3코호트) ──"])
+    rows.append(["코호트월", "첫구매자(명)", "M+1(%)", "M+2(%)", "M+3(%)", "M+6(%)"])
+    for r in mn_recent3:
+        rows.append([
+            r.get("코호트월", ""),
+            r.get("첫구매자수") or 0,
+            r.get("M+1") or "—",
+            r.get("M+2") or "—",
+            r.get("M+3") or "—",
+            r.get("M+6") or "—",
+        ])
+    rows.append([""])
+
+    # 액션 포인트
+    rows.append(["── 액션 포인트 ──"])
+    actions = _build_action_points(conv_rate, m1_recent, p50_num, mom_pct, cohort_trend)
+    for a in actions:
+        rows.append([a])
+
+    # 시트에 쓰기
+    ws.update(values=rows, range_name="A1")
+    _log(f"  [📊 대시보드] 갱신 완료 ({len(rows)}행)")
+
+
+def _build_action_points(conv_rate, m1_recent, p50_num, mom_pct, cohort_trend) -> list[str]:
+    """현재 KPI 기반으로 액션 포인트 자동 생성."""
+    points = []
+
+    if m1_recent is not None:
+        try:
+            v = float(m1_recent)
+            if v < 14:
+                points.append(f"🔴 M+1 리텐션 {v}% — 벤치(20%) 크게 미달. Day 3/10/17 이메일 시퀀스 즉시 검토 필요.")
+            elif v < 20:
+                points.append(f"🟡 M+1 리텐션 {v}% — 벤치(20%) 미달. CRM 재구매 트리거 강화 검토.")
+            else:
+                points.append(f"🟢 M+1 리텐션 {v}% — 벤치(20%) 충족.")
+        except (TypeError, ValueError):
+            pass
+
+    if conv_rate is not None:
+        try:
+            v = float(conv_rate)
+            trend_str = ""
+            recent_avg = cohort_trend.get("최근3개월_평균")
+            prev_avg = cohort_trend.get("이전3개월_평균")
+            if recent_avg is not None and prev_avg is not None:
+                try:
+                    delta = round(float(recent_avg) - float(prev_avg), 1)
+                    trend_str = f" (추세: {'↑' if delta > 0 else '↓'}{abs(delta)}pp)"
+                except (TypeError, ValueError):
+                    pass
+            if v < 20:
+                points.append(f"🔴 1→2 전환율 {v}%{trend_str} — 첫 구매 후 이탈 심각. 상세페이지·구매 경험 점검.")
+            elif v < 30:
+                points.append(f"🟡 1→2 전환율 {v}%{trend_str} — 개선 여지 있음.")
+            else:
+                points.append(f"🟢 1→2 전환율 {v}%{trend_str} — 양호.")
+        except (TypeError, ValueError):
+            pass
+
+    if p50_num is not None:
+        if p50_num <= 15:
+            points.append(f"🟢 재구매 간격 P50 {p50_num}일 — 생활 루틴 편입 확인.")
+        elif p50_num <= 25:
+            points.append(f"🟡 재구매 간격 P50 {p50_num}일 — 리마인드 타이밍 점검.")
+        else:
+            points.append(f"🔴 재구매 간격 P50 {p50_num}일 — 구매 주기 길어짐. 정기 구독 설계 검토.")
+
+    if mom_pct is not None:
+        try:
+            v = float(mom_pct)
+            if v < -10:
+                points.append(f"🔴 재구매 매출 MoM {v}% — 전월 대비 급감. 원인 파악 필요.")
+            elif v < 0:
+                points.append(f"🟡 재구매 매출 MoM {v}% — 소폭 감소.")
+        except (TypeError, ValueError):
+            pass
+
+    if not points:
+        points.append("현재 주요 이상 신호 없음. 정기 모니터링 유지.")
+
+    return points
+
+
+# ============================================================
 # Claude 분석
 # ============================================================
 
@@ -591,6 +871,13 @@ SYSTEM_PROMPT = """당신은 10년차 D2C 이커머스 경영 전문가다. Heav
 4. **경영 관점.** 재구매 1%p 변화가 CAC 회수 속도와 LTV에 미치는 영향을 염두에 두되, 구체적 금액 계산은 JSON에 없으면 하지 않는다.
 
 5. **포맷.** 불릿/헤더 남발 금지. 문장 중심. 전체 길이 800자 이내. 이모지는 ⚠️ ✅ 📊만 최소한으로.
+
+6. **용어 설명.** 약어가 처음 등장할 때 반드시 괄호로 한글 설명을 붙인다.
+   예시: AOV(평균 주문금액), CAC(고객 획득 비용), LTV(고객 생애가치), MoM(전월대비), WoW(전주대비),
+         코호트(같은 달 첫구매 고객 그룹), M+1(첫달 재구매율), M+N(N개월 후 재구매율),
+         P50(재구매 간격 중앙값 — 전체 고객의 절반이 이 기간 안에 재구매함),
+         1→2 전환(첫 구매 후 두 번째 구매로 이어지는 비율).
+   이후 같은 글 안에서 재등장할 때는 약어만 사용해도 됨.
 
 **리포트 필수 섹션:**
 
@@ -800,6 +1087,21 @@ def run() -> dict:
         _log("✅ 마트 탭 갱신 완료")
     except Exception as e:
         _log(f"⚠️ 마트 탭 갱신 실패: {e}")
+
+    # 채널별 중복 탭 숨김 (첫 실행 시에만 실질적 변경, 이후는 no-op)
+    try:
+        _log("채널별 중복 탭 숨김 처리 중...")
+        hide_redundant_tabs(ss)
+    except Exception as e:
+        _log(f"⚠️ 탭 숨김 실패: {e}")
+
+    # 경영자용 대시보드 탭 갱신
+    try:
+        _log("대시보드 탭 갱신 중...")
+        write_dashboard(ss, gt)
+        _log("✅ 대시보드 탭 갱신 완료")
+    except Exception as e:
+        _log(f"⚠️ 대시보드 탭 갱신 실패: {e}")
 
     # GT 저장 (감사 + 후속 스크립트들이 비교용으로 사용)
     date_str = datetime.now(KST).strftime("%Y-%m-%d")
