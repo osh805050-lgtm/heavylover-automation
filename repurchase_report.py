@@ -609,8 +609,10 @@ def _style_mart_tabs(spreadsheet):
 # 탭 정리 (채널별 중복 탭 숨김)
 # ============================================================
 
-# 데이터는 통합 탭 + mart_* 로 충분. 채널별 중복 탭은 숨김 처리.
+# 숨김 대상: 채널별 중복 탭 + Meta 광고 탭 + 카페24/SS 재구매매출 탭 (통합 탭으로 충분)
+# 이 탭들은 맨 뒤로 이동 후 숨김 처리 (데이터 보존)
 _REDUNDANT_TABS = [
+    # 채널별 중복 — 통합 탭 + mart_*로 커버
     "재구매_카페24_월별",
     "재구매_SS_월별",
     "코호트_카페24_전환율",
@@ -618,31 +620,54 @@ _REDUNDANT_TABS = [
     "구매횟수_퍼널_카페24",
     "구매횟수_퍼널_SS",
     "구매횟수_퍼널_통합",
+    # Meta 광고 — 별도 시트에서 관리
+    "Meta_Ads_Daily",
+    "Meta_Ads_Daily_Campaign",
+    "Meta_Ads_Winners",
+]
+
+# 카페24/SS 채널별 재구매매출 탭 — 맨 뒤 이동 후 숨김
+_MOVE_TO_BACK_TABS = [
+    "카페24 재구매매출",
+    "스마트스토어 재구매매출",
 ]
 
 
 def hide_redundant_tabs(spreadsheet):
-    """채널별 중복 탭을 숨김 처리 (데이터 보존, 가독성 개선)."""
-    hidden = []
-    for ws in spreadsheet.worksheets():
-        if ws.title in _REDUNDANT_TABS and not ws.isSheetHidden:
-            try:
-                spreadsheet.batch_update({
-                    "requests": [{
-                        "updateSheetProperties": {
-                            "properties": {
-                                "sheetId": ws.id,
-                                "hidden": True,
-                            },
-                            "fields": "hidden",
-                        }
-                    }]
+    """숨김 대상 탭을 맨 뒤로 이동 후 일괄 숨김 처리."""
+    all_ws = spreadsheet.worksheets()
+    total = len(all_ws)
+
+    requests = []
+    hidden_titles = []
+
+    for ws in all_ws:
+        # 맨 뒤로 이동 대상
+        if ws.title in _MOVE_TO_BACK_TABS:
+            requests.append({
+                "updateSheetProperties": {
+                    "properties": {"sheetId": ws.id, "index": total - 1},
+                    "fields": "index",
+                }
+            })
+
+        # 숨김 대상 (이미 숨겨진 탭은 skip)
+        if ws.title in _REDUNDANT_TABS + _MOVE_TO_BACK_TABS:
+            if not ws.isSheetHidden:
+                requests.append({
+                    "updateSheetProperties": {
+                        "properties": {"sheetId": ws.id, "hidden": True},
+                        "fields": "hidden",
+                    }
                 })
-                hidden.append(ws.title)
-            except Exception as e:
-                _log(f"  탭 숨김 실패 ({ws.title}): {e}")
-    if hidden:
-        _log(f"  탭 숨김 완료: {hidden}")
+                hidden_titles.append(ws.title)
+
+    if requests:
+        try:
+            spreadsheet.batch_update({"requests": requests})
+            _log(f"  탭 숨김/이동 완료: {hidden_titles}")
+        except Exception as e:
+            _log(f"  ⚠️ 탭 숨김 실패: {e}")
     else:
         _log("  숨김 대상 탭 없음 (이미 처리됨)")
 
@@ -823,7 +848,7 @@ def write_dashboard(spreadsheet, gt: dict):
     ws.update(values=rows, range_name="A1")
 
     # ── 셀 포맷 적용 ─────────────────────────────────────────
-    _apply_dashboard_formats(ws, spreadsheet, rows, conv_rate, m1_recent, p50_num, mom_pct)
+    _apply_dashboard_formats(ws, spreadsheet, rows, conv_rate, m1_recent, p50_num, mom_pct, mn_recent3)
     _log(f"  [📊 대시보드] 갱신 완료 ({len(rows)}행)")
 
 
@@ -926,7 +951,7 @@ def _cell_fmt(bg: dict, bold=False, font_size=10) -> dict:
     return fmt
 
 
-def _apply_dashboard_formats(ws, spreadsheet, rows: list, conv_rate, m1_recent, p50_num, mom_pct):
+def _apply_dashboard_formats(ws, spreadsheet, rows: list, conv_rate, m1_recent, p50_num, mom_pct, mn_recent3=None):
     """대시보드 셀 배경색·볼드·폰트 크기 일괄 적용."""
     sheet_id = ws.id
     requests = []
@@ -1018,6 +1043,47 @@ def _apply_dashboard_formats(ws, spreadsheet, rows: list, conv_rate, m1_recent, 
                     color = _COLOR_WHITE
                 requests.append(_fmt_req(r, color, col_start=4, col_end=4))
             r += 1
+
+    # M+N 리텐션 히트맵 — M+1~M+6 각 셀을 값 크기에 따라 색상 칠하기
+    # 판정 기준: ≥20% 초록, 14~20% 노랑, <14% 빨강
+    mn_header_idx = None
+    for idx, row in enumerate(rows):
+        if row and isinstance(row[0], str) and "M+N 리텐션" in row[0]:
+            mn_header_idx = idx
+            break
+    if mn_header_idx is not None:
+        col_hdr_idx = mn_header_idx + 1
+        requests.append(_fmt_req(col_hdr_idx, {"red": 0.9, "green": 0.9, "blue": 0.9}, bold=True))
+        r = col_hdr_idx + 1
+        while r < len(rows):
+            row = rows[r]
+            if not row or not row[0] or (isinstance(row[0], str) and "──" in row[0]):
+                break
+            # M+1~M+6은 col 2~5 (코호트월=0, 첫구매자=1, M+1=2, M+2=3, M+3=4, M+6=5)
+            for col_i in range(2, 6):
+                if col_i >= len(row):
+                    break
+                val = row[col_i]
+                if val == "—" or val is None or val == "":
+                    r_col = _COLOR_WHITE
+                else:
+                    r_col = _rgb_for_status(val, 20, 14, True)
+                requests.append(_fmt_req(r, r_col, col_start=col_i, col_end=col_i))
+            # 코호트월 컬럼은 연회색
+            requests.append(_fmt_req(r, {"red": 0.97, "green": 0.97, "blue": 0.97}, col_start=0, col_end=0))
+            r += 1
+
+    # 열 너비 자동 조정 (A~G 컬럼)
+    requests.append({
+        "autoResizeDimensions": {
+            "dimensions": {
+                "sheetId": sheet_id,
+                "dimension": "COLUMNS",
+                "startIndex": 0,
+                "endIndex": 7,
+            }
+        }
+    })
 
     if requests:
         try:
