@@ -233,7 +233,30 @@ def run_from_excel():
         except Exception as e:
             cafe24_fail.append(f"{order_id}: {e}")
 
+    # SS: 엑셀 주문번호 부동소수점 손실 보정 — API 현재 발송대기 주문과 앞 15자리 매칭
+    actual_naver_orders = naver_client.orders_pending_dispatch(days_back=7)
+    actual_ids = {
+        o.get("productOrder", {}).get("productOrderId", ""): True
+        for o in actual_naver_orders
+    }
+
+    def _fix_naver_id(excel_id):
+        """엑셀 주문번호(마지막 자리 소실)를 실제 SS 주문번호로 보정."""
+        if excel_id in actual_ids:
+            return excel_id
+        prefix = excel_id[:15]
+        for real_id in actual_ids:
+            if real_id.startswith(prefix):
+                return real_id
+        return excel_id  # 보정 실패 시 원본 유지
+
+    seen_naver = {}
     for product_order_id, tracking in naver_items:
+        fixed_id = _fix_naver_id(product_order_id)
+        if fixed_id not in seen_naver:
+            seen_naver[fixed_id] = tracking
+
+    for product_order_id, tracking in seen_naver.items():
         try:
             r = register_tracking_naver(product_order_id, tracking, NAVER_LOGEN)
             if r.status_code == 200:
