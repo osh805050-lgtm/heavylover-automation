@@ -752,6 +752,38 @@ def write_dashboard(spreadsheet, gt: dict):
     cohort_recent = [r for r in cohort_rows if r.get("첫구매자수", 0) >= 5][-6:]
     mn_recent3 = mn_list[-3:] if len(mn_list) >= 3 else mn_list
 
+    # ── 숫자 포맷 헬퍼 ───────────────────────────────────────
+    def _fmt_won(v):
+        """원 단위 → 만원/억원 표기. 예) 14,284,532 → 1,428만원"""
+        if not v:
+            return "—"
+        v = int(v)
+        if v >= 100_000_000:
+            return f"{v / 100_000_000:.1f}억원"
+        if v >= 10_000:
+            return f"{v // 10_000:,}만원"
+        return f"{v:,}원"
+
+    def _fmt_pct(v, decimal=1):
+        """float → '23.3%' 포맷."""
+        if v is None:
+            return "—"
+        try:
+            return f"{float(v):.{decimal}f}%"
+        except (TypeError, ValueError):
+            return str(v)
+
+    def _fmt_delta(v):
+        """전월 대비 % → '+2.3%' / '-1.5%' 포맷."""
+        if v is None:
+            return "—"
+        try:
+            f = float(v)
+            sign = "▲" if f > 0 else ("▼" if f < 0 else "")
+            return f"{sign}{abs(f):.1f}%"
+        except (TypeError, ValueError):
+            return str(v)
+
     # ── 행 구성 ──────────────────────────────────────────────
     rows: list[list] = []
 
@@ -760,90 +792,92 @@ def write_dashboard(spreadsheet, gt: dict):
     rows.append([""])
 
     # KPI 카드 헤더
-    rows.append(["지표", "현재값", "벤치마크", "상태", ""])
+    rows.append(["지표", "이번 달", "전월 대비", "목표 기준", "판정"])
 
-    # KPI 카드 4개
+    # KPI 카드 4개 — 전월값도 같은 행에
+    mom_str = _fmt_delta(mom_pct)
     rows.append([
-        "당월 재구매 매출",
-        f"{cur_m.get('매출', 0):,}원" if cur_m.get('매출') else "—",
+        "재구매 매출",
+        _fmt_won(cur_m.get("매출")),
+        f"{mom_str}  (전월 {_fmt_won(prev_m.get('매출'))})",
         "—",
-        f"MoM {'+' if (mom_pct or 0) >= 0 else ''}{mom_pct}%" if mom_pct is not None else "—",
-        "",
+        f"{'▲' if (mom_pct or 0) >= 0 else '▼'} {'양호' if (mom_pct or 0) >= 0 else '감소'}",
     ])
     rows.append([
-        "1→2 전환율 (60일)",
-        f"{conv_rate}%" if conv_rate is not None else "—",
-        "30% 이상 양호",
+        "첫 구매 → 재구매 전환율",
+        _fmt_pct(conv_rate),
+        "—",
+        "30% 이상이면 양호",
         _dash_status(conv_rate, 30, 20, True),
-        "",
     ])
     rows.append([
-        "M+1 리텐션 (최신 코호트)",
-        f"{m1_recent}%" if m1_recent is not None else "—",
-        "20~30% 양호",
+        "한 달 후 재구매율 (최신)",
+        _fmt_pct(m1_recent),
+        "—",
+        "20% 이상이면 양호",
         _dash_status(m1_recent, 20, 14, True),
-        "",
     ])
     rows.append([
-        "재구매 간격 P50",
-        f"{p50_raw}",
-        "15일 이내 양호",
+        "재구매 평균 주기",
+        f"{p50_raw}" if p50_raw != "—" else "—",
+        "—",
+        "15일 이내이면 양호",
         _dash_status(p50_num, 15, 25, False) if p50_num is not None else "—",
-        "",
     ])
     rows.append([""])
 
     # 월별 추이 테이블
-    rows.append(["── 월별 재구매 추이 (최근 6개월) ──"])
-    rows.append(["기간", "재구매자(명)", "재구매 매출(원)", "AOV(원)", "재구매율(%)", "MoM"])
+    rows.append(["▸ 월별 재구매 추이 (최근 6개월)", "", "", "", "", ""])
+    rows.append(["월", "재구매 고객 수", "재구매 매출", "1인당 평균 결제액", "재구매율", "전월 대비"])
     prev_매출 = None
     for r in monthly_rows:
         매출 = r.get("재구매매출") or 0
-        mom = ""
+        delta_str = ""
         if prev_매출 is not None and prev_매출 > 0:
             delta = round((매출 - prev_매출) / prev_매출 * 100, 1)
-            mom = f"{'+' if delta >= 0 else ''}{delta}%"
+            sign = "▲" if delta > 0 else ("▼" if delta < 0 else "")
+            delta_str = f"{sign}{abs(delta):.1f}%"
         rows.append([
             r.get("월", ""),
-            r.get("재구매자수") or 0,
-            f"{매출:,}",
-            f"{r.get('AOV') or 0:,}",
-            r.get("재구매율") or 0,
-            mom,
+            f"{r.get('재구매자수') or 0:,}명",
+            _fmt_won(매출),
+            _fmt_won(r.get("AOV")),
+            _fmt_pct(r.get("재구매율")),
+            delta_str,
         ])
         prev_매출 = 매출
     rows.append([""])
 
     # 코호트 전환율 테이블
-    rows.append(["── 1→2 코호트 전환율 (최근 6개월) ──"])
-    rows.append(["코호트월", "첫구매자(명)", "30일 전환율(%)", "60일 전환율(%)", "상태"])
+    rows.append(["▸ 첫 구매 → 재구매 전환율 (최근 6개월)", "", "", "", ""])
+    rows.append(["구매 월", "첫 구매 고객 수", "30일 내 재구매율", "60일 내 재구매율", "판정"])
     for r in cohort_recent:
         conv60 = r.get("60일_전환율")
         rows.append([
             r.get("코호트월", ""),
-            r.get("첫구매자수") or 0,
-            r.get("30일_전환율") or "—",
-            conv60 if conv60 is not None else "—",
+            f"{r.get('첫구매자수') or 0:,}명",
+            _fmt_pct(r.get("30일_전환율")),
+            _fmt_pct(conv60),
             _dash_status(conv60, 30, 20, True) if conv60 is not None else "—",
         ])
     rows.append([""])
 
-    # M+N 리텐션 테이블
-    rows.append(["── M+N 리텐션 (최근 3코호트) ──"])
-    rows.append(["코호트월", "첫구매자(명)", "M+1(%)", "M+2(%)", "M+3(%)", "M+6(%)"])
+    # 재구매 유지율 테이블 (M+N)
+    rows.append(["▸ 재구매 유지율 — 첫 구매 후 몇 달이 지나도 사는가 (최근 3개월)", "", "", "", "", ""])
+    rows.append(["구매 월", "첫 구매 고객 수", "1개월 후", "2개월 후", "3개월 후", "6개월 후"])
     for r in mn_recent3:
         rows.append([
             r.get("코호트월", ""),
-            r.get("첫구매자수") or 0,
-            r.get("M+1") or "—",
-            r.get("M+2") or "—",
-            r.get("M+3") or "—",
-            r.get("M+6") or "—",
+            f"{r.get('첫구매자수') or 0:,}명",
+            _fmt_pct(r.get("M+1")),
+            _fmt_pct(r.get("M+2")),
+            _fmt_pct(r.get("M+3")),
+            _fmt_pct(r.get("M+6")),
         ])
     rows.append([""])
 
     # 액션 포인트
-    rows.append(["── 액션 포인트 ──"])
+    rows.append(["▸ 지금 봐야 할 것", "", "", "", ""])
     actions = _build_action_points(conv_rate, m1_recent, p50_num, mom_pct, cohort_trend)
     for a in actions:
         rows.append([a])
@@ -864,11 +898,11 @@ def _build_action_points(conv_rate, m1_recent, p50_num, mom_pct, cohort_trend) -
         try:
             v = float(m1_recent)
             if v < 14:
-                points.append(f"🔴 M+1 리텐션 {v}% — 벤치(20%) 크게 미달. Day 3/10/17 이메일 시퀀스 즉시 검토 필요.")
+                points.append(f"🔴 첫 구매 후 한 달 안에 재구매하는 비율이 {v}%입니다. 목표(20%)에 크게 못 미칩니다. 구매 3일·10일·17일 후 리마인드 메일 검토 필요.")
             elif v < 20:
-                points.append(f"🟡 M+1 리텐션 {v}% — 벤치(20%) 미달. CRM 재구매 트리거 강화 검토.")
+                points.append(f"🟡 첫 구매 후 한 달 안에 재구매하는 비율이 {v}%입니다. 목표(20%)에 조금 못 미칩니다. CRM 재구매 유도 메시지 강화를 검토하세요.")
             else:
-                points.append(f"🟢 M+1 리텐션 {v}% — 벤치(20%) 충족.")
+                points.append(f"🟢 첫 구매 후 한 달 안에 재구매하는 비율이 {v}%로 목표(20%) 충족입니다.")
         except (TypeError, ValueError):
             pass
 
@@ -881,33 +915,33 @@ def _build_action_points(conv_rate, m1_recent, p50_num, mom_pct, cohort_trend) -
             if recent_avg is not None and prev_avg is not None:
                 try:
                     delta = round(float(recent_avg) - float(prev_avg), 1)
-                    trend_str = f" (추세: {'↑' if delta > 0 else '↓'}{abs(delta)}pp)"
+                    trend_str = f", 최근 3개월 추세 {'↑상승' if delta > 0 else '↓하락'} {abs(delta)}%p"
                 except (TypeError, ValueError):
                     pass
             if v < 20:
-                points.append(f"🔴 1→2 전환율 {v}%{trend_str} — 첫 구매 후 이탈 심각. 상세페이지·구매 경험 점검.")
+                points.append(f"🔴 첫 구매 후 60일 내 재구매율이 {v}%입니다{trend_str}. 상세페이지·구매 경험을 점검하세요.")
             elif v < 30:
-                points.append(f"🟡 1→2 전환율 {v}%{trend_str} — 개선 여지 있음.")
+                points.append(f"🟡 첫 구매 후 60일 내 재구매율이 {v}%입니다{trend_str}. 개선 여지가 있습니다.")
             else:
-                points.append(f"🟢 1→2 전환율 {v}%{trend_str} — 양호.")
+                points.append(f"🟢 첫 구매 후 60일 내 재구매율이 {v}%입니다{trend_str}. 양호합니다.")
         except (TypeError, ValueError):
             pass
 
     if p50_num is not None:
         if p50_num <= 15:
-            points.append(f"🟢 재구매 간격 P50 {p50_num}일 — 생활 루틴 편입 확인.")
+            points.append(f"🟢 고객의 절반이 {p50_num}일 만에 다시 구매합니다. 생활 루틴으로 자리잡은 신호입니다.")
         elif p50_num <= 25:
-            points.append(f"🟡 재구매 간격 P50 {p50_num}일 — 리마인드 타이밍 점검.")
+            points.append(f"🟡 고객의 절반이 {p50_num}일 만에 재구매합니다. 리마인드 타이밍을 점검하세요.")
         else:
-            points.append(f"🔴 재구매 간격 P50 {p50_num}일 — 구매 주기 길어짐. 정기 구독 설계 검토.")
+            points.append(f"🔴 고객의 절반이 {p50_num}일이 지나야 재구매합니다. 구매 주기가 길어지고 있습니다. 정기 구독 유도를 검토하세요.")
 
     if mom_pct is not None:
         try:
             v = float(mom_pct)
             if v < -10:
-                points.append(f"🔴 재구매 매출 MoM {v}% — 전월 대비 급감. 원인 파악 필요.")
+                points.append(f"🔴 재구매 매출이 전월보다 {abs(v):.1f}% 급감했습니다. 원인 파악이 필요합니다.")
             elif v < 0:
-                points.append(f"🟡 재구매 매출 MoM {v}% — 소폭 감소.")
+                points.append(f"🟡 재구매 매출이 전월보다 {abs(v):.1f}% 소폭 감소했습니다.")
         except (TypeError, ValueError):
             pass
 
@@ -1012,16 +1046,16 @@ def _apply_dashboard_formats(ws, spreadsheet, rows: list, conv_rate, m1_recent, 
         # 지표명 컬럼(A=col 0)은 연한 회색
         requests.append(_fmt_req(row_idx, {"red": 0.97, "green": 0.97, "blue": 0.97}, col_start=0, col_end=0))
 
-    # 섹션 헤더 행들 찾아서 볼드 처리 (rows에서 "──" 포함 행)
+    # 섹션 헤더 행들 찾아서 볼드 처리 (rows에서 "▸" 포함 행)
     for idx, row in enumerate(rows):
-        if row and isinstance(row[0], str) and "──" in row[0]:
-            requests.append(_fmt_req(idx, {"red": 0.933, "green": 0.933, "blue": 0.933}, bold=True))
+        if row and isinstance(row[0], str) and "▸" in row[0]:
+            requests.append(_fmt_req(idx, {"red": 0.851, "green": 0.886, "blue": 0.953}, bold=True, font_size=11))
 
     # 코호트 전환율 상태 컬럼 (E=col 4) 색상
     # rows 순서: 제목(0), 빈(1), KPI헤더(2), KPI×4(3~6), 빈(7), 월별헤더(8), 월별컬럼(9), 월별data, 빈, 코호트헤더, 코호트컬럼, 코호트data...
     cohort_header_idx = None
     for idx, row in enumerate(rows):
-        if row and isinstance(row[0], str) and "코호트 전환율" in row[0]:
+        if row and isinstance(row[0], str) and "첫 구매 → 재구매 전환율" in row[0]:
             cohort_header_idx = idx
             break
     if cohort_header_idx is not None:
@@ -1052,7 +1086,7 @@ def _apply_dashboard_formats(ws, spreadsheet, rows: list, conv_rate, m1_recent, 
     # 판정 기준: ≥20% 초록, 14~20% 노랑, <14% 빨강
     mn_header_idx = None
     for idx, row in enumerate(rows):
-        if row and isinstance(row[0], str) and "M+N 리텐션" in row[0]:
+        if row and isinstance(row[0], str) and "재구매 유지율" in row[0]:
             mn_header_idx = idx
             break
     if mn_header_idx is not None:
