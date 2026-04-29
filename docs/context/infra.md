@@ -120,6 +120,48 @@
 - 템플릿 복제 (`shutil.copy2`) → 서식·열너비·숨김컬럼 보존
 - 파일명: `더다냉동물류 발주양식 YY.M.D.xlsx`
 
+## 정부지원 레이더 (2026-04-29 기준)
+
+> 상세: `docs/govt-radar/08-coverage-audit.md`
+
+### 실행 흐름
+- GitHub Actions `govt-radar-daily.yml` — 매일 KST 11시 (`30 1 * * *` UTC)
+- `govt-radar-commands.yml` — 5분마다 텔레그램 명령 폴링
+- `govt-radar-weekly.yml` — 매주 월요일 08:00 KST 다이제스트 이메일
+
+### 소스 (17개)
+- **API**: 기업마당(DATA_GO_KR_API_KEY), K-Startup
+- **HTML**: KOTRA, 중기부, 소상공인24, 고비즈코리아, 경기경제과학진흥원, 용인시산업진흥원, NIPA, 창업진흥원, SMTECH, K-Sure, 농림축산식품부, aT, 경기도, **경기테크노파크(신규)**, **중소기업유통센터(신규)**
+- **메일 IMAP**: ohkm8050@naver.com Layer 2
+
+### 점수 임계값
+- 캘린더 등록: score ≥ 7.0 + deadline 존재
+- 알림 발송: score ≥ 3.0 (S/A 풀 본문 · B 제목만 · C 카운트)
+- LLM 자격검증: score ≥ 5.0 (Claude Haiku, 월 ~$1)
+
+### GitHub Secrets (필수)
+| 시크릿 | 용도 |
+|---|---|
+| `DATA_GO_KR_API_KEY` | 기업마당·K-Startup API |
+| `ANTHROPIC_API_KEY` | LLM 자격검증 + /draft |
+| `GOOGLE_SA_KEY_JSON` | 캘린더 + Docs (SA 키) |
+| `GOOGLE_CALENDAR_ID` | 공고 등록 캘린더 ID |
+| `NAVER_MAIL_USER` / `NAVER_MAIL_APP_PASSWORD` | IMAP 메일 스캔 |
+| `TELEGRAM_BOT_TOKEN_GOVT` / `TELEGRAM_CHAT_ID_GOVT` | 공고 알림 전용 봇 |
+| `EMAIL_TO` | 주간 다이제스트 수신자 |
+
+### 이메일 공고 캘린더 등록 (2026-04-29 수정)
+- 이전: `agency=None` → 발주기관 가점 0 → 점수 4점대 → 캘린더 미등록
+- 수정: `_agency_from_sender()` 발신 도메인→기관명 매핑 (14개) → 점수 8점대 → 캘린더 자동 등록
+
+### 텔레그램 명령어
+`/details S1` · `/why S1` · `/save A2` · `/draft S1`
+— notify_id(S1/A1)는 매일 실행 시 자동 부여, 당일 유효
+
+### 미완료
+- `EMAIL_TO` Secret에 `musclecipe@naver.com` 추가 필요 (`gh secret set` 1줄)
+- PlusCL 인증 5개 등록 (13시 송장 자동화 완성)
+
 ## 코딩 도구
 - 메인: Claude Code + Google Apps Script
 - 검토: Lovable (0→1), Cursor (1→프로덕션) — 효율 입증 시 도입
