@@ -1,19 +1,18 @@
 """송장 자동 등록 모듈
 
-1. PlusCL API에서 출고 완료된 송장 조회
-2. 텔레그램으로 사장님에게 알림 + 승인 요청
-3. /done 받으면 카페24 + 스마트스토어에 송장 자동 등록
-4. 완료 알림
+텔레그램 /tracking 명령 → 바탕화면 더다 엑셀 자동 감지 → 카페24/SS 송장 등록
 
-실행 주기: 평일 13:00 (cron)
+실행 주기: Vultr cron 5분마다 /tracking 명령 폴링
 """
 
+import glob
 import io
 import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
 import requests
 from dotenv import load_dotenv
 
@@ -26,6 +25,14 @@ sys.path.insert(0, str(Path(__file__).parent))
 import cafe24_client
 import naver_client
 import telegram_client
+
+# 더다 송장 엑셀 OneDrive 경로 (rclone remote 기준)
+ONEDRIVE_TRACKING_DIR = os.getenv(
+    "ONEDRIVE_TRACKING_DIR",
+    "heavylover_onedrive:바탕 화면/사업/더다 3pl/3PL/",
+)
+# 서버 로컬 다운로드 위치
+LOCAL_TRACKING_DIR = Path(os.getenv("LOCAL_TRACKING_DIR", "/tmp/tracking_excel"))
 
 ENV_PATH = Path(__file__).parent / ".env"
 load_dotenv(ENV_PATH, override=True)
@@ -42,6 +49,190 @@ CAFE24_LOGEN = "0004"
 
 # 네이버 deliveryCompanyCode
 NAVER_LOGEN = "KGB"  # 로젠택배 (네이버 시스템에선 KGB 코드)
+
+def find_today_excel():
+    """OneDrive 더다 3pl 폴더에서 rclone으로 최신 송장 엑셀 다운로드 후 경로 반환."""
+    import subprocess
+    LOCAL_TRACKING_DIR.mkdir(parents=True, exist_ok=True)
+
+    # rclone으로 최신 파일 동기화
+    r = subprocess.run(
+        ["rclone", "copy", ONEDRIVE_TRACKING_DIR, str(LOCAL_TRACKING_DIR),
+         "--include", "일반_*.xls*", "--transfers=4"],
+        capture_output=True, text=True, timeout=60,
+    )
+    if r.returncode != 0:
+        print(f"rclone 오류: {r.stderr[:200]}")
+
+    # 다운로드된 파일 중 오늘 날짜 우선, 없으면 최신
+    today = datetime.now().strftime("%Y%m%d")
+    files = sorted(LOCAL_TRACKING_DIR.glob("일반_*.xls*"))
+    if not files:
+        return None
+    today_files = [f for f in files if today in f.name]
+    return today_files[-1] if today_files else files[-1]
+
+
+def read_tracking_excel(path: Path):
+    """더다 송장 엑셀 읽기. 카페24/SS 분류 + 전화번호 기준 구매자 수 반환.
+
+    Returns:
+        dict: {
+            "cafe24": [(order_id, item_code, tracking_no)],
+            "naver": [(product_order_id, tracking_no)],
+            "cafe24_buyers": int,  # 전화번호 unique
+            "naver_buyers": int,
+            "filename": str,
+        }
+    """
+    # xls는 xlrd로 cp949 읽기, xlsx는 openpyxl
+    suffix = path.suffix.lower()
+    if suffix == ".xls":
+        import xlrd
+        wb = xlrd.open_workbook(str(path), encoding_override="cp949")
+        ws = wb.sheet_by_index(0)
+        headers = ws.row_values(0)
+        rows = [ws.row_values(i) for i in range(1, ws.nrows)]
+        df = pd.DataFrame(rows, columns=headers)
+    else:
+        df = pd.read_excel(path)
+
+    # 송장번호 숫자→문자열 변환 (과학적 표기 방지)
+    df["송장번호"] = df["송장번호"].apply(
+        lambda x: str(int(float(x))) if pd.notna(x) and str(x) not in ["", "nan"] else ""
+    )
+
+    cafe24_rows = []
+    naver_rows = []
+    cafe24_phones = set()
+    naver_phones = set()
+
+    for _, row in df.iterrows():
+        order_no = str(row.get("주문번호", "")).strip()
+        tracking = str(row.get("송장번호", "")).strip()
+        phone = str(row.get("수취인 휴대전화", "") or row.get("수취인 전화", "")).strip()
+
+        if not order_no or not tracking or tracking == "nan":
+            continue
+
+        # 카페24: YYYYMMDD-NNNNNNN 형식 (하이픈 포함)
+        if "-" in order_no:
+            item_code = str(row.get("주문 상품코드", "")).strip()
+            cafe24_rows.append((order_no, item_code, tracking))
+            if phone:
+                cafe24_phones.add(phone)
+        else:
+            # 스마트스토어: 16자리 숫자
+            naver_rows.append((order_no, tracking))
+            if phone:
+                naver_phones.add(phone)
+
+    return {
+        "cafe24": cafe24_rows,
+        "naver": naver_rows,
+        "cafe24_buyers": len(cafe24_phones),
+        "naver_buyers": len(naver_phones),
+        "filename": path.name,
+    }
+
+
+def run_from_excel():
+    """텔레그램 /tracking 명령 수신 시 호출 — 엑셀 기반 송장 등록"""
+    now = datetime.now()
+    print(f"=== 엑셀 송장 등록 시작 ({now:%Y-%m-%d %H:%M:%S}) ===\n")
+
+    # 1) 엑셀 파일 찾기
+    excel_path = find_today_excel()
+    if not excel_path:
+        telegram_client.send_message(
+            "⚠️ 바탕화면에서 더다 송장 엑셀을 찾을 수 없습니다.\n"
+            "파일명 형식: 일반_YYYYMMDD.xls",
+            channel="ops",
+        )
+        return
+
+    print(f"  파일: {excel_path.name}")
+
+    # 2) 엑셀 파싱
+    try:
+        data = read_tracking_excel(excel_path)
+    except Exception as e:
+        telegram_client.send_message(f"⚠️ 엑셀 읽기 실패: {e}", channel="ops")
+        return
+
+    cafe24_items = data["cafe24"]
+    naver_items = data["naver"]
+    total_buyers = data["cafe24_buyers"] + data["naver_buyers"]
+
+    if not cafe24_items and not naver_items:
+        telegram_client.send_message("⚠️ 등록할 송장이 없습니다.", channel="ops")
+        return
+
+    # 3) 텔레그램 승인 요청
+    msg = (
+        f"📦 송장 등록 준비 완료 ({now:%H:%M})\n\n"
+        f"파일: {data['filename']}\n"
+        f"카페24: {data['cafe24_buyers']}명\n"
+        f"스마트스토어: {data['naver_buyers']}명\n"
+        f"합계: {total_buyers}명\n\n"
+        f"/done → 송장 자동 등록\n"
+        f"/cancel → 취소"
+    )
+    telegram_client.send_message(msg, channel="ops")
+
+    print("  텔레그램 응답 대기 중 (최대 8시간)...")
+    cmd = telegram_client.wait_for_command(["/done", "/cancel"], timeout_seconds=28800, channel="ops")
+    if cmd == "/cancel":
+        telegram_client.send_message("❌ 송장 등록 취소됨.", channel="ops")
+        return
+    if cmd is None:
+        telegram_client.send_message("⏰ 응답 대기 타임아웃.", channel="ops")
+        return
+
+    # 4) 송장 등록
+    print("[등록] 카페24 + 스마트스토어 송장 등록 중...")
+    cafe24_success, cafe24_fail = 0, []
+    naver_success, naver_fail = 0, []
+
+    for order_id, item_code, tracking in cafe24_items:
+        try:
+            r = register_tracking_cafe24(order_id, item_code, tracking, CAFE24_LOGEN)
+            if r.status_code in (200, 201):
+                cafe24_success += 1
+            else:
+                cafe24_fail.append(f"{order_id}: {r.text[:80]}")
+        except Exception as e:
+            cafe24_fail.append(f"{order_id}: {e}")
+
+    for product_order_id, tracking in naver_items:
+        try:
+            r = register_tracking_naver(product_order_id, tracking, NAVER_LOGEN)
+            if r.status_code == 200:
+                result = r.json().get("data", {})
+                if result.get("successProductOrderIds"):
+                    naver_success += 1
+                else:
+                    fail_info = result.get("failProductOrderInfos", [{}])
+                    naver_fail.append(f"{product_order_id}: {fail_info[0].get('message','fail')}")
+            else:
+                naver_fail.append(f"{product_order_id}: {r.text[:80]}")
+        except Exception as e:
+            naver_fail.append(f"{product_order_id}: {e}")
+
+    # 5) 완료 알림
+    result_msg = (
+        f"✅ 송장 등록 완료\n\n"
+        f"카페24: {cafe24_success}/{len(cafe24_items)}건 성공\n"
+        f"스마트스토어: {naver_success}/{len(naver_items)}건 성공"
+    )
+    if cafe24_fail:
+        result_msg += "\n\n카페24 실패:\n" + "\n".join(f"  - {e}" for e in cafe24_fail[:5])
+    if naver_fail:
+        result_msg += "\n\n스마트스토어 실패:\n" + "\n".join(f"  - {e}" for e in naver_fail[:5])
+
+    telegram_client.send_message(result_msg, channel="ops")
+    print(result_msg)
+
 
 def pluscl_to_cafe24(pluscl_code):
     """PlusCL tran_comp_code를 카페24 shipping_company_code로 변환.
