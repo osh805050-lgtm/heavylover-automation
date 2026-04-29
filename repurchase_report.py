@@ -573,9 +573,6 @@ def write_marts(spreadsheet, gt: dict, tabs: dict):
     ws.update(values=[MART_SUMMARY_HEADER] + summary_rows, range_name="A1")
     _log(f"  mart_summary: {len(summary_rows)}행")
 
-    # mart_* 탭 구분 처리: 탭 색상 회색 설정 (내부용임을 시각적으로 표시)
-    _style_mart_tabs(spreadsheet)
-
 
 _MART_TAB_NAMES = ["mart_monthly", "mart_cohort", "mart_stage", "mart_summary"]
 # 회색 탭 색상 (RGB 0~1)
@@ -612,7 +609,7 @@ def _style_mart_tabs(spreadsheet):
 # 숨김 대상: 채널별 중복 탭 + Meta 광고 탭 + 카페24/SS 재구매매출 탭 (통합 탭으로 충분)
 # 이 탭들은 맨 뒤로 이동 후 숨김 처리 (데이터 보존)
 _REDUNDANT_TABS = [
-    # 채널별 중복 — 통합 탭 + mart_*로 커버
+    # 채널별 중복 — 통합 탭으로 충분
     "재구매_카페24_월별",
     "재구매_SS_월별",
     "코호트_카페24_전환율",
@@ -620,10 +617,17 @@ _REDUNDANT_TABS = [
     "구매횟수_퍼널_카페24",
     "구매횟수_퍼널_SS",
     "구매횟수_퍼널_통합",
+    # 고객마스터 — 원본 탭으로 충분, 직접 볼 필요 없음
+    "코호트_고객마스터",
     # Meta 광고 — 별도 시트에서 관리
     "Meta_Ads_Daily",
     "Meta_Ads_Daily_Campaign",
     "Meta_Ads_Winners",
+    # mart_* — 내부 BI용, 대시보드로 대체
+    "mart_monthly",
+    "mart_cohort",
+    "mart_stage",
+    "mart_summary",
 ]
 
 # 카페24/SS 채널별 재구매매출 탭 — 맨 뒤 이동 후 숨김
