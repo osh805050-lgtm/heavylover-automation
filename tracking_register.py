@@ -97,10 +97,17 @@ def read_tracking_excel(path: Path):
     else:
         df = pd.read_excel(path)
 
-    # 송장번호 숫자→문자열 변환 (과학적 표기 방지)
-    df["송장번호"] = df["송장번호"].apply(
-        lambda x: str(int(float(x))) if pd.notna(x) and str(x) not in ["", "nan"] else ""
-    )
+    def _to_str(val):
+        """숫자형 셀값을 문자열로 변환 (과학적 표기 방지)"""
+        if pd.isna(val) or str(val) in ("", "nan"):
+            return ""
+        try:
+            return str(int(float(val)))
+        except Exception:
+            return str(val).strip()
+
+    df["송장번호"] = df["송장번호"].apply(_to_str)
+    df["주문번호"] = df["주문번호"].apply(_to_str)
 
     cafe24_rows = []
     naver_rows = []
@@ -108,8 +115,8 @@ def read_tracking_excel(path: Path):
     naver_phones = set()
 
     for _, row in df.iterrows():
-        order_no = str(row.get("주문번호", "")).strip()
-        tracking = str(row.get("송장번호", "")).strip()
+        order_no = _to_str(row.get("주문번호", ""))
+        tracking = _to_str(row.get("송장번호", ""))
         phone = str(row.get("수취인 휴대전화", "") or row.get("수취인 전화", "")).strip()
 
         if not order_no or not tracking or tracking == "nan":
@@ -194,9 +201,19 @@ def run_from_excel():
     cafe24_success, cafe24_fail = 0, []
     naver_success, naver_fail = 0, []
 
-    for order_id, item_code, tracking in cafe24_items:
+    # 카페24: 주문번호 중복 제거 후 API로 order_item_code 조회
+    seen_cafe24 = {}
+    for order_id, _, tracking in cafe24_items:
+        if order_id not in seen_cafe24:
+            seen_cafe24[order_id] = tracking
+
+    for order_id, tracking in seen_cafe24.items():
         try:
-            r = register_tracking_cafe24(order_id, item_code, tracking, CAFE24_LOGEN)
+            item_codes = cafe24_client.get_order_item_codes(order_id)
+            if not item_codes:
+                cafe24_fail.append(f"{order_id}: order_item_code 조회 실패")
+                continue
+            r = register_tracking_cafe24(order_id, item_codes, tracking, CAFE24_LOGEN)
             if r.status_code in (200, 201):
                 cafe24_success += 1
             else:
@@ -310,15 +327,17 @@ def fetch_pluscl_shipments(hours_back=24):
     return [d for d in data if d.get("invoice_no")]
 
 
-def register_tracking_cafe24(order_id, item_code, tracking_no, carrier_code):
+def register_tracking_cafe24(order_id, item_codes, tracking_no, carrier_code):
     """카페24에 송장번호 등록 (배송중 전환)
 
-    POST /api/v2/admin/orders/{order_id}/shipments
+    item_codes: list[str] — API 조회로 얻은 order_item_code 목록
     """
+    if isinstance(item_codes, str):
+        item_codes = [item_codes]
     body = {
         "shop_no": 1,
         "request": {
-            "order_item_code": [item_code],
+            "order_item_code": item_codes,
             "tracking_no": tracking_no,
             "shipping_company_code": carrier_code,
             "status": "shipping",

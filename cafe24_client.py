@@ -199,6 +199,19 @@ def fetch_orders(days_back=1):
     return all_orders
 
 
+def get_order_item_codes(order_id):
+    """카페24 주문번호로 order_item_code 목록 조회.
+
+    Returns:
+        list[str]: order_item_code 리스트 (보통 1개, 여러 품목 주문 시 복수)
+    """
+    r = _api_get(f"/api/v2/admin/orders/{order_id}", params={"embed": "items"})
+    if r.status_code != 200:
+        return []
+    items = r.json().get("order", {}).get("items", [])
+    return [item["order_item_code"] for item in items if item.get("order_item_code")]
+
+
 def orders_to_dada_rows(orders):
     """카페24 주문 리스트 → 더다 양식 DataFrame
 
