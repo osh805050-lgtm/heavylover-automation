@@ -175,7 +175,13 @@ def run(skip_weekend_check=False):
         print("  - 주문 0건, 종료")
         return None, True
 
-    output_path = create_dada_file(combined)
+    try:
+        output_path = create_dada_file(combined)
+    except Exception as e:
+        msg = f"❌ 엑셀 생성 실패\n{e}\n\n확인: DADA_TEMPLATE 경로 또는 템플릿 파일 존재 여부"
+        telegram_client.send_message(msg, channel="ops")
+        print(f"  - 엑셀 생성 실패: {e}")
+        return None, False
     print(f"  - 파일: {output_path}")
     print(f"  - 총 {len(combined)}행 (카페24 {len(cafe24_df)} + 네이버 {len(naver_df)})")
 

@@ -597,6 +597,18 @@ def main():
                 log.error(f"텔레그램 메시지 {i}/{len(messages)} 에러: {e}")
         log.info(f"텔레그램 발송: {success_count}/{len(messages)}개 성공")
 
+        # 이메일 일일 요약 발송
+        try:
+            import email_sender
+            today_str = datetime.now(KST).strftime("%Y-%m-%d")
+            high_count = sum(1 for it in scored if it.get("score", 0) >= 7)
+            subject = f"[정부지원 레이더] {today_str} 일일 요약 — 총 {len(scored)}건 / S·A {high_count}건"
+            email_body = "\n\n".join(messages) if messages else "오늘 적합 공고 없음"
+            email_sender.send_email(subject=subject, text_body=email_body)
+            log.info("이메일 일일 발송 성공")
+        except Exception as e:
+            log.warning(f"이메일 발송 실패 (텔레그램은 성공): {e}")
+
     # 캘린더 자동 등록 (적합도 ≥ 7 + 마감일 있는 공고)
     try:
         from lib import calendar_client

@@ -16,9 +16,14 @@ from dotenv import load_dotenv
 _ENV_PATH = Path(__file__).parent / ".env"
 load_dotenv(_ENV_PATH, override=True)
 
-# 경로 설정 - 환경변수 DADA_FOLDER/DADA_TEMPLATE로 오버라이드 가능 (서버 배포용)
-_DEFAULT_DADA_FOLDER = Path("C:/Users/osh80/OneDrive/바탕 화면/사업/더다 3pl/더다 양식")
-_DEFAULT_TEMPLATE = _DEFAULT_DADA_FOLDER / "더다냉동물류 발주양식 25.7.8.xlsx"
+# 경로 설정 - 환경변수 DADA_FOLDER/DADA_TEMPLATE 우선, 없으면 OS별 기본값
+_SCRIPT_DIR = Path(__file__).parent
+if os.name == "nt":  # Windows
+    _DEFAULT_DADA_FOLDER = Path("C:/Users/osh80/OneDrive/바탕 화면/사업/더다 3pl/더다 양식")
+    _DEFAULT_TEMPLATE = _DEFAULT_DADA_FOLDER / "더다냉동물류 발주양식 25.7.8.xlsx"
+else:  # Linux (Vultr)
+    _DEFAULT_DADA_FOLDER = _SCRIPT_DIR / "output"
+    _DEFAULT_TEMPLATE = _SCRIPT_DIR / "template" / "더다냉동물류_발주양식.xlsx"
 
 DADA_FOLDER = Path(os.getenv("DADA_FOLDER") or _DEFAULT_DADA_FOLDER)
 TEMPLATE_FILE = Path(os.getenv("DADA_TEMPLATE") or _DEFAULT_TEMPLATE)
