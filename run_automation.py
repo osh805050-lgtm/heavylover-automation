@@ -242,6 +242,40 @@ def run(skip_weekend_check=False):
     telegram_client.send_document(str(output_path), caption=result_msg, channel="ops")
     print("  - 텔레그램 전송 완료")
 
+    # 6) 송장 등록 단계 (당일 23:59까지 대기, 미응답 시 자동 종료)
+    print("\n[6/6] 송장 등록 대기 중...")
+    import tracking_register
+
+    midnight = datetime.now().replace(hour=23, minute=59, second=59, microsecond=0)
+    secs_until_midnight = max(60, int((midnight - datetime.now()).total_seconds()))
+
+    telegram_client.send_message(
+        "📦 송장 등록할까요?\n"
+        "/tracking → 송장 엑셀로 즉시 등록\n"
+        "/skip → 오늘 송장 등록 안 함\n\n"
+        "(오늘 23:59까지 대기, 미응답 시 자동 종료)",
+        channel="ops",
+    )
+
+    cmd2 = telegram_client.wait_for_command(
+        ["/tracking", "/skip"],
+        timeout_seconds=secs_until_midnight,
+        channel="ops",
+    )
+    if cmd2 == "/tracking":
+        print("  - /tracking 받음 → 송장 등록 시작")
+        try:
+            tracking_register.run_from_excel()
+        except Exception as e:
+            telegram_client.send_message(f"❌ 송장 등록 오류: {e}", channel="ops")
+            print(f"  - 송장 등록 오류: {e}")
+    elif cmd2 == "/skip":
+        telegram_client.send_message("✅ 오늘 송장 등록 건너뜀", channel="ops")
+        print("  - /skip → 송장 등록 건너뜀")
+    else:
+        telegram_client.send_message("⏰ 송장 등록 자동 종료 (자정 도달)", channel="ops")
+        print("  - 자정 도달 타임아웃")
+
     print(f"\n=== 완료 ===")
     print(f"생성 파일: {output_path}")
     return output_path, is_valid

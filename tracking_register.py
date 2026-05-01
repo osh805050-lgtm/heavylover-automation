@@ -156,7 +156,7 @@ def read_tracking_excel(path: Path):
 
 
 def run_from_excel():
-    """텔레그램 /tracking 명령 수신 시 호출 — 엑셀 기반 송장 등록"""
+    """엑셀 기반 송장 등록 — 발주 자동화(/tracking)에서 호출됨"""
     now = datetime.now()
     print(f"=== 엑셀 송장 등록 시작 ({now:%Y-%m-%d %H:%M:%S}) ===\n")
 
@@ -187,26 +187,13 @@ def run_from_excel():
         telegram_client.send_message("⚠️ 등록할 송장이 없습니다.", channel="ops")
         return
 
-    # 3) 텔레그램 승인 요청
-    msg = (
-        f"📦 송장 등록 준비 완료 ({now:%H:%M})\n\n"
+    # 3) 즉시 등록 시작 (재확인 단계 없음 — 이미 /tracking 받은 상태)
+    telegram_client.send_message(
+        f"📦 송장 등록 시작\n"
         f"파일: {data['filename']}\n"
-        f"카페24: {data['cafe24_buyers']}명\n"
-        f"스마트스토어: {data['naver_buyers']}명\n"
-        f"합계: {total_buyers}명\n\n"
-        f"/done → 송장 자동 등록\n"
-        f"/cancel → 취소"
+        f"카페24 {data['cafe24_buyers']}명 + SS {data['naver_buyers']}명 = 총 {total_buyers}명",
+        channel="ops",
     )
-    telegram_client.send_message(msg, channel="ops")
-
-    print("  텔레그램 응답 대기 중 (최대 8시간)...")
-    cmd = telegram_client.wait_for_command(["/done", "/cancel"], timeout_seconds=28800, channel="ops")
-    if cmd == "/cancel":
-        telegram_client.send_message("❌ 송장 등록 취소됨.", channel="ops")
-        return
-    if cmd is None:
-        telegram_client.send_message("⏰ 응답 대기 타임아웃.", channel="ops")
-        return
 
     # 4) 송장 등록
     print("[등록] 카페24 + 스마트스토어 송장 등록 중...")
