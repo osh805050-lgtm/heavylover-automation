@@ -51,7 +51,10 @@ CAFE24_LOGEN = "0004"
 NAVER_LOGEN = "KGB"  # 로젠택배 (네이버 시스템에선 KGB 코드)
 
 def find_today_excel():
-    """OneDrive 더다 3pl 폴더에서 rclone으로 최신 송장 엑셀 다운로드 후 경로 반환."""
+    """OneDrive 바탕화면에서 오늘 날짜 송장 엑셀만 다운로드 후 경로 반환.
+
+    오늘 날짜 파일이 없으면 None 반환 (이전 날짜 fallback 없음 — 잘못된 송장번호 등록 차단).
+    """
     import subprocess
     LOCAL_TRACKING_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -64,13 +67,10 @@ def find_today_excel():
     if r.returncode != 0:
         print(f"rclone 오류: {r.stderr[:200]}")
 
-    # 다운로드된 파일 중 오늘 날짜 우선, 없으면 최신
+    # 오늘 날짜 파일만 찾음 — 없으면 None (이전 날짜 fallback 제거)
     today = datetime.now().strftime("%Y%m%d")
-    files = sorted(LOCAL_TRACKING_DIR.glob("일반_*.xls*"))
-    if not files:
-        return None
-    today_files = [f for f in files if today in f.name]
-    return today_files[-1] if today_files else files[-1]
+    today_files = sorted(LOCAL_TRACKING_DIR.glob(f"일반_*{today}*.xls*"))
+    return today_files[-1] if today_files else None
 
 
 def read_tracking_excel(path: Path):
@@ -160,12 +160,14 @@ def run_from_excel():
     now = datetime.now()
     print(f"=== 엑셀 송장 등록 시작 ({now:%Y-%m-%d %H:%M:%S}) ===\n")
 
-    # 1) 엑셀 파일 찾기
+    # 1) 엑셀 파일 찾기 (오늘 날짜만 — 이전 날짜 fallback 없음)
     excel_path = find_today_excel()
     if not excel_path:
+        today = datetime.now().strftime("%Y%m%d")
         telegram_client.send_message(
-            "⚠️ 바탕화면에서 더다 송장 엑셀을 찾을 수 없습니다.\n"
-            "파일명 형식: 일반_YYYYMMDD.xls",
+            f"⚠️ 오늘({today}) 송장 엑셀을 찾을 수 없습니다.\n"
+            f"OneDrive 바탕화면에 '일반_{today}.xls' 파일을 올린 후\n"
+            f"다음 11시 자동화에서 다시 시도해주세요.",
             channel="ops",
         )
         return
