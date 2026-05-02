@@ -50,7 +50,7 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
-        run: python meta_ads_report.py --model=claude-opus-4-7
+        run: python meta_ads_report.py
 
       - name: Commit report
         run: |
