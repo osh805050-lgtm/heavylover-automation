@@ -1,0 +1,60 @@
+name: gitleaks 보안 스캔
+
+on:
+  schedule:
+    # 매주 월요일 09:00 KST (00:00 UTC) — Dependabot과 동일 시간대
+    - cron: '0 0 * * 1'
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks 실행
+        id: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: true
+          GITLEAKS_ENABLE_SUMMARY: true
+
+      - name: 텔레그램 알림 (누출 발견 시)
+        if: steps.gitleaks.outcome == 'failure'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          MESSAGE=$'🚨 *gitleaks 누출 감지*\n\n'
+          MESSAGE+=$'레포: `${{ github.repository }}`\n'
+          MESSAGE+=$'트리거: ${{ github.event_name }}\n'
+          MESSAGE+=$'상세: '"${RUN_URL}"
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d parse_mode="Markdown" \
+            -d text="${MESSAGE}" || true
+
+      - name: 텔레그램 알림 (주간 정상 보고 — 월요일 cron만)
+        if: steps.gitleaks.outcome == 'success' && github.event_name == 'schedule'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          MESSAGE=$'✅ gitleaks 주간 스캔 — 누출 0건'
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="${MESSAGE}" || true
+
+      - name: 누출 발견 시 워크플로우 실패 처리
+        if: steps.gitleaks.outcome == 'failure'
+        run: exit 1
