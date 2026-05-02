@@ -84,23 +84,23 @@ def build_kpi_cards_html(enriched: dict) -> str:
     sales_card = _card(
         "당월 매출",
         _format_money(sales_val),
-        f"MoM {mom:+.1f}%" if mom is not None else "MoM —",
+        f"전월대비 {mom:+.2f}%" if mom is not None else "전월대비 —",
         sales_bg, sales_bd, sales_tx, sales_badge,
     )
 
     bg, bd, tx, badge = _color_for(rate_1to2, 30, severity_pct=15)
     conv_card = _card(
-        "1→2 전환",
-        f"{rate_1to2:.1f}%" if rate_1to2 is not None else "—",
-        "목표 30%",
+        "1→2 재구매",
+        f"{rate_1to2:.2f}%" if rate_1to2 is not None else "—",
+        "목표 30% (첫→두번째 구매)",
         bg, bd, tx, badge,
     )
 
     bg, bd, tx, badge = _color_for(m1, 20, severity_pct=15)
     m1_card = _card(
-        "M+1 리텐션",
-        f"{m1:.1f}%" if m1 is not None else "—",
-        "벤치 20%",
+        "한달 재구매율",
+        f"{m1:.2f}%" if m1 is not None else "—",
+        "목표 20% (첫달 안 재구매)",
         bg, bd, tx, badge,
     )
 
@@ -114,9 +114,9 @@ def build_kpi_cards_html(enriched: dict) -> str:
     else:
         bg, bd, tx, badge = "#fdedec", "#e74c3c", "#922b21", "🔴"
     p50_card = _card(
-        "재구매 P50",
+        "재구매 간격",
         str(p50_raw) if p50_raw else "—",
-        "정상 14~16일",
+        "절반 기준 10~16일",
         bg, bd, tx, badge,
     )
 

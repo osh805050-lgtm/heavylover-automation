@@ -33,6 +33,8 @@ from lib.historical_data import enrich, load_recent_gt
 from lib import recommendation_log
 from lib.charts import generate_weekly_charts
 from report_email_daily import _md_to_html, _wrap_html
+from lib.kpi_cards import build_kpi_cards_html
+from lib.glossary import glossary_details_html
 
 KST = timezone(timedelta(hours=9))
 ENV_PATH = Path(__file__).parent / ".env"
@@ -164,7 +166,7 @@ def call_claude(system: str, user: str) -> str | None:
     client = Anthropic(api_key=api_key)
     try:
         resp = client.messages.create(
-            model="claude-opus-4-7",
+            model="claude-sonnet-4-6",
             max_tokens=4500,
             system=system,
             messages=[{"role": "user", "content": user}],
@@ -308,7 +310,11 @@ def main() -> int:
             charts = {}
 
         if analysis:
-            html = _wrap_html(_md_to_html(analysis), enriched, chart_cids=list(charts.keys()))
+            html = _wrap_html(
+                glossary_details_html() + _md_to_html(analysis),
+                enriched,
+                chart_cids=list(charts.keys()),
+            )
             send_email(
                 subject=f"📊 HeavyLover 주간 심층 (멀티 에이전트) — {today}",
                 text_body=analysis,

@@ -57,6 +57,12 @@ BENCHMARK = {
     "frequency_high": 4.0,
 }
 
+# Kill Criteria (CLAUDE.md §14, docs/strategy/outputs/ 확정)
+KILL_CRITERIA = {
+    "K1_roas_min": 2.8,      # ROAS < 2.8 → 광고비 -30% (발동 시 승현님 수동 집행 필요)
+    "K6_aov_min": 58_000,    # AOV < 58,000원 2개월 연속 → 타겟 리셋
+}
+
 # 광고 계정 통화: USD. 자사 KRW 벤치마크와 비교 위해 환산.
 # 환율 고정 1,450원/USD (2026-04-28 승인). 변동 환율 미사용 — 추세 일관성 우선.
 CURRENCY_KRW_PER_USD = 1450
@@ -99,12 +105,19 @@ def _first_non_none(fn, row, keys):
     return None, None
 
 
+from lib.format_utils import fmt_money, fmt_ratio, fmt_pct, fmt_count
+
+
 def _fmt_num(v, decimals=0, suffix=""):
     if v is None:
         return "데이터 없음"
     try:
+        if suffix == "원":
+            return fmt_money(v)
+        if suffix == "%":
+            return fmt_pct(v, decimals=decimals)
         if decimals == 0:
-            return f"{int(round(v)):,}{suffix}"
+            return fmt_count(v, suffix=suffix) if suffix else f"{int(round(v)):,}"
         return f"{v:,.{decimals}f}{suffix}"
     except (TypeError, ValueError):
         return "데이터 없음"
@@ -191,22 +204,33 @@ def compute_metrics(row):
 
 
 def build_flags(m):
-    """CLAUDE.md §8 자동 플래그 조건"""
+    """CLAUDE.md §8 자동 플래그 조건 + Kill Criteria K1~K3"""
     flags = []
     if m["frequency"] is not None and m["frequency"] > 5:
-        flags.append(f"⚠️ Frequency {m['frequency']:.2f} > 5 → 크리에이티브 피로")
+        flags.append(f"⚠️ 같은 광고 반복 노출 {m['frequency']:.2f}회 > 5회 → 소재 교체 필요 (광고 피로)")
     if m["cpa_krw"] is not None and m["cpa_krw"] > BENCHMARK["cpa_krw"] * 1.5:
         flags.append(
-            f"⚠️ CPA {int(m['cpa_krw']):,}원 > 벤치×1.5 ({int(BENCHMARK['cpa_krw']*1.5):,}원) "
-            "→ 오디언스/크리에이티브 재검토"
+            f"⚠️ 고객 1명 구매 비용 {int(m['cpa_krw']):,}원 — 기준({int(BENCHMARK['cpa_krw']*1.5):,}원) 초과 "
+            "→ 타겟·소재 재검토"
         )
-    if m["roas"] is not None and m["roas"] < 2.0:
-        flags.append(f"⚠️ ROAS {m['roas']:.2f} < 2.0 → 캠페인 일시 정지 검토")
+    # Kill Criteria K1: ROAS < 2.8 → 광고비 -30% (2.0 미만은 즉시 중단)
+    k1_threshold = KILL_CRITERIA["K1_roas_min"]
+    if m["roas"] is not None and m["roas"] < k1_threshold:
+        if m["roas"] < 2.0:
+            flags.append(
+                f"🔴 [K1 발동] ROAS {m['roas']:.2f} < 2.0 → 광고비 즉시 -30% 집행 필요 "
+                "(Kill Criteria K1 초과 — 승현님 수동 조치 필요)"
+            )
+        else:
+            flags.append(
+                f"🟡 [K1 경보] ROAS {m['roas']:.2f} — Kill Criteria 기준({k1_threshold}) 미달 "
+                "→ 광고비 -30% 준비. 3일 연속 시 즉시 집행"
+            )
     if (
         m["impressions"] is not None and m["impressions"] < 1000
         and m["spend"] is not None and m["spend"] > 0
     ):
-        flags.append("⚠️ 노출 1,000 미만 + 지출 발생 → Learning Limited 의심")
+        flags.append("⚠️ 광고 노출 1,000회 미만 + 광고비 지출 → 광고 학습 부족 (예산·기간 부족 가능성)")
     return flags
 
 
@@ -236,7 +260,7 @@ def format_markdown_report(target_date, metrics, flags, validation, raw_data, se
 
     lines.append("## 핵심 지표")
     lines.append("")
-    lines.append("| 지표 | 실측 | 업계 평균 | 정적 대비 | 자사 P50 |")
+    lines.append("| 지표 | 오늘 | 업계 기준값 | 업계 대비 | 우리 중간값(P50) |")
     lines.append("|---|---|---|---|---|")
     lines.append(
         f"| 지출 | {_fmt_num(metrics['spend'], 0, '원')} | - | - | - |"
@@ -368,13 +392,13 @@ def format_telegram_summary(target_date, metrics, flags, ok, action_text=None):
     lines.append("")
 
     # ═══ 효율 지표 (한 블록에)
-    lines.append("◆ 효율")
+    lines.append("◆ 광고 효율")
     ctr_em = _verdict_emoji(ctr, BENCHMARK['ctr_pct'], True)
-    lines.append(f"  CTR    {_fmt_num(ctr, 2, '%')}  {ctr_em}  (벤치 {BENCHMARK['ctr_pct']}%)")
+    lines.append(f"  클릭률(CTR)      {_fmt_num(ctr, 2, '%')}  {ctr_em}  (기준 {BENCHMARK['ctr_pct']}%)")
     cpc_em = _verdict_emoji(cpc, BENCHMARK['cpc_krw'], False)
-    lines.append(f"  CPC    {_fmt_num(cpc, 0, '원')}  {cpc_em}  (벤치 {BENCHMARK['cpc_krw']:,}원)")
+    lines.append(f"  클릭당 비용(CPC) {_fmt_num(cpc, 0, '원')}  {cpc_em}  (기준 {BENCHMARK['cpc_krw']:,}원)")
     cpa_em = _verdict_emoji(cpa, BENCHMARK['cpa_krw'], False)
-    lines.append(f"  CPA    {_fmt_num(cpa, 0, '원')}  {cpa_em}  (벤치 {BENCHMARK['cpa_krw']:,}원)")
+    lines.append(f"  구매 비용(CPA)   {_fmt_num(cpa, 0, '원')}  {cpa_em}  (기준 {BENCHMARK['cpa_krw']:,}원)")
     # Frequency는 별도 — 범위 안이면 OK
     freq_em = "🔵"
     if freq is not None:
@@ -382,7 +406,7 @@ def format_telegram_summary(target_date, metrics, flags, ok, action_text=None):
             freq_em = "🔴"
         elif freq > BENCHMARK['frequency_high']:
             freq_em = "🟡"
-    lines.append(f"  Freq   {_fmt_num(freq, 2)}  {freq_em}  (적정 {BENCHMARK['frequency_low']}~{BENCHMARK['frequency_high']})")
+    lines.append(f"  반복 노출(Freq)  {_fmt_num(freq, 2)}회  {freq_em}  (적정 {BENCHMARK['frequency_low']}~{BENCHMARK['frequency_high']}회)")
     lines.append("")
 
     # ═══ 플래그 (있을 때만, 시선 끌도록 ▶ 사용)
@@ -569,6 +593,15 @@ def save_report(target_date, content):
 
 
 def run():
+    import argparse
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--model", default=None, help="Claude 모델 오버라이드 (품질 비교 테스트용)")
+    args, _ = parser.parse_known_args()
+    if args.model:
+        import meta_ads_email_daily as _med
+        _med.CLAUDE_MODEL = args.model
+        print(f"[테스트] Claude 모델 오버라이드: {args.model}")
+
     print("Meta 광고 리포트 생성 시작")
     raw = fetch_account_insights()
     target_date = raw["target_date"]

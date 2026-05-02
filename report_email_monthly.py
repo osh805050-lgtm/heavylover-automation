@@ -33,6 +33,7 @@ from lib.historical_data import enrich, load_recent_gt
 from lib.charts import generate_weekly_charts
 from lib import recommendation_log
 from report_email_daily import _md_to_html, _wrap_html
+from lib.glossary import glossary_details_html
 
 KST = timezone(timedelta(hours=9))
 ENV_PATH = Path(__file__).parent / ".env"
@@ -275,7 +276,11 @@ def main() -> int:
             charts = {}
 
         if analysis:
-            html = _wrap_html(_md_to_html(analysis), enriched, chart_cids=list(charts.keys()))
+            html = _wrap_html(
+                glossary_details_html() + _md_to_html(analysis),
+                enriched,
+                chart_cids=list(charts.keys()),
+            )
             send_email(
                 subject=f"📅 HeavyLover 월간 액션 (5회 왕복) — {today}",
                 text_body=analysis,

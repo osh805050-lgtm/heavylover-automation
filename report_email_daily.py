@@ -31,6 +31,7 @@ from lib.historical_data import enrich
 from lib import recommendation_log
 from lib.charts import generate_daily_charts
 from lib.kpi_cards import build_kpi_cards_html
+from lib.glossary import glossary_details_html
 
 KST = timezone(timedelta(hours=9))
 ENV_PATH = Path(__file__).parent / ".env"
@@ -109,7 +110,7 @@ def call_claude(enriched_gt: dict, rec_block: str = "") -> str | None:
 
     try:
         resp = client.messages.create(
-            model="claude-opus-4-7",
+            model="claude-sonnet-4-6",
             max_tokens=3500,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user}],
@@ -323,7 +324,11 @@ def main() -> int:
             charts = {}
 
         if analysis:
-            html = _wrap_html(_md_to_html(analysis), enriched, chart_cids=list(charts.keys()))
+            html = _wrap_html(
+                glossary_details_html() + _md_to_html(analysis),
+                enriched,
+                chart_cids=list(charts.keys()),
+            )
             send_email(
                 subject=f"📊 HeavyLover 재구매 일일 — {today}",
                 text_body=analysis,
@@ -343,9 +348,22 @@ def main() -> int:
             print(f"일일 이메일 발송 완료 ({today})")
             return 0
         else:
-            text, html = fallback_email_body(enriched, "Anthropic API 401 또는 호출 실패")
-            # fallback도 차트는 포함 (분석 텍스트 없어도 시각화는 가치)
-            html_with_charts = _wrap_html(_md_to_html(text), enriched, chart_cids=list(charts.keys()))
+            # 크레딧 부족이면 ops 채널 즉시 알림
+            try:
+                from telegram_client import send_message as _tg
+                _tg(
+                    f"🚨 Anthropic 크레딧 부족 — 재구매 분석 실패\n"
+                    f"console.anthropic.com → Plans & Billing → Add credits",
+                    channel="ops",
+                )
+            except Exception:
+                pass
+            text, html = fallback_email_body(enriched, "Anthropic API 크레딧 부족 또는 호출 실패")
+            html_with_charts = _wrap_html(
+                glossary_details_html() + _md_to_html(text),
+                enriched,
+                chart_cids=list(charts.keys()),
+            )
             send_email(
                 subject=f"⚠️ HeavyLover 재구매 일일 (fallback) — {today}",
                 text_body=text,

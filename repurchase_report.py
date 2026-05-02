@@ -1194,7 +1194,7 @@ def call_claude(gt: dict, feedback: str = "") -> str:
     user = USER_PROMPT_TEMPLATE.format(gt_json=gt_json, feedback_block=feedback_block)
 
     resp = client.messages.create(
-        model="claude-opus-4-7",
+        model="claude-sonnet-4-6",
         max_tokens=1500,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user}],

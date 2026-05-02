@@ -357,6 +357,129 @@ def _assign_notify_ids(scored_items):
         s["notify_id"] = f"B{idx}"
 
 
+def _build_govt_email_html(scored_items, today_str: str) -> str:
+    """정부지원 레이더 일일 HTML 이메일 본문.
+
+    S·A 등급: 개별 카드 (제목·기관·마감일·적합도 컬러바·키워드·URL)
+    B 등급: 목록 테이블
+    C 등급: 건수만
+    """
+    EXCLUDE_TIER_PREFIX = ("타지역", "제외", "비공고", "메뉴", "자격미달", "검증불가")
+    notify = [
+        s for s in scored_items
+        if (s.get("score") or 0) >= 3
+        and not (s.get("tier") or "").startswith(EXCLUDE_TIER_PREFIX)
+    ]
+    s_tier = [s for s in notify if s.get("score", 0) >= 9]
+    a_tier = [s for s in notify if 7 <= s.get("score", 0) < 9]
+    b_tier = [s for s in notify if 5 <= s.get("score", 0) < 7]
+    c_count = sum(1 for s in notify if 3 <= s.get("score", 0) < 5)
+
+    def _score_color(score):
+        if score >= 9:
+            return "#e74c3c"
+        if score >= 7:
+            return "#e67e22"
+        if score >= 5:
+            return "#f1c40f"
+        return "#95a5a6"
+
+    def _card(s, tier_label):
+        score = s.get("score", 0)
+        title = (s.get("title") or "제목 없음")[:60]
+        agency = (s.get("agency") or "")[:40]
+        deadline = s.get("deadline") or "마감일 미정"
+        url = s.get("url") or ""
+        matched = ", ".join((s.get("matched") or [])[:5])
+        color = _score_color(score)
+        score_bar = (
+            f"<div style='background:#eee;border-radius:3px;height:6px;margin:6px 0;'>"
+            f"<div style='background:{color};width:{min(score*10,100)}%;height:6px;border-radius:3px;'></div>"
+            f"</div>"
+        )
+        url_html = (
+            f"<a href='{url}' style='color:#3498db;font-size:12px;'>신청 페이지 열기</a>"
+            if url else ""
+        )
+        kw_html = (
+            f"<div style='font-size:11px;color:#7f8c8d;margin-top:4px;'>키워드: {matched}</div>"
+            if matched else ""
+        )
+        return (
+            f"<div style='border:1px solid #e1e4e8;border-left:4px solid {color};border-radius:6px;"
+            f"padding:12px 14px;margin:8px 0;background:white;'>"
+            f"<div style='font-size:13px;font-weight:bold;color:#2c3e50;'>{tier_label} {title}</div>"
+            f"<div style='font-size:12px;color:#555;margin-top:3px;'>🏛 {agency} &nbsp;|&nbsp; 📅 {deadline}</div>"
+            f"{score_bar}"
+            f"<div style='font-size:12px;color:{color};font-weight:bold;'>적합도 {score}/10</div>"
+            f"{kw_html}"
+            f"<div style='margin-top:8px;'>{url_html}</div>"
+            f"</div>"
+        )
+
+    cards_html = ""
+    if s_tier:
+        cards_html += f"<h2 style='color:#e74c3c;font-size:15px;margin:16px 0 4px 0;'>🚨 S 긴급 — 즉시 검토 ({len(s_tier)}건)</h2>"
+        for i, s in enumerate(s_tier, 1):
+            cards_html += _card(s, f"S{i}")
+
+    if a_tier:
+        cards_html += f"<h2 style='color:#e67e22;font-size:15px;margin:16px 0 4px 0;'>⭐ A 등급 — 사업계획서 후보 ({len(a_tier)}건)</h2>"
+        for i, s in enumerate(a_tier, 1):
+            cards_html += _card(s, f"A{i}")
+
+    if b_tier:
+        cards_html += f"<h2 style='color:#f39c12;font-size:15px;margin:16px 0 4px 0;'>📋 B 등급 — 검토 ({len(b_tier)}건)</h2>"
+        rows = ""
+        for i, s in enumerate(b_tier[:15], 1):
+            title = (s.get("title") or "")[:55]
+            deadline = s.get("deadline") or "미정"
+            score = s.get("score", 0)
+            rows += (
+                f"<tr>"
+                f"<td style='padding:5px 8px;border-bottom:1px solid #eee;font-size:12px;color:#2c3e50;'>B{i}</td>"
+                f"<td style='padding:5px 8px;border-bottom:1px solid #eee;font-size:12px;'>{title}</td>"
+                f"<td style='padding:5px 8px;border-bottom:1px solid #eee;font-size:12px;text-align:center;'>{score}</td>"
+                f"<td style='padding:5px 8px;border-bottom:1px solid #eee;font-size:12px;color:#e74c3c;'>{deadline}</td>"
+                f"</tr>"
+            )
+        cards_html += (
+            "<table style='width:100%;border-collapse:collapse;font-size:12px;'>"
+            "<tr style='background:#f8f9fa;'>"
+            "<th style='padding:5px 8px;text-align:left;'>ID</th>"
+            "<th style='padding:5px 8px;text-align:left;'>공고명</th>"
+            "<th style='padding:5px 8px;text-align:center;'>점수</th>"
+            "<th style='padding:5px 8px;text-align:left;'>마감</th>"
+            "</tr>"
+            f"{rows}</table>"
+        )
+
+    if c_count:
+        cards_html += (
+            f"<p style='font-size:12px;color:#888;margin-top:12px;'>📎 C 등급 {c_count}건 — "
+            "텔레그램 또는 Google Sheets에서 확인</p>"
+        )
+
+    if not cards_html:
+        cards_html = "<p style='color:#888;'>오늘은 새로운 적합 공고가 없습니다.</p>"
+
+    total = len(notify)
+    return f"""<!DOCTYPE html>
+<html><head><meta charset='utf-8'></head>
+<body style='font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;max-width:720px;margin:0 auto;padding:20px;color:#333;line-height:1.55;background:#fafbfc;'>
+<div style='background:linear-gradient(135deg,#1a73e8 0%,#0d47a1 100%);color:white;padding:18px 22px;border-radius:8px;margin-bottom:20px;'>
+  <h1 style='margin:0 0 4px 0;font-size:20px;'>🎯 정부지원 레이더</h1>
+  <div style='opacity:0.9;font-size:13px;'>{today_str} 일일 요약 &nbsp;|&nbsp; 적합 공고 {total}건 (S {len(s_tier)} / A {len(a_tier)} / B {len(b_tier)} / C {c_count})</div>
+</div>
+<div style='background:#fff3cd;border-left:4px solid #f39c12;padding:10px 14px;border-radius:4px;margin-bottom:16px;font-size:13px;color:#856404;'>
+  💬 텔레그램 명령: /details S1 &nbsp;·&nbsp; /why A2 &nbsp;·&nbsp; /save S1 &nbsp;·&nbsp; /draft A1
+</div>
+{cards_html}
+<hr style='border:none;border-top:1px solid #eee;margin:24px 0;'>
+<div style='font-size:11px;color:#aaa;text-align:center;'>자동 발송 · HeavyLover 정부지원 레이더 · 매일 09:00 KST</div>
+</body></html>"""
+
+
 def build_telegram_messages(scored_items, stats_l1, count_l2, today_str):
     """텔레그램 메시지 구성 (분할 발송용 list[str] 반환).
 
@@ -603,8 +726,9 @@ def main():
             today_str = datetime.now(KST).strftime("%Y-%m-%d")
             high_count = sum(1 for it in scored if it.get("score", 0) >= 7)
             subject = f"[정부지원 레이더] {today_str} 일일 요약 — 총 {len(scored)}건 / S·A {high_count}건"
-            email_body = "\n\n".join(messages) if messages else "오늘 적합 공고 없음"
-            email_sender.send_email(subject=subject, text_body=email_body)
+            text_body = "\n\n".join(messages) if messages else "오늘 적합 공고 없음"
+            html_body = _build_govt_email_html(scored, today_str)
+            email_sender.send_email(subject=subject, text_body=text_body, html_body=html_body)
             log.info("이메일 일일 발송 성공")
         except Exception as e:
             log.warning(f"이메일 발송 실패 (텔레그램은 성공): {e}")

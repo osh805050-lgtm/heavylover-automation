@@ -27,12 +27,13 @@ from dotenv import load_dotenv
 
 import email_sender
 from lib.charts_meta import generate_meta_daily_charts
+from lib.glossary import glossary_details_html
 from meta_ads_funnel_analysis import overall_funnel, funnel_to_markdown, funnel_health_diagnosis
 
 KST = timezone(timedelta(hours=9))
 ENV_PATH = Path(__file__).parent / ".env"
 
-CLAUDE_MODEL = "claude-opus-4-7"  # 재구매 일일과 동일
+CLAUDE_MODEL = "claude-sonnet-4-6"  # 일일 리포트 — 비용 효율 우선 (월간만 opus)
 MAX_TOKENS = 2500
 
 
@@ -395,14 +396,26 @@ def send_daily_email(target_date, metrics, self_bench, flags,
     analysis, err = call_claude_4roles(ctx)
 
     if analysis:
-        body_html = _md_to_html(analysis)
+        body_html = glossary_details_html() + _md_to_html(analysis)
         html = _wrap_html(body_html, target_date, chart_cids=list(charts.keys()),
                           sheet_url=sheet_url, ctx=ctx)
         text_body = analysis
         subject = f"📈 HeavyLover Meta 광고 일일 심층 — {target_date}"
     else:
+        # 크레딧 부족 여부를 ops 채널에 별도 알림
+        if err and "credit balance is too low" in str(err).lower():
+            try:
+                from telegram_client import send_message
+                send_message(
+                    f"🚨 Anthropic 크레딧 부족 — Meta 광고 분석 실패\n"
+                    f"console.anthropic.com → Plans & Billing → Add credits\n"
+                    f"에러: {str(err)[:200]}",
+                    channel="ops",
+                )
+            except Exception:
+                pass
         text_body = _fallback_text(target_date, metrics, flags, err or "분석 실패")
-        body_html = _md_to_html(text_body)
+        body_html = glossary_details_html() + _md_to_html(text_body)
         html = _wrap_html(body_html, target_date, chart_cids=list(charts.keys()),
                           sheet_url=sheet_url, ctx=ctx)
         subject = f"⚠️ HeavyLover Meta 광고 일일 (fallback) — {target_date}"
