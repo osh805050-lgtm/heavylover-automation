@@ -78,7 +78,11 @@ def compute_drop_offs(counts: dict) -> list[dict]:
         else:
             rate = (t_cnt / f_cnt) * 100
             drop = 100 - rate
-            cmt = f"{rate:.2f}% 통과 / {drop:.2f}% 이탈"
+            if rate > 100:
+                cmt = f"광고 외 직접 유입 포함 ({t_cnt:,} > {f_cnt:,}) — 이탈률 계산 불가"
+                drop = None
+            else:
+                cmt = f"{rate:.2f}% 통과 / {drop:.2f}% 이탈"
         out.append({
             "from": labels[f_key],
             "to": labels[t_key],
@@ -137,7 +141,15 @@ def funnel_health_diagnosis(funnel: dict) -> list[str]:
     click_to_view = next((d for d in drops if d["from"] == "클릭"), None)
     if click_to_view and click_to_view["conversion_rate_pct"] is not None:
         r = click_to_view["conversion_rate_pct"]
-        if r < 60:
+        if r > 100:
+            # 광고 클릭보다 페이지 조회가 더 많음 = 광고 외 직접 유입(카카오톡 공유, 북마크, 오가닉) 포함
+            # 픽셀 중복 설치는 아님(API로 확인). 이 단계 drop-off는 신뢰 불가 — 건너뜀.
+            msgs.append(
+                f"ℹ️ 클릭({click_to_view['from_count']:,})보다 페이지 조회({click_to_view['to_count']:,})가 많음 "
+                f"— 광고 외 직접 유입(카카오톡 공유·북마크·오가닉 검색) {click_to_view['to_count'] - click_to_view['from_count']:,}건 포함. "
+                f"픽셀 중복 아님. ROAS·구매 수치는 정확."
+            )
+        elif r < 60:
             msgs.append(f"⚠️ 클릭→콘텐츠 조회 {r:.1f}% — 랜딩 페이지 로딩·이탈 검토 (40%+가 이탈)")
 
     # 콘텐츠 조회 → 장바구니
