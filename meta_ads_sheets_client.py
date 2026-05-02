@@ -17,10 +17,19 @@ ENV_PATH = Path(__file__).parent / ".env"
 
 DAILY_WS = "Meta_Ads_Daily"
 DAILY_CAMPAIGN_WS = "Meta_Ads_Daily_Campaign"
+DAILY_ADSET_WS = "Meta_Ads_Daily_AdSet"
 WINNERS_WS = "Meta_Ads_Winners"
 
 HISTORY_HEADERS = [
     "date", "level", "campaign_id", "campaign_name",
+    "spend", "impressions", "clicks",
+    "ctr_pct", "cpc_krw", "frequency",
+    "purchases", "purchase_value_krw", "cpa_krw", "roas",
+    "raw_json_path", "appended_at",
+]
+
+ADSET_HEADERS = [
+    "date", "adset_id", "adset_name", "campaign_id", "campaign_name",
     "spend", "impressions", "clicks",
     "ctr_pct", "cpc_krw", "frequency",
     "purchases", "purchase_value_krw", "cpa_krw", "roas",
@@ -148,6 +157,29 @@ def push_daily_rows(rows, level):
     replaced = _delete_rows_by_keys(ws, HISTORY_HEADERS, key_indices, keys)
 
     payload = [_row_to_list(r, HISTORY_HEADERS) for r in rows]
+    ws.append_rows(payload, value_input_option="USER_ENTERED")
+
+    return {"ok": True, "appended": len(payload), "replaced": replaced, "error": None}
+
+
+def push_adset_rows(rows):
+    """Meta_Ads_Daily_AdSet 시트에 광고세트 단위 행 upsert.
+
+    중복 제거 키: (date, adset_id). 같은 날짜+광고세트면 기존 행 삭제 후 신규 추가.
+    """
+    if not rows:
+        return {"ok": True, "appended": 0, "replaced": 0, "error": None}
+
+    gc, sh, err = _get_client()
+    if err:
+        return {"ok": False, "appended": 0, "replaced": 0, "error": err}
+
+    ws = _ensure_worksheet(sh, DAILY_ADSET_WS, ADSET_HEADERS)
+    key_indices = [ADSET_HEADERS.index("date"), ADSET_HEADERS.index("adset_id")]
+    keys = {(r["date"], r["adset_id"]) for r in rows}
+    replaced = _delete_rows_by_keys(ws, ADSET_HEADERS, key_indices, keys)
+
+    payload = [_row_to_list(r, ADSET_HEADERS) for r in rows]
     ws.append_rows(payload, value_input_option="USER_ENTERED")
 
     return {"ok": True, "appended": len(payload), "replaced": replaced, "error": None}

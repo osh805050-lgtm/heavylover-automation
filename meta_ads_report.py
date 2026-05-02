@@ -35,7 +35,7 @@ import meta_ads_history
 import meta_ads_self_benchmark
 import meta_ads_claude_comment
 import email_sender
-from meta_ads_weekly_report import summarize_row as summarize_campaign_row
+from meta_ads_weekly_report import summarize_row as summarize_campaign_row, _to_float
 import telegram_client
 
 # Windows cp949 콘솔 대비
@@ -688,6 +688,56 @@ def run():
             print(f"  sheet campaign: {hist['sheet']['campaign']}")
     except Exception as e:
         print(f"history 누적 실패 (리포트는 계속): {e}")
+
+    # 광고세트(adset) 단위 시계열 누적 — 트랙 A
+    # CAC 낮지만 재구매 안 좋은 vs CAC 높지만 재구매 좋은 광고세트 식별용 데이터 축적
+    try:
+        from meta_ads_client import fetch_adset_daily_range
+        adset_raw = fetch_adset_daily_range(target_date, target_date)
+        if adset_raw["ok"]:
+            adset_summaries = []
+            for r in adset_raw.get("data", []):
+                m = summarize_campaign_row(r)  # 동일 액션 추출 로직 재사용
+                # USD → KRW 환산 (단가성 필드만)
+                for k in ("spend", "purchase_value", "cpa_krw"):
+                    if m.get(k) is not None:
+                        m[k] = float(m[k]) * CURRENCY_KRW_PER_USD
+                adset_summaries.append({
+                    "date": target_date,
+                    "adset_id": r.get("adset_id"),
+                    "adset_name": r.get("adset_name") or "(이름 없음)",
+                    "campaign_id": r.get("campaign_id"),
+                    "campaign_name": r.get("campaign_name") or "(이름 없음)",
+                    "spend": m.get("spend"),
+                    "impressions": m.get("impressions"),
+                    "clicks": m.get("clicks"),
+                    "ctr_pct": m.get("ctr_pct"),
+                    "cpc_krw": (m["spend"] / m["clicks"]) if m.get("spend") and m.get("clicks") else None,
+                    "frequency": _to_float(r.get("frequency")) if r.get("frequency") else None,
+                    "purchases": m.get("purchases"),
+                    "purchase_value_krw": m.get("purchase_value"),
+                    "cpa_krw": m.get("cpa_krw"),
+                    "roas": m.get("roas"),
+                })
+            adset_hist = meta_ads_history.append_adset_range(adset_summaries)
+            print(f"adset 시계열: {len(adset_summaries)}건 수집 → CSV {adset_hist['adset_rows']}행, {adset_hist['sheet']}")
+        else:
+            print(f"adset fetch 실패 (계속 진행): {adset_raw.get('error', '')[:200]}")
+    except Exception as e:
+        # 401/토큰 만료 감지 시 텔레그램 ops 채널 알림 (§외부API다루기 규칙 7)
+        err_str = str(e)
+        if any(k in err_str for k in ["OAuthException", "Session has expired", "401", "code:190", "code:463"]):
+            try:
+                from telegram_client import send_message
+                send_message(
+                    f"⚠️ Meta adset 수집 실패 — 토큰 만료 의심\n"
+                    f"오류: {err_str[:200]}\n"
+                    f"확인: refresh_meta_token.py 또는 Graph API Explorer 재발급",
+                    channel="ops",
+                )
+            except Exception:
+                pass
+        print(f"adset 누적 예외 (리포트 계속): {e}")
 
     # 자사 동적 벤치 (14일 미만이면 ok=False, 정적 벤치만 사용)
     try:

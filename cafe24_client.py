@@ -168,7 +168,10 @@ def move_shipping_ready(days_back=7):
 
 
 def fetch_orders(days_back=1):
-    """최근 N일 주문 조회 (오래된 주문 → 최신 주문 순으로 정렬)"""
+    """최근 N일 주문 조회 (오래된 주문 → 최신 주문 순으로 정렬).
+
+    embed에 buyer를 추가해 buyer_message 필드를 받아온다 (광고 attribution용 UTM 캡처).
+    """
     end_date = datetime.now()
     start_date = end_date - timedelta(days=days_back)
 
@@ -180,7 +183,7 @@ def fetch_orders(days_back=1):
         params = {
             "start_date": start_date.strftime("%Y-%m-%d"),
             "end_date": end_date.strftime("%Y-%m-%d"),
-            "embed": "items,receivers",
+            "embed": "items,receivers,buyer",
             "limit": limit,
             "offset": offset,
         }
@@ -210,6 +213,56 @@ def get_order_item_codes(order_id):
         return []
     items = r.json().get("order", {}).get("items", [])
     return [item["order_item_code"] for item in items if item.get("order_item_code")]
+
+
+def extract_utm_from_order(order):
+    """카페24 주문에서 UTM 파라미터 추출.
+
+    카페24 주문 메모(buyer_message) 또는 user_id 필드에 결제 페이지 JS가
+    삽입한 utm_* 파라미터를 파싱.
+
+    캡처 형식 (결제 페이지 JS가 삽입):
+        utm_source=meta&utm_medium=paid&utm_campaign=...&utm_content=...&utm_term=...
+
+    Returns:
+        dict: {
+            "utm_source": str | None,
+            "utm_medium": str | None,
+            "utm_campaign": str | None,
+            "utm_content": str | None,  # 광고세트 ID (Meta {{adset.id}} 매크로)
+            "utm_term": str | None,     # 광고 이름 (Meta {{ad.name}} 매크로)
+        }
+        값이 없으면 모두 None — adset_id 분석 시 'organic' 또는 null로 처리.
+    """
+    keys = ("utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term")
+    out = {k: None for k in keys}
+
+    # buyer_message 필드 우선 — 결제 시 사용자가 입력하는 메시지 영역
+    msg = order.get("buyer_message") or ""
+    if not msg:
+        return out
+
+    # 형식: "utm_source=meta&utm_medium=paid&..." (URL query string)
+    # 또는 "[UTM] utm_source=meta..." (prefix 있는 경우)
+    if "utm_" not in msg:
+        return out
+
+    # query string 파싱 (실제 메시지가 섞여있어도 utm_ 항목만 추출)
+    try:
+        # 가장 단순: & 또는 공백으로 split, k=v 형태 추출
+        for token in msg.replace("\n", " ").replace("&", " ").split(" "):
+            token = token.strip()
+            if "=" not in token:
+                continue
+            k, _, v = token.partition("=")
+            k = k.strip().lower()
+            v = v.strip()
+            if k in out and v:
+                out[k] = v
+    except Exception:
+        pass
+
+    return out
 
 
 def orders_to_dada_rows(orders):

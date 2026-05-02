@@ -17,10 +17,19 @@ DATA_DIR = ROOT / "data" / "meta_ads"
 RAW_DIR = DATA_DIR / "raw"
 DAILY_CSV = DATA_DIR / "daily.csv"
 DAILY_CAMPAIGN_CSV = DATA_DIR / "daily_campaign.csv"
+DAILY_ADSET_CSV = DATA_DIR / "daily_adset.csv"
 KST = timezone(timedelta(hours=9))
 
 COLUMNS = [
     "date", "level", "campaign_id", "campaign_name",
+    "spend", "impressions", "clicks",
+    "ctr_pct", "cpc_krw", "frequency",
+    "purchases", "purchase_value_krw", "cpa_krw", "roas",
+    "raw_json_path", "appended_at",
+]
+
+ADSET_COLUMNS = [
+    "date", "adset_id", "adset_name", "campaign_id", "campaign_name",
     "spend", "impressions", "clicks",
     "ctr_pct", "cpc_krw", "frequency",
     "purchases", "purchase_value_krw", "cpa_krw", "roas",
@@ -47,13 +56,14 @@ def _load_csv(path):
         return list(csv.DictReader(f))
 
 
-def _write_csv(path, rows):
+def _write_csv(path, rows, columns=None):
     _ensure_dirs()
+    cols = columns or COLUMNS
     with path.open("w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=COLUMNS)
+        w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
         for r in rows:
-            w.writerow({c: r.get(c, "") for c in COLUMNS})
+            w.writerow({c: r.get(c, "") for c in cols})
 
 
 def _row_from_metrics(target_date, level, campaign_id, campaign_name, m, raw_path):
@@ -79,13 +89,16 @@ def _row_from_metrics(target_date, level, campaign_id, campaign_name, m, raw_pat
     }
 
 
-def _upsert(path, new_rows, key_fn):
+def _upsert(path, new_rows, key_fn, columns=None, sort_key=None):
     existing = _load_csv(path)
     new_keys = {key_fn(r) for r in new_rows}
     kept = [r for r in existing if key_fn(r) not in new_keys]
     merged = kept + new_rows
-    merged.sort(key=lambda r: (r.get("date", ""), r.get("campaign_id", "")), reverse=True)
-    _write_csv(path, merged)
+    if sort_key:
+        merged.sort(key=sort_key, reverse=True)
+    else:
+        merged.sort(key=lambda r: (r.get("date", ""), r.get("campaign_id", "")), reverse=True)
+    _write_csv(path, merged, columns=columns)
     return len(merged)
 
 
@@ -141,6 +154,73 @@ def _push_to_sheets(account_row, campaign_rows):
         else:
             msgs["campaign"] = f"campaign 시트 skip — {camp_res['error']}"
     return msgs
+
+
+def _row_from_adset(target_date, adset_id, adset_name, campaign_id, campaign_name, m, raw_path):
+    """Adset 단위 row 생성. metric dict는 compute_metrics() 결과(KRW 환산 후)."""
+    def _v(x):
+        return "" if x is None else x
+    return {
+        "date": target_date,
+        "adset_id": adset_id or "",
+        "adset_name": adset_name or "",
+        "campaign_id": campaign_id or "",
+        "campaign_name": campaign_name or "",
+        "spend": _v(m.get("spend")),
+        "impressions": _v(m.get("impressions")),
+        "clicks": _v(m.get("clicks")),
+        "ctr_pct": _v(m.get("ctr_pct")),
+        "cpc_krw": _v(m.get("cpc_krw")),
+        "frequency": _v(m.get("frequency")),
+        "purchases": _v(m.get("purchases")),
+        "purchase_value_krw": _v(m.get("purchase_value_krw") or m.get("purchase_value")),
+        "cpa_krw": _v(m.get("cpa_krw")),
+        "roas": _v(m.get("roas")),
+        "raw_json_path": raw_path,
+        "appended_at": datetime.now(KST).isoformat(timespec="seconds"),
+    }
+
+
+def append_adset_range(adset_summaries, raw_path=""):
+    """Adset 일별 시계열 upsert. (date, adset_id) 키 기준 덮어쓰기.
+
+    Args:
+        adset_summaries: list of dict — date, adset_id, adset_name, campaign_id,
+                         campaign_name, spend(KRW), impressions, clicks, ctr_pct,
+                         cpc_krw, purchases, purchase_value_krw, cpa_krw, roas
+        raw_path: 감사용 raw JSON 경로 (선택)
+
+    Returns:
+        dict: {"adset_rows": int, "sheet": str}
+    """
+    rows = []
+    for s in adset_summaries:
+        rows.append(_row_from_adset(
+            s.get("date"), s.get("adset_id"), s.get("adset_name"),
+            s.get("campaign_id"), s.get("campaign_name"),
+            s, raw_path,
+        ))
+    n = _upsert(
+        DAILY_ADSET_CSV, rows,
+        key_fn=lambda r: (r["date"], r["adset_id"]),
+        columns=ADSET_COLUMNS,
+        sort_key=lambda r: (r.get("date", ""), r.get("adset_id", "")),
+    )
+
+    sheet_msg = ""
+    try:
+        import meta_ads_sheets_client as sheets
+        res = sheets.push_adset_rows(rows)
+        if res["ok"]:
+            sheet_msg = f"adset 시트 +{res['appended']} (replaced {res['replaced']})"
+        else:
+            sheet_msg = f"adset 시트 skip — {res['error']}"
+    except ImportError as e:
+        sheet_msg = f"sheets 모듈 import 실패: {e}"
+    except AttributeError:
+        sheet_msg = "adset 시트 함수(push_adset_rows) 없음 — 시트 skip"
+
+    return {"adset_rows": n, "sheet": sheet_msg}
 
 
 def load_recent_account(days=30):
