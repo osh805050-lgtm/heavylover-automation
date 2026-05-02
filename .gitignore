@@ -27,6 +27,15 @@ Thumbs.db
 # 데이터 원본 (용량/개인정보)
 data/raw/
 data/meta_ads/raw/
+proposals/knowledge/precedents/official/_raw/
+proposals/knowledge/legacy/
+
+# 산출물은 git 추적 — 2026-05-01 MCP 파일 손실 사고 후 정책 변경
+# proposals/outputs/        → 추적 (gitignore 미차단)
+# docs/analysis_10b/        → 추적 (gitignore 미차단)
+# docs/strategy/outputs/    → 추적 (.gitkeep으로 폴더 보존)
+# docs/expansion/outputs/   → 추적 (.gitkeep으로 폴더 보존)
+# data/analysis_10b/sheets/ → 추적 (.gitkeep으로 폴더 보존)
 
 # 엑셀 출력물 (수시 생성)
 *.xlsx
@@ -34,3 +43,6 @@ data/meta_ads/raw/
 
 # 설치파일 / 대용량 바이너리
 *.exe
+
+# MCP 설정 (서비스 계정 경로 노출 방지)
+.mcp.json
