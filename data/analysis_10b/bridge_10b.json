@@ -1,0 +1,114 @@
+{
+  "_meta": {
+    "regenerated": "2026-05-02",
+    "source": "R10 synthesis + R5 스트레스 + R6 가정 역전 통합",
+    "note": "MCP 파일 손실 사고(2026-05-01) 후 재생성. 시나리오 수치는 R1~R9 합의 기반 보수 추정",
+    "freshness_warning": "patterns.md §수치현행성검증 적용 — 사용 전 사용자 1줄 확인 필수"
+  },
+  "current_state": {
+    "monthly_revenue_KRW": 38000000,
+    "annual_pace_KRW": 456000000,
+    "target_KRW": 1000000000,
+    "gap_KRW": 544000000,
+    "monthly_target_for_10b_KRW": 83000000,
+    "scale_factor_required": 2.18
+  },
+  "scenarios": {
+    "bear": {
+      "annual_revenue_KRW": [400000000, 600000000],
+      "probability": 0.35,
+      "conditions": [
+        "ROAS 디케이 (< 2.8 진입)",
+        "M+1 12% 고착",
+        "시리얼 K5 미달",
+        "상생자금 탈락 시 K4 발동"
+      ],
+      "monthly_run_rate_end_2026": [33000000, 50000000]
+    },
+    "base": {
+      "annual_revenue_KRW": [700000000, 900000000],
+      "probability": 0.45,
+      "conditions": [
+        "ROAS 3.0~3.5 유지",
+        "M+1 14~16%",
+        "결제 퍼널 49.85% → 55% 개선",
+        "시리얼 점진 성장 (월 +500만)",
+        "상생자금 탈락 가정"
+      ],
+      "monthly_run_rate_end_2026": [60000000, 75000000]
+    },
+    "bull": {
+      "annual_revenue_KRW": [1200000000, 1500000000],
+      "probability": 0.20,
+      "conditions": [
+        "ROAS 스케일 유지(월 1,000만+ 광고비 구간)",
+        "M+1 16~20%",
+        "상생자금 1억 확보",
+        "시리얼 K5 통과 + 도시락 교차구매 빈도 2배",
+        "결제 퍼널 60%+ 달성"
+      ],
+      "monthly_run_rate_end_2026": [100000000, 125000000]
+    }
+  },
+  "growth_levers": {
+    "lever_A_ads_scale": {
+      "name": "광고 스케일업",
+      "max_contribution_KRW": 480000000,
+      "warning": "R3에서 ROAS 유지 가정 미검증. 월 1,000만+ 구간 데이터 없음. Base 시나리오 +4.8억은 6분의 1로 붕괴 가능"
+    },
+    "lever_B_repurchase": {
+      "name": "재구매 개선 (M+1·CRM)",
+      "max_contribution_KRW": 80000000,
+      "warning": "p_2_to_3·p_3_to_4 assumed. 실측 후 효과 재계산 필요"
+    },
+    "lever_C_serial": {
+      "name": "시리얼 SKU 추가",
+      "max_contribution_KRW": 360000000,
+      "min_contribution_KRW": 50000000,
+      "warning": "K5 미달 시 0. K4 탈락 시 50% 축소"
+    },
+    "lever_D_b2b_expansion": {
+      "name": "B2B / 복지몰 / 채널 확장",
+      "max_contribution_KRW": 60000000,
+      "warning": "ACT-01 박재영 역할 확정 블로킹. 현재 0건"
+    }
+  },
+  "critical_assumptions": [
+    {
+      "id": 1,
+      "assumption": "ROAS 3.5가 광고비 4~8배 확대 시 유지된다",
+      "current_evidence": "월 346,202원 일 최대 지출 구간만 검증. 26.4.2 abo 선례 ROAS 3.02로 저하 신호",
+      "verification": "월 1,000만→2,000만→3,000만원 4주 스텝 테스트, 약 6,000만원, 3개월",
+      "risk": "high"
+    },
+    {
+      "id": 2,
+      "assumption": "M+1을 16~20%로 개선하는 메커니즘이 존재한다",
+      "current_evidence": "n≥100 코호트 중 M+1 14% 이상 안정 달성은 2025-12(16.9%) 단 1개월",
+      "verification": "카페24 3.4회 구매 분포로 p_2_to_3 즉시 역산. 비용 0원, 1일",
+      "risk": "high"
+    },
+    {
+      "id": 3,
+      "assumption": "상생자금 1억이 확보된다",
+      "current_evidence": "현장실사 대기. 6,000만원으로 거의 확정 (2026-04-30 승현님 확인)",
+      "verification": "외부 변수. 대응 플랜 B(레버 B+C만으로 Bear 달성) 사전 수립",
+      "risk": "medium-high"
+    },
+    {
+      "id": 4,
+      "assumption": "타겟 시장(운동 직장인 벌크업)이 10억 담을 만큼 크다",
+      "current_evidence": "추정 10~15만명. 1만명×연 10만원 필요. 5~7배 확장 필요",
+      "verification": "키워드 검색량 추이 12개월 모니터링",
+      "risk": "medium"
+    },
+    {
+      "id": 5,
+      "assumption": "시리얼이 도시락 구매빈도 2배 효과를 만든다",
+      "current_evidence": "교차구매 데이터 0건. 프리오더 고객의 기존 도시락 구매 비율 확인 필요",
+      "verification": "프리오더 500봉 후 4주 코호트 추적",
+      "risk": "medium-high"
+    }
+  ],
+  "kill_criteria_reference": "data/analysis_10b/unit_economics.json kill_criteria 블록"
+}

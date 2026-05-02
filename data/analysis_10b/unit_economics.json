@@ -1,0 +1,92 @@
+{
+  "_meta": {
+    "regenerated": "2026-05-02",
+    "source": "CLAUDE.md §4 + R1~R10 분석 + cashflow_simulation.md 실측",
+    "note": "MCP 파일 손실 사고(2026-05-01) 후 재생성. 1차 정본 손실로 재구축이며, 분석에 활용 시 CLAUDE.md §4 KPI 섹션 우선 참조 권고",
+    "freshness_warning": "이 파일의 수치는 2026-04-30 시점 박제값. 의사결정 사용 전 patterns.md §수치현행성검증 적용"
+  },
+  "currency": "KRW",
+  "freeze_date": "2026-04-29",
+  "lifetime_value": {
+    "LTV": 31687,
+    "CAC": 17717,
+    "LTV_CAC_ratio": 1.79,
+    "AOV_new": 67420,
+    "AOV_repurchase": 86529,
+    "p_1_to_2": {
+      "value": 0.232,
+      "type": "measured",
+      "source": "카페24 코호트"
+    },
+    "p_2_to_3": {
+      "value": 0.35,
+      "type": "assumed",
+      "warning": "R1·R3에서 'assumed' 자인됨. LTV 31,687원 산출 근거 흔들림. 카페24 3.4회 구매 분포로 역산 필요"
+    },
+    "p_3_to_4": {
+      "value": 0.40,
+      "type": "assumed",
+      "warning": "동일. 실측 시 LTV 최대 25,000원 수준으로 하락 가능"
+    }
+  },
+  "ads_performance": {
+    "ROAS_lifetime": 3.77,
+    "ROAS_last30": 3.51,
+    "ROAS_winner": 6.20,
+    "ROAS_loser": 2.33,
+    "winner_AOV": 81918,
+    "winner_campaign": "26.2.21 abo",
+    "current_campaign": "26.3.25 abo",
+    "current_AOV": 60375,
+    "spend_per_day_KRW": 164729,
+    "spend_per_month_implied_KRW": 4941870,
+    "spend_per_month_claude_md": 6900000,
+    "currency_warning": "Meta 계정은 USD. 환산률 CURRENCY_KRW_PER_USD=1450 고정"
+  },
+  "repurchase": {
+    "M1_avg": 0.128,
+    "M1_2026_03": 0.098,
+    "M1_2026_02_outlier": 0.295,
+    "M1_2026_02_n": 88,
+    "M1_2026_02_explanation": "광고 7주 중단(2026-01-05~02-20) 기간 소규모 고의도 유입. 대규모 유입 시 재현 불가. CRM 기준선은 12.8%로 설계",
+    "P50_days": 10,
+    "P90_days": null,
+    "ratio_repurchase_AOV": 1.28,
+    "first_purchase_dropoff": 0.768,
+    "settled_customer_avg_orders": 3.4
+  },
+  "funnel": {
+    "view_to_atc": 0.0194,
+    "atc_to_checkout": null,
+    "checkout_to_purchase": 0.4985,
+    "primary_bottleneck": "checkout_to_purchase 49.85% — 광고비 절반 소실",
+    "secondary_bottleneck": "view_to_atc 1.94% — 콘텐츠/장바구니"
+  },
+  "fixed_costs": {
+    "monthly_total_KRW_current": 5250000,
+    "monthly_total_KRW_range": [5000000, 5500000],
+    "park_jaeyoung": 1000000,
+    "deprecated_656_warning": "bridge_10b.json의 6,560,000원은 박재영 499만 기준 구 데이터. 현재 100만으로 변경됨",
+    "one_time_lecture_card_installment": 4690000,
+    "lecture_card_remaining_balance": 2500000
+  },
+  "breakeven": {
+    "monthly_revenue_target_KRW": 50000000,
+    "current_monthly_revenue_KRW": 38000000,
+    "gap_KRW": 12000000,
+    "gross_margin": 0.31,
+    "gross_margin_range": [0.31, 0.33],
+    "april_2026_net_profit_KRW": 5000000,
+    "comment": "흑자 진입선 5,000만/월. 현재 3,800만 → 갭 1,200만. 마진 31% 보수 적용"
+  },
+  "kill_criteria": {
+    "K1": {"name": "ROAS < 2.8", "current": 3.51, "trigger": "광고비 -30%", "status": "여유"},
+    "K2": {"name": "M+1 < 12% 3개월 연속", "current": 0.098, "trigger": "신규 획득 정지 검토", "status": "경계"},
+    "K3": {"name": "월매출 < 3,500만 2개월", "current": 38000000, "trigger": "광고비 구조 재검토", "status": "여유"},
+    "K4": {"name": "상생자금 탈락", "current": "거의 확정 6,000만", "trigger": "시리얼 50% 축소", "status": "임박"},
+    "K5": {"name": "시리얼 프리오더 500봉 미달", "current": null, "trigger": "시리얼 광고 보류", "status": "미평가"},
+    "K6": {"name": "AOV < 58,000 2개월", "current": 59964, "trigger": "광고 타겟 리셋", "status": "경계"},
+    "K7": {"name": "LTV/CAC < 1.5 (60일)", "current": 1.79, "trigger": "광고 -50% + UE 재진단", "status": "양호"},
+    "K8": {"name": "1주 현금 음수 4주 연속", "current": "미모니터링", "trigger": "인건비 구조 긴급 검토", "status": "미평가 — R9에서 빠진 관점 1순위로 지적됨"}
+  }
+}
