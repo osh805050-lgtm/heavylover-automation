@@ -163,56 +163,106 @@ def call_claude_4roles(ctx):
 
 
 def _md_to_html(md):
-    """간단 Markdown → HTML 변환 (헤더·불릿·표만). report_email_daily와 동일 패턴."""
+    """Markdown → HTML. ## 섹션마다 배경색 카드로 분리해 가독성 확보."""
+    import re
+
+    # 섹션별 색상 (헤더 텍스트에 숫자 기준)
+    SECTION_COLORS = {
+        "1": ("#e8f4f8", "#0c5460", "#17a2b8"),   # 파랑 — 숫자 정리
+        "2": ("#fff8e1", "#856404", "#ffc107"),   # 노랑 — 원인 추정
+        "3": ("#fdf2f8", "#6c1f57", "#e83e8c"),   # 분홍 — 반박
+        "4": ("#d4edda", "#155724", "#28a745"),   # 초록 — 오늘 할 일
+    }
+
+    def _bold(s):
+        s = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', s)
+        s = re.sub(r'\*(.+?)\*', r'<em>\1</em>', s)
+        return s
+
     lines = md.splitlines()
     out = []
     in_list = False
     in_table = False
+    in_section = False
+
+    def _close_all():
+        nonlocal in_list, in_table, in_section
+        if in_list:
+            out.append("</ul>"); in_list = False
+        if in_table:
+            out.append("</table>"); in_table = False
+        if in_section:
+            out.append("</div>"); in_section = False
+
     for line in lines:
         s = line.rstrip()
+
         if s.startswith("## "):
-            if in_list:
-                out.append("</ul>"); in_list = False
-            if in_table:
-                out.append("</table>"); in_table = False
-            out.append(f"<h2 style='color:#2c3e50;border-bottom:2px solid #3498db;padding-bottom:4px;margin-top:24px;'>{s[3:].strip()}</h2>")
+            _close_all()
+            title = s[3:].strip()
+            # 섹션 번호 추출 (예: "1. 분석가" → "1")
+            num_match = re.match(r'^(\d+)', title)
+            num = num_match.group(1) if num_match else ""
+            bg, fg, border = SECTION_COLORS.get(num, ("#f8f9fa", "#2c3e50", "#6c757d"))
+            out.append(
+                f"<div style='background:{bg};border-left:5px solid {border};"
+                f"border-radius:0 8px 8px 0;padding:16px 18px;margin:20px 0 8px 0;'>"
+                f"<div style='font-size:16px;font-weight:800;color:{fg};margin-bottom:10px;"
+                f"letter-spacing:-0.3px;'>{title}</div>"
+            )
+            in_section = True
+
         elif s.startswith("- "):
             if in_table:
                 out.append("</table>"); in_table = False
             if not in_list:
-                out.append("<ul>"); in_list = True
-            out.append(f"<li>{s[2:].strip()}</li>")
+                out.append("<ul style='margin:6px 0 6px 0;padding-left:18px;'>"); in_list = True
+            out.append(f"<li style='margin:5px 0;line-height:1.6;'>{_bold(s[2:].strip())}</li>")
+
         elif s.startswith("|") and s.endswith("|"):
             if in_list:
                 out.append("</ul>"); in_list = False
             cells = [c.strip() for c in s.strip("|").split("|")]
             if all(set(c) <= set("-:| ") for c in cells):
                 continue
-            tag = "th" if not in_table else "td"
+            is_header = not in_table
             if not in_table:
-                out.append("<table style='border-collapse:collapse;margin:8px 0;'>"); in_table = True
-            cells_html = "".join(
-                f"<{tag} style='border:1px solid #ddd;padding:6px 12px;'>{c}</{tag}>" for c in cells
-            )
+                out.append(
+                    "<div style='overflow-x:auto;margin:10px 0;'>"
+                    "<table style='border-collapse:collapse;width:100%;font-size:13px;'>"
+                )
+                in_table = True
+            if is_header:
+                cells_html = "".join(
+                    f"<th style='border:1px solid #dee2e6;padding:8px 12px;"
+                    f"background:#343a40;color:white;text-align:left;white-space:nowrap;'>{c}</th>"
+                    for c in cells
+                )
+            else:
+                cells_html = "".join(
+                    f"<td style='border:1px solid #dee2e6;padding:7px 12px;"
+                    f"background:white;vertical-align:top;'>{_bold(c)}</td>"
+                    for c in cells
+                )
             out.append(f"<tr>{cells_html}</tr>")
+
         elif s == "---":
-            if in_list:
-                out.append("</ul>"); in_list = False
-            if in_table:
-                out.append("</table>"); in_table = False
-            out.append("<hr style='border:none;border-top:1px solid #eee;margin:16px 0;'>")
+            _close_all()
+
         elif s == "":
             if in_list:
                 out.append("</ul>"); in_list = False
             if in_table:
-                out.append("</table>"); in_table = False
-            out.append("<br>")
+                out.append("</table></div>"); in_table = False
+
         else:
-            out.append(f"<p style='margin:8px 0;'>{s}</p>")
-    if in_list:
-        out.append("</ul>")
+            if in_table:
+                out.append("</table></div>"); in_table = False
+            out.append(f"<p style='margin:6px 0;line-height:1.7;'>{_bold(s)}</p>")
+
+    _close_all()
     if in_table:
-        out.append("</table>")
+        out.append("</table></div>")
     return "\n".join(out)
 
 
@@ -335,31 +385,51 @@ def _build_alerts_box(ctx):
 
 
 def _wrap_html(body_html, target_date, chart_cids=None, sheet_url="", ctx=None):
-    today_label = target_date
+    from datetime import datetime, timezone, timedelta
+    KST = timezone(timedelta(hours=9))
+    generated_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
     charts_html = _render_charts_block(chart_cids or [])
     sheet_link_html = (
-        f"<p>시트: <a href='{sheet_url}'>HeavyLover Meta Ads</a></p>" if sheet_url else ""
+        f"<a href='{sheet_url}' style='color:#667eea;'>📊 Google Sheets 열기</a>" if sheet_url else ""
     )
     kpi_html = _build_kpi_cards(ctx) if ctx else ""
     alerts_html = _build_alerts_box(ctx) if ctx else ""
+    model_label = CLAUDE_MODEL.replace("claude-", "").replace("-", " ").upper()
+
     return f"""<!DOCTYPE html>
-<html><head><meta charset='utf-8'><title>HeavyLover Meta 광고 일일 심층</title></head>
-<body style='font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;max-width:760px;margin:0 auto;padding:20px;color:#333;line-height:1.6;background:#fafbfc;'>
-<div style='background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:20px 22px;border-radius:8px;margin-bottom:22px;box-shadow:0 2px 8px rgba(102,126,234,0.25);'>
-  <h1 style='margin:0 0 6px 0;font-size:22px;'>📈 HeavyLover Meta 광고 일일 심층</h1>
-  <div style='opacity:0.95;font-size:13px;'>{today_label} · 4역할 페르소나 분석 + 시각화</div>
+<html><head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>HeavyLover Meta 광고 일일</title>
+</head>
+<body style='font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",Malgun Gothic,sans-serif;max-width:720px;margin:0 auto;padding:16px;color:#222;line-height:1.65;background:#f0f2f5;'>
+
+<!-- 헤더 -->
+<div style='background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:22px 24px;border-radius:12px;margin-bottom:16px;box-shadow:0 4px 12px rgba(102,126,234,0.3);'>
+  <div style='font-size:11px;opacity:0.8;letter-spacing:1px;margin-bottom:6px;'>HEAVYLOVER · META 광고 일일 리포트</div>
+  <h1 style='margin:0 0 6px 0;font-size:24px;font-weight:800;letter-spacing:-0.5px;'>📈 {target_date} 광고 성과</h1>
+  <div style='opacity:0.9;font-size:13px;'>분석 모델: {model_label} &nbsp;|&nbsp; 생성: {generated_at}</div>
 </div>
+
+<!-- KPI 카드 -->
 {kpi_html}
+
+<!-- 경고 박스 -->
 {alerts_html}
+
+<!-- 차트 -->
 {charts_html}
-<div style='background:white;padding:20px;border-radius:8px;border:1px solid #e1e4e8;'>
+
+<!-- 본문 -->
+<div style='background:white;border-radius:12px;border:1px solid #e1e4e8;padding:24px;margin-top:4px;box-shadow:0 1px 4px rgba(0,0,0,0.06);'>
 {body_html}
 </div>
-<hr style='margin-top:30px;border:none;border-top:1px solid #e1e4e8;'>
-<div style='font-size:12px;color:#888;text-align:center;padding-top:8px;'>
-  <p>자동 발송 · GitHub Actions cron (KST 09:00) · 매일 자동</p>
-  {sheet_link_html}
+
+<!-- 푸터 -->
+<div style='margin-top:20px;padding:12px 0;border-top:1px solid #dee2e6;font-size:11px;color:#aaa;text-align:center;'>
+  매일 09:00 KST 자동 발송 &nbsp;|&nbsp; {sheet_link_html}
 </div>
+
 </body></html>"""
 
 
@@ -409,7 +479,8 @@ def send_daily_email(target_date, metrics, self_bench, flags,
         html = _wrap_html(body_html, target_date, chart_cids=list(charts.keys()),
                           sheet_url=sheet_url, ctx=ctx)
         text_body = analysis
-        subject = f"📈 HeavyLover Meta 광고 일일 심층 — {target_date}"
+        model_short = "Opus" if "opus" in CLAUDE_MODEL else "Sonnet"
+        subject = f"📈 HeavyLover Meta 광고 일일 [{model_short}] — {target_date}"
     else:
         # 크레딧 부족 여부를 ops 채널에 별도 알림
         if err and "credit balance is too low" in str(err).lower():
