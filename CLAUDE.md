@@ -1,6 +1,6 @@
 # CLAUDE.md — HeavyLover 운영 컨텍스트
 
-**최종 업데이트**: 2026-04-29 (rev. 9) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
+**최종 업데이트**: 2026-04-30 (rev. 10) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
 
 > **외부 컨텍스트 우선 참조 규칙**: 정보 부족 시 추측 금지. 다음 위치를 먼저 Glob/Read 후 결정한다.
 > - 작업 종류별 회피 규칙: `docs/lessons/patterns.md`
@@ -60,12 +60,15 @@
 - **§엑셀편집**: 색상·폰트·테두리·열너비만 건드림. 수식·freeze panes·숨김·셀 타입 금지. 편집 후 `openpyxl.load_workbook()` 검증. → `patterns.md §엑셀편집`
 - **§출력관리**: 5,000자 초과 우려 시 분할 제안. 분석 리포트는 표+요약 우선. → `patterns.md §출력관리`
 - **§환경컨텍스트**: 메일 분리(Naver=정부지원수신, Gmail=업무발송), Windows 11 + Git Bash/PowerShell, 활성 세션 안 `claude -c`/`-r` 안 먹힘. → `patterns.md §환경컨텍스트`
+- **§수치현행성검증**: 인건비·고정비·매출 등 박제 수치 사용 전 "현재도 맞나요?" 1줄 확인. 동일 항목에 두 값 보이면 계산 금지. CLAUDE.md "즉시 대응" 항목을 권고로 쓰지 말 것. → `patterns.md §수치현행성검증`
+- **§제출요건정본확인**: 사업계획서 제출 서류는 공고문 원문만 정본. 본문 언급 ≠ 제출 요건. → `patterns.md §제출요건정본확인`
+- **§파일안전성**: git 미추적 파일은 언제든 사라질 수 있다고 가정. 산출물 생성 시 git 추적 여부 확인. MCP/npm 실행 전 commit 권장. → `patterns.md §파일안전성`
 
 ### 실수 자동 기록 (필수)
 - 승현님이 실수·오류·잘못된 판단·금지사항 위반을 지적하면 → **즉시 `docs/lessons/failures.md` 상단(시간 역순)에 한 줄 누적 기록**
 - 형식: `- **YYYY-MM-DD** ⓝ | {무엇을 잘못했는지} | **하지 말 것**: {회피 규칙}`
 - 추가 시 사용자에게 "failures.md에 기록했습니다" 한 줄 보고
-- **작업 시작 전** patterns.md 카테고리 인덱스(8개)와 §0 안전규칙 요약 5개 매칭. hook이 키워드 기반으로 patterns.md 해당 섹션 자동 주입함 (`.claude/hooks/inject-patterns.py`). 같은 키워드 3회+ 반복 시 patterns.md 카테고리 보강.
+- **작업 시작 전** patterns.md 카테고리 인덱스(10개)와 §0 안전규칙 요약 8개 매칭. hook이 키워드 기반으로 patterns.md 해당 섹션 자동 주입함 (`.claude/hooks/inject-patterns.py`). **실수 1회 발생 즉시 failures.md 기록 + patterns.md 해당 카테고리 보강** (3회 대기 없음).
 - **트리거 어휘 감지**: 사용자 발화에 "실수", "잘못됐어", "오류", "금지", "하지 말랬는데", "또 같은", "왜 또" 등 포함 시 → 즉시 `docs/lessons/failures.md` 상단에 한 줄 append + 사용자에게 "failures.md에 기록했습니다" 보고 (사전 승인 없이 박제. 부정확하면 사용자가 수정 요청).
 
 ---
@@ -117,6 +120,7 @@
 - 동물성+식물성 이중 단백질, 치아시드
 - 저당·고단백 포지셔닝
 - 프리오더: 2026-04~05
+- OEM: 나비야 아님 — 별도 제조업체. 패키지 포함 초도 비용 **3,500~4,000만원**
 - 목적: 구매 빈도 증가 → CRM 데이터 축적 가속
 
 ### 해외 (검토 중)
@@ -142,7 +146,7 @@
 - 1회 후 이탈률: 76.8%
 - 카페24 정착 고객(2회+): 평균 3.4회 구매
 - LTV: 31,687원 / CAC: 17,717원 / LTV/CAC: 1.79
-- **이상치**: 2026-02 코호트 M+1 29.5% — 원인 미분석, 재현 가능성 高 → 분석 선행 필요
+- **이상치**: 2026-02 코호트 M+1 29.5% — **원인 분석 완료** (2026-04-30): 광고 7주 중단 기간(2026-01-05~02-20) 소규모 고의도 유입(n=88). 대규모 유입 시 재현 불가. CRM 기준선은 전체 평균 12.8%로 설계. 상세: `docs/analysis_10b/cohort_funnel_diagnosis.md`
 
 ### 광고·채널 (2026-04-29 실측)
 - Meta ROAS: 3.77 lifetime / **3.51 last30** (하락 추세 주의)
@@ -154,7 +158,11 @@
 - 브랜드 검색량: 월 약 260
 
 ### 단위 경제학
-- 마진율: 31~33% (가중평균 판매가 8,993원 / COGS 5,697원)
+- 마진율: 31~33% (가중평균 판매가 8,993원 / COGS 5,697원) — **물류비 포함**
+- 월 고정비: 500~550만원 (박재영 100만/월 포함. 오승현 월급 포함 총액)
+  - ※ 기존 bridge_10b.json의 656만원은 구 데이터 (박재영 499만 기준). 현재 100만으로 변경됨.
+  - ※ 469만원은 강의 사업자카드 할부 (일회성, 잔액 약 250만원)
+- **월 순이익 실측 (2026-04)**: 약 500만원 (모든 비용 차감 후 확정)
 - LTV 1회 구매 기여 69% → 1회 구매만으로 광고비 부분 회수
 - ROAS 3.3+ 유지 시 광고 스케일업 타당
 
@@ -277,23 +285,33 @@
 
 ## 9. Top of Mind
 
-### 즉시 대응
-1. 상생성장지원자금 1억 신청 → 현장실사 예정
-2. 스마트스토어 API 자동화 (프록시 IP 확보 완료, 코드 작업 단계)
-3. 시리얼 프리오더 (4~5월) → 6월 정식 출시
+### 즉시 대응 (이번 주 — 2026-04-29 기준)
+1. **결제 퍼널 개선**: 배송비 상품 페이지 사전 표시 + 카카오 소셜 로그인 추가 (비용 0, 반나절)
+2. **2026-02 M+1 29.5% 코호트 원인 분석** (Claude, 2시간) — CRM 설계 전 선행 필수
+3. **재구매 고객 그룹 분류 인프라 구축** (Claude) — 이메일 자동화의 선결조건
+4. **GA4+UTM 블로그 전환 추적 설치** (Claude+승현님, 반나절)
+5. **고반복 고객 13명 레퍼럴 쿠폰 발송** — 트레이너 가설 검증 + B2B 방향 결정
+6. **ACT-01: 박재영 역할 명세 확정** (기한 05-06) — B2B 계획 전체 블로킹 중
+7. 상생성장지원자금 1억 → 현장실사 대기 (K4 연동)
+8. 시리얼 프리오더 (4~5월) → 6월 정식 출시
 
 ### 진행 중 (2026-04~07)
-4. 정부 지원사업 다중 신청
-   - 초기창업패키지 2차 (3년차 자격 마지막)
-   - 용인시 온라인 플랫폼 지원사업 (서류 통과)
-   - KOTRA 내수기업 수출기업화
-   - 지식재산바우처 (상표)
-5. M+1 리텐션 14% → 20~25% 개선 (자본 효율 최고 레버)
-6. 등기사항전부증명서 리뷰
-7. ~~Meta Ads API 자동화~~ ✅ 완료 (2026-04-29 E2E 검증)
-   - System User Token (무기한) 발급 + GitHub Secrets 등록
-   - 텔레그램 4채널 분리 완료 (ops/report/ads/govt)
-   - 매일 09:00 KST 일일 리포트 + 매주 일요일 종합 리포트 자동 가동
+- 스마트스토어 API 자동화 (프록시 IP 확보 완료, 코드 작업 단계)
+- 정부 지원사업 다중 신청
+  - 초기창업패키지 2차 (3년차 자격 마지막)
+  - 용인시 온라인 플랫폼 지원사업 (서류 통과)
+  - KOTRA 내수기업 수출기업화
+  - 지식재산바우처 (상표 — 네이버 브랜드관 입점 선결조건)
+- ~~Meta Ads API 자동화~~ ✅ 완료 (2026-04-29 E2E 검증)
+  - System User Token (무기한) 발급 + GitHub Secrets 등록
+  - 텔레그램 4채널 분리 완료 (ops/report/ads/govt)
+  - 매일 09:00 KST 일일 리포트 + 매주 일요일 종합 리포트 자동 가동
+- 등기사항전부증명서 리뷰
+
+### 다음 주 (05-06~05-10)
+- A-2 광고 소재 변경 ("2박스로 2주치" 메시지) + 전환율 롤백 트리거 설정
+- SS 소규모 광고 실험 (Meta→SS 50만원 — 오가닉 vs 지연 효과 4주 검증)
+- 복지몰 베네피아 입점 신청 1곳 파일럿
 
 ### 검토 (2순위)
 - 모두의 아이디어 경진대회 — 전세 사기 방지 시스템 지원
@@ -320,32 +338,28 @@
 heavylover-automation/
 ├── CLAUDE.md            ← 본 파일 (코어 컨텍스트만)
 ├── .claude/
-│   ├── agents/          ← 서브에이전트 8개 (blog-writer, meta-ads-analyst, automation-debugger 등)
-│   │   └── proposal/    ← 사업계획서 7역할 (drafter, rubric-mapper, consistency, budget-auditor, competitor, fact-checker, devil)
-│   ├── hooks/           ← UserPromptSubmit hook (inject-patterns.py + test)
-│   ├── settings.json    ← hook 등록 / settings.local.json (권한)과 분리
-│   ├── commands/        ← 슬래시 커맨드 (proposal.md = /proposal 사업명)
-│   └── skills/          ← heavylover-voice 등
-├── *.py                 ← 자동화 스크립트 (run_automation, cafe24_client, naver_client 등)
-├── apps_script_main.gs / repurchase_v5_4.gs
-├── .github/workflows/   ← Meta 광고 cron + **deploy-vultr.yml (자동 배포)**
-├── data/{raw,reports}/
-├── proposals/           ← 사업계획서 시스템 (PSST 7역할 2라운드)
-│   ├── README.md
-│   ├── knowledge/{psst-rubric.json, heavylover-skeleton.md, precedents/, legacy/, submissions-log/}
-│   ├── tools/{parse_legacy_docs.py, crawl_precedents.py, extract_kised_list.py}
-│   └── outputs/         ← v0~final 산출물
-└── docs/
-    ├── context/         ← 영역별 상세 컨텍스트 (infra, blog, ads)
-    ├── lessons/         ← 실수 누적·승격 (failures.md, patterns.md)
-    ├── incidents/       ← 종합 사고 리포트 (날짜-주제.md 형식)
-    ├── brand-guide/blog-history.md  ← 미존재 (첫 발행 시 신설)
-    ├── blog-drafts/
-    ├── meta-ads/{benchmarks.md, reports/, weekly/, SETUP.md}
-    ├── govt-radar/      ← 정부지원 레이더 (Layer 1·2·4)
-    ├── deploy-repurchase-cron.md / setup-repurchase-automation.md
-    ├── looker-studio-repurchase-dashboard.md
-    └── competitors/
+│   ├── agents/
+│   │   ├── (운영) blog-writer, meta-ads-analyst, automation-debugger, cs-responder 등
+│   │   ├── proposal/    ← 사업계획서 7역할 (drafter, rubric-mapper, consistency, budget-auditor, competitor, fact-checker, devil)
+│   │   ├── strategy/    ← 성장전략 5에이전트 갑론을박 (margin/acquisition/structural/capital/identity + orchestrator)
+│   │   └── expansion/   ← 확장 토론 13에이전트 (6도메인 × proposer+challenger + orchestrator)
+│   ├── hooks/           ← UserPromptSubmit hook (inject-patterns.py)
+│   ├── settings.json
+│   └── commands/        ← /proposal, /strategy-debate, /expansion-debate
+├── *.py                 ← 자동화 스크립트
+├── .github/workflows/   ← Meta 광고 cron + deploy-vultr.yml
+├── data/
+│   ├── meta_ads/        ← daily.csv, daily_campaign.csv, winner_patterns.jsonl
+│   └── analysis_10b/    ← unit_economics.json, bridge_10b.json, sheets/*.csv
+├── docs/
+│   ├── context/         ← infra.md, blog.md, ads.md
+│   ├── lessons/         ← failures.md, patterns.md
+│   ├── analysis_10b/    ← IC 진단 리포트 8섹션 + _master.md + charts/
+│   ├── strategy/outputs/← 5에이전트 갑론을박 라운드1~5 + 6개월 로드맵 (2026-04-29)
+│   ├── expansion/outputs/← 6도메인 토론 결과 + expansion-synthesis.md (2026-04-29)
+│   ├── meta-ads/        ← benchmarks.md, reports/
+│   └── govt-radar/
+└── proposals/           ← 사업계획서 시스템
 ```
 
 ---
@@ -365,13 +379,13 @@ heavylover-automation/
 ## 13. 실험 노트 (요약)
 
 > 정본 — 시간순 원시 로그(13건+): **`docs/lessons/failures.md`**
-> 회피 패턴 — 작업 종류별 카테고리 8개 (§자동화점검·§외부API다루기·§시간중복처리·§데이터범위와분석분리·§엑셀편집·§출력관리·§지역자격필터·§환경컨텍스트): **`docs/lessons/patterns.md`**
+> 회피 패턴 — 작업 종류별 카테고리 10개 (§자동화점검·§외부API다루기·§시간중복처리·§데이터범위와분석분리·§엑셀편집·§출력관리·§지역자격필터·§환경컨텍스트·**§수치현행성검증·§제출요건정본확인·§파일안전성**): **`docs/lessons/patterns.md`**
 
 ### 활용 흐름
-1. **작업 시작 전** patterns.md 카테고리 인덱스(8개)와 §0 안전규칙 요약 5개 매칭. hook이 키워드 기반으로 해당 섹션 자동 주입 (`.claude/hooks/inject-patterns.py`)
+1. **작업 시작 전** patterns.md 카테고리 인덱스(10개)와 §0 안전규칙 요약 8개 매칭. hook이 키워드 기반으로 해당 섹션 자동 주입 (`.claude/hooks/inject-patterns.py`)
 2. 깊게 들어갈 필요 시 → `failures.md` grep (예: `grep "SS sync" docs/lessons/failures.md`)
-3. 신규 실수 발생 시 → `failures.md` 상단에 한 줄 추가 + 사용자에게 "failures.md에 기록했습니다" 보고
-4. 같은 키워드 3회+ → `patterns.md` 카테고리 보강 또는 신설
+3. 신규 실수 발생 시 → `failures.md` 상단에 한 줄 추가 + **즉시 `patterns.md` 해당 카테고리도 보강** + 사용자에게 "failures.md에 기록했습니다" 보고
+4. 1회 발생으로도 patterns.md 반영 (3회 대기 없음)
 
 ### 최근 5건 (전체는 failures.md, 자세한 사고 리포트는 docs/incidents/)
 - **2026-04-28** ㉑ | E2E 검증 가설3 발견: `is_shipping_overdue`가 `placeOrderStatus` 미체크 → PAYED+CANCEL 7건을 "발송기한초과"로 오판정. OK 체크 추가 + detect_special_orders에 PAYED+CANCEL 분기 — **외부 API 상태 enum 두 종류 이상이면 둘 다 함께 평가**
@@ -379,6 +393,57 @@ heavylover-automation/
 - **2026-04-28** ⑰ | "git push 완료" 보고 후 origin/main 미검증 — push 직후 `git log origin/main` + 서버 `git log -1` 이중 실측
 - **2026-04-28** ⑯ | Meta USD vs KRW 가정 — 첫 응답에서 통화 필드 확인, 환산 함수 일관 적용
 - **2026-04-28** ① | SS hours_back=24 + 평일 cron(1-5)로 금~일 결제분 영구 누락 — orders_pending_dispatch 14일 PAYED 전수로 전환
+
+---
+
+---
+
+## 14. 전략 분석 요약 (2026-04-29 완료)
+
+> 상세 원본: `docs/analysis_10b/`, `docs/strategy/outputs/`, `docs/expansion/outputs/`
+> Word 요약본: 바탕화면 `헤비로버_확장전략_2026-04-29.docx`
+
+### 단계별 완료 현황
+| 단계 | 내용 | 산출물 |
+|---|---|---|
+| Stage 1~3 | Unit Economics · Bridge 시나리오 · 코어팬 분석 | `data/analysis_10b/` |
+| Stage 4 | IC 진단 리포트 8섹션 (뻔한 답변 차단 구조) | `docs/analysis_10b/_master.md` |
+| Stage 5 | 5에이전트 갑론을박 5라운드 → Kill Criteria 8개 → 6개월 로드맵 | `docs/strategy/outputs/` |
+| Stage 6 | 6도메인 Proposer+Challenger 12명 토론 → 실행 우선순위 확정 | `docs/expansion/outputs/` |
+
+### 핵심 확정 사실 (데이터 실측)
+- **P50 10일** (기존 15일 가정 수정) — 구매 후 10일이 재구매 트리거 골든타임
+- **M+1 실측 12.8%** (가정치 14% 아님) — 2026-03 코호트 9.8%로 K2 경계
+- **결제 전환율 49.85%** — 광고비의 절반이 결제 단계에서 소실 (가장 큰 병목)
+- **위너 캠페인 AOV 81,918원** vs 현행 60,375원 — ROAS 격차는 AOV 차이가 원인
+- **SS 재구매율 43%** — Meta 광고 지연 효과 가능성 미검증 (50만원 실험으로 4주 내 확인 가능)
+
+### Kill Criteria 8개 (확정 — 매주 자동 모니터링)
+| # | 기준 | 측정 주기 | 트리거 액션 | 현재 상태 |
+|---|---|---|---|---|
+| K1 | ROAS < 2.8 | 매주 월요일 | 광고비 -30% | 3.51 (여유 있음) |
+| K2 | M+1 < 12% 3개월 연속 | 월 1회 | 신규 획득 정지 검토 | 9.8% (⚠️ 이미 미달) |
+| K3 | 월매출 < 3,500만 2개월 | 월 1회 | 광고비 구조 재검토 | ~3,800만 (300만 여유) |
+| K4 | 상생자금 탈락 | 즉시 | 시리얼 50% 축소 | **거의 확정 (6,000만원)** |
+| K5 | 시리얼 프리오더 500봉 미달 | 출시 후 1회 | 시리얼 광고 보류 | 6월 출시 예정 |
+| K6 | AOV < 58,000 2개월 | 매주 | 광고 타겟 리셋 | 59,964 (⚠️ 2,000원 여유) |
+| K7 | LTV/CAC < 1.5 (60일) | 월 1회 | 광고 -50% + UE 재진단 | 1.79 (양호) |
+| K8 | 1주 현금 음수 4주 연속 | 매주 | 인건비 구조 긴급 검토 | 미모니터링 |
+
+### 6개월 로드맵 핵심 액션 (확정)
+| ID | 액션 | 담당 | 기한 |
+|---|---|---|---|
+| ACT-01 | 박재영 역할 명세 작성 | 승현님 | **05-06** |
+| ACT-02 | 결제 퍼널 개선 (배송비·소셜로그인 완료 → 남은 원인: 비회원구매·간편결제·배송일 표시) | 승현님 | 진행중 |
+| ACT-03 | 2026-02 코호트 원인 분석 | Claude | ✅ 완료 (2026-04-30) |
+| ACT-04 | 재구매 그룹 분류 인프라 + GA4 연동 | Claude | 이번 주 |
+| ACT-05 | 광고 소재 변경 ("2박스로 2주치") | 승현님 | 05-07 |
+| ACT-06 | SS 소규모 광고 실험 (Meta→SS 50만원) | 승현님 | 05-10 |
+| ACT-07 | 복지몰 베네피아 파일럿 입점 | 승현님 | 05-10 |
+| ACT-08 | 상생자금 현장실사 준비 | 승현님 | 실사 통보 후 |
+
+### 탈락 확정 제안 (재논의 불필요)
+- **TikTok 파일럿**: 흑자선 미달 + 1인 운영 병목 + 전환 추적 불가 3가지 동시 해당
 
 ---
 
