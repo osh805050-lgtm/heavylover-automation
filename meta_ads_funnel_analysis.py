@@ -161,7 +161,7 @@ def funnel_health_diagnosis(funnel: dict) -> list[str]:
     if checkout_to_purchase and checkout_to_purchase["conversion_rate_pct"] is not None:
         r = checkout_to_purchase["conversion_rate_pct"]
         if r < 50:
-            msgs.append(f"🔴 결제→구매 {r:.1f}% (50% 미만) — 결제 단계 마찰(배송비·결제수단·회원가입) 검토")
+            msgs.append(f"🔴 결제→구매 {r:.1f}% (50% 미만) — 비회원 구매 가능 여부·간편결제(카카오페이·토스페이·네이버페이)·냉동 배송일 표시 확인 (배송비·소셜로그인은 완료)")
         elif r > 75:
             msgs.append(f"✅ 결제→구매 {r:.1f}% — 결제 페이지 마찰 적음")
 

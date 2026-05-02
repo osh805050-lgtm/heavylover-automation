@@ -12,5 +12,20 @@
         ]
       }
     ]
-  }
+  },
+  "permissions": {
+    "allow": [
+      "Bash(ssh root@158.247.215.170 *)",
+      "Bash(crontab -l)",
+      "Bash(tree *)",
+      "Bash(pip list)",
+      "Bash(pip list *)",
+      "Bash(pip show *)",
+      "Bash(systemctl status *)",
+      "Bash(journalctl *)",
+      "Bash(env)",
+      "Bash(printenv *)"
+    ]
+  },
+  "enableAllProjectMcpServers": true
 }

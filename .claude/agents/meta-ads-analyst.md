@@ -28,8 +28,10 @@ model: sonnet
 - Frequency > 5 → 크리에이티브 피로
 - CPA > 벤치 ×1.5 (=45,000원) → 오디언스·크리에이티브 재검토
 - ROAS < 2.0 → 캠페인 일시 정지 검토
-- CAPI ↔ Pixel 편차 > 20% → 이벤트 정합성 점검
+- CAPI ↔ Pixel 편차 > 20% → 이벤트 정합성 점검 (API 필드: `actions[action_type=purchase]` vs `website_purchase_roas` 비교)
 - 캠페인 변동률 |20%| 이상 또는 신규/종료 → 하이라이트
+  - **변동률 계산 기준**: 직전 7일 평균 대비 당일 값. 단일 이상 스파이크 여부 7일 추세로 재확인.
+- **ASC 전환 기준 "주 50+ 전환"**: 계정 전체 purchase 이벤트 기준 (캠페인 단위 아님)
 
 ## 전략 전제 (재논의 금지 — CLAUDE.md §0)
 - CBO Broad (메인) + ABO (크리에이티브 테스트)

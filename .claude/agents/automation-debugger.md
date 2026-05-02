@@ -30,7 +30,19 @@ model: sonnet
 - **GitHub Actions** (UTC):
   - `0 0 * * *` → Meta 광고 일일 (KST 09:00)
   - 주간 → 월요일 KST 09:00
-- **로그**: `/root/heavylover-automation/logs/`
+- **로그 파일 위치**:
+  - `/root/heavylover-automation/logs/run_automation.log`
+  - `/root/heavylover-automation/logs/sheets_sync.log`
+  - `/root/heavylover-automation/logs/tracking_register.log`
+  - `/root/heavylover-automation/logs/repurchase_report.log`
+  - `/root/heavylover-repurchase/logs/` (재구매 분석 전용 — 별도 폴더)
+- **서버 파일 존재 필수 확인 목록** (장애 전 체크):
+  - `/root/heavylover-automation/run_automation.py`
+  - `/root/heavylover-automation/sheets_sync.py`
+  - `/root/heavylover-automation/tracking_register.py`
+  - `/root/heavylover-automation/.env`
+  - `/root/heavylover-automation/rclone.conf` (또는 `~/.config/rclone/rclone.conf`)
+  - `/root/heavylover-repurchase/repurchase_report.py`
 
 ## 외부 시스템
 - 카페24 API (`mall.read_order` + `mall.write_order`) — 토큰 자동 갱신
@@ -49,10 +61,19 @@ model: sonnet
    - 텔레그램 봇 (getMe 호출)
    - OneDrive rclone 락(423) 여부
 4. **코드 변경 이력**: 최근 git log + 의심 모듈
+   ```bash
+   ssh root@158.247.215.170 "cd /root/heavylover-automation && git log --oneline -10"
+   ```
 5. **수동 재실행** 권장:
    ```bash
+   # 자동화 메인
    ssh root@158.247.215.170 "cd /root/heavylover-automation && python3 run_automation.py --force"
+   # 시트 싱크
+   ssh root@158.247.215.170 "cd /root/heavylover-automation && python3 sheets_sync.py"
+   # 재구매 리포트
+   ssh root@158.247.215.170 "cd /root/heavylover-repurchase && python3 repurchase_report.py"
    ```
+   > `--force` 플래그: 평일 시간 조건 무시하고 즉시 실행. 주문 API 호출·엑셀 생성·텔레그램 발송 모두 실제 동작함 — 중복 발송 주의.
 
 ## 자주 발생 + 알려진 함정
 - **카페24 401 반복**: 토큰 자동 갱신 실패 가능성 (set_key 동시 실행 race) → `.env` 수동 확인

@@ -29,12 +29,16 @@ KEYWORDS = {
     "§자동화점검": r"자동화|automation|cron|vultr|pluscl|배포|crontab|\.env|발주|송장|텔레그램|telegram",
     "§외부API다루기": r"\bAPI\b|api|cafe24|카페24|naver|네이버|meta|메타|oauth|토큰|anthropic|스마트스토어|productorder|webhook",
     "§시간중복처리": r"중복|dedup|윈도우|hours_back|days_back|cutoff|동기화|\bsync\b|paymentdate|결제일",
-    "§데이터범위와분석분리": r"\b분석\b|리포트|report|mart_|cohort|코호트|시트.*상태|repurchase|재구매",
+    # "분석" 단독 매칭 오주입 방지 — mart_/cohort/repurchase 등 구체적 맥락 동반 시만 매칭
+    "§데이터범위와분석분리": r"mart_|cohort|코호트|repurchase|재구매.*분석|분석.*재구매|리포트.*시트|시트.*리포트",
     "§엑셀편집": r"엑셀|excel|openpyxl|xlsx|freeze|숨김|발주.?양식|디자인.*시트",
-    "§출력관리": r"\b리포트\b|장문|길이|토큰|insights|5000자|분할",
+    "§출력관리": r"장문|5000자|분할|토큰.*초과|출력.*길이",
     "§지역자격필터": r"지역|region|경기|용인|소재지|govt.?radar|정부지원|지원사업|시·군|시군",
     "§환경컨텍스트": r"메일|gmail|naver.*메일|imap|smtp|claude\s*-[cr]|wsl|powershell",
 }
+
+# 다중 섹션 매칭 시 최대 개수 (토큰 절약)
+MAX_SECTIONS = 2
 
 PATTERNS_PATH = Path(__file__).resolve().parent.parent.parent / "docs" / "lessons" / "patterns.md"
 
@@ -78,8 +82,9 @@ def main() -> None:
     except Exception:
         sys.exit(0)
 
+    # 최대 MAX_SECTIONS개 섹션만 주입 (중요도 순: 먼저 매칭된 것 우선)
     sections = []
-    for h in matched:
+    for h in matched[:MAX_SECTIONS]:
         s = extract_section(content, h)
         if s:
             sections.append(s)
