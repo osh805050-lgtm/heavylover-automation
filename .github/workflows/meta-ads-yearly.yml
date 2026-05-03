@@ -1,9 +1,9 @@
 name: Meta 광고 종합 심층 리포트 (1년치)
 
-# 매주 일요일 KST 09:00 = UTC 일요일 00:00
+# 매주 일요일 KST 08:00 = UTC 토요일 23:00 (정각 큐 집중 회피)
 on:
   schedule:
-    - cron: "0 0 * * 0"
+    - cron: "0 23 * * 6"
   workflow_dispatch:
 
 permissions:

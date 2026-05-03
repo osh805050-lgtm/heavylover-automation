@@ -1,9 +1,9 @@
 name: 정부지원 레이더 일일 실행
 
-# 매일 KST 11:00 = UTC 02:00
+# 매일 KST 08:00 = UTC 전날 23:00 (정각 큐 집중 회피)
 on:
   schedule:
-    - cron: "0 2 * * *"
+    - cron: "0 23 * * *"
   workflow_dispatch:  # 수동 실행 가능
 
 permissions:

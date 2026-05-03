@@ -1,9 +1,9 @@
 name: Meta 광고 주간 리포트
 
-# 매주 월요일 KST 09:00 = UTC 월요일 00:00
+# 매주 월요일 KST 08:00 = UTC 일요일 23:00 (정각 큐 집중 회피)
 on:
   schedule:
-    - cron: "0 0 * * 1"
+    - cron: "0 23 * * 0"
   workflow_dispatch:
 
 permissions:
