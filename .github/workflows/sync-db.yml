@@ -1,0 +1,120 @@
+name: SQLite DB 주간 동기화
+
+on:
+  schedule:
+    # 매주 월요일 08:00 KST (23:00 UTC 일요일)
+    - cron: '0 23 * * 0'
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: CSV → SQLite 동기화
+        run: |
+          python3 << 'EOF'
+          import sqlite3, csv, json, os
+
+          db_path = 'data/heavylover.db'
+          conn = sqlite3.connect(db_path)
+
+          # 1. Meta 광고 데이터 동기화
+          files = [
+              ('data/meta_ads/daily.csv', 'meta_ads_daily'),
+              ('data/meta_ads/daily_campaign.csv', 'meta_ads_campaign'),
+              ('data/meta_ads/daily_adset.csv', 'meta_ads_adset'),
+          ]
+
+          for fpath, tname in files:
+              if not os.path.exists(fpath):
+                  print(f'파일 없음: {fpath}')
+                  continue
+              with open(fpath, 'r', encoding='utf-8') as f:
+                  reader = csv.DictReader(f)
+                  rows = list(reader)
+              if not rows:
+                  print(f'{tname}: 행 없음')
+                  continue
+              cols = list(rows[0].keys())
+              col_defs = ', '.join(['"' + c + '" TEXT' for c in cols])
+              placeholders = ', '.join(['?' for _ in cols])
+              conn.execute('DROP TABLE IF EXISTS ' + tname)
+              conn.execute('CREATE TABLE ' + tname + ' (' + col_defs + ')')
+              for row in rows:
+                  conn.execute('INSERT INTO ' + tname + ' VALUES (' + placeholders + ')', list(row.values()))
+              print(f'{tname}: {len(rows)}행 동기화')
+
+          # 2. unit_economics JSON 동기화
+          with open('data/analysis_10b/unit_economics.json', 'r', encoding='utf-8') as f:
+              data = json.load(f)
+
+          conn.execute('DROP TABLE IF EXISTS unit_economics_kpi')
+          conn.execute('''CREATE TABLE unit_economics_kpi (
+              metric TEXT, value TEXT, unit TEXT, type TEXT, source TEXT
+          )''')
+
+          kpi_rows = [
+              ('LTV', str(data['lifetime_value']['LTV']), 'KRW', 'measured', 'CRM'),
+              ('CAC', str(data['lifetime_value']['CAC']), 'KRW', 'measured', 'Meta'),
+              ('LTV/CAC', str(data['lifetime_value']['LTV_CAC_ratio']), 'ratio', 'measured', 'calculated'),
+              ('AOV_신규', str(data['lifetime_value']['AOV_new']), 'KRW', 'measured', 'CRM'),
+              ('AOV_재구매', str(data['lifetime_value']['AOV_repurchase']), 'KRW', 'measured', 'CRM'),
+              ('1->2_전환율', str(data['lifetime_value']['p_1_to_2']['value']), 'ratio', 'measured', 'CRM'),
+              ('ROAS_lifetime', str(data['ads_performance']['ROAS_lifetime']), 'ratio', 'measured', 'Meta'),
+              ('ROAS_last30', str(data['ads_performance']['ROAS_last30']), 'ratio', 'measured', 'Meta'),
+              ('M+1_avg', str(data['repurchase']['M1_avg']), 'ratio', 'measured', 'CRM'),
+              ('M+1_2026_03', str(data['repurchase']['M1_2026_03']), 'ratio', 'measured', 'CRM'),
+              ('P50_days', str(data['repurchase']['P50_days']), 'day', 'measured', 'CRM'),
+              ('월_매출', str(data['breakeven']['current_monthly_revenue_KRW']), 'KRW', 'measured', 'CRM'),
+              ('월_고정비', str(data['fixed_costs']['monthly_total_KRW_current']), 'KRW', 'measured', 'accounting'),
+              ('흑자선', str(data['breakeven']['monthly_revenue_target_KRW']), 'KRW', 'target', 'calculation'),
+          ]
+
+          for row in kpi_rows:
+              conn.execute('INSERT INTO unit_economics_kpi VALUES (?, ?, ?, ?, ?)', row)
+          print(f'unit_economics_kpi: {len(kpi_rows)}행 동기화')
+
+          # 3. Kill Criteria 동기화
+          conn.execute('DROP TABLE IF EXISTS kill_criteria')
+          conn.execute('''CREATE TABLE kill_criteria (
+              id TEXT, name TEXT, current TEXT, trigger TEXT, status TEXT
+          )''')
+
+          for k, v in data['kill_criteria'].items():
+              conn.execute('INSERT INTO kill_criteria VALUES (?, ?, ?, ?, ?)', (
+                  k, v['name'], str(v['current']), v['trigger'], v['status']
+              ))
+          print(f'kill_criteria: {len(data["kill_criteria"])}행 동기화')
+
+          conn.commit()
+          conn.close()
+          print('✅ DB 동기화 완료')
+          EOF
+
+      - name: 변경사항 git에 추가
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "noreply@github.com"
+          git add data/heavylover.db
+          if git diff --cached --exit-code > /dev/null; then
+            echo "변경사항 없음"
+          else
+            git commit -m "chore: SQLite DB 주간 동기화 (월요일 08:00 KST)"
+            git push
+            echo "✅ DB 푸시 완료"
+          fi
+
+      - name: Slack/텔레그램 알림 (옵션)
+        if: always()
+        run: |
+          echo "DB 동기화 완료 — meta_ads + unit_economics + kill_criteria"
