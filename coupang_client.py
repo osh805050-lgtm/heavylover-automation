@@ -50,55 +50,60 @@ def _auth_header(method, path, query, env):
     }
 
 
-def fetch_orders(days_back=1):
-    """발주서 목록 조회 (분단위 전체, INSTRUCT 상태 = 상품준비중/배송준비)
+def _fetch_one_day(env, date_from, date_to):
+    """하루치 발주서 조회 (최대 범위 24h 제한)"""
+    path = f"/v2/providers/openapi/apis/api/v4/vendors/{env['vendor_id']}/ordersheets"
+    base_query = (
+        f"createdAtFrom={date_from.strftime('%Y-%m-%dT%H:%M')}"
+        f"&createdAtTo={date_to.strftime('%Y-%m-%dT%H:%M')}"
+        f"&searchType=timeFrame"
+        f"&status=INSTRUCT"
+        f"&maxPerPage=50"
+    )
+    orders = []
+    page = 1
+    while True:
+        paged_query = base_query + f"&pageIndex={page}"
+        headers = _auth_header("GET", path, paged_query, env)
+        # params= 사용 금지 — requests가 URL을 재조합하면 서명 query와 불일치 발생
+        r = requests.get(f"{API_BASE}{path}?{paged_query}", headers=headers, timeout=30)
+        if r.status_code != 200:
+            raise RuntimeError(f"쿠팡 주문 조회 실패 ({r.status_code}): {r.text[:300]}")
+        data = r.json().get("data", []) or []
+        orders.extend(data)
+        if len(data) < 50:
+            break
+        page += 1
+        time.sleep(0.5)
+    return orders
 
-    days_back: 며칠 전까지 조회할지 (기본 1일)
-    반환: 발주서 raw dict 리스트
+
+def fetch_orders(days_back=2):
+    """발주서 목록 조회 (INSTRUCT 상태 = 상품준비중/배송준비)
+
+    쿠팡 API는 1회 요청 범위가 최대 24h이므로 days_back 일수만큼 1일 단위로 분할 호출.
+    반환: 발주서 raw dict 리스트 (중복 orderId 제거)
     """
     env = _get_env()
     if not env["vendor_id"] or not env["access_key"] or not env["secret_key"]:
         raise RuntimeError("쿠팡 API 키 미설정 — .env에 COUPANG_VENDOR_ID/ACCESS_KEY/SECRET_KEY 추가 필요")
 
     now = datetime.now(KST)
-    created_from = (now - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M")
-    created_to = now.strftime("%Y-%m-%dT%H:%M")
+    seen = {}
+    for d in range(days_back):
+        date_to = now - timedelta(days=d)
+        date_from = date_to - timedelta(days=1)
+        try:
+            day_orders = _fetch_one_day(env, date_from, date_to)
+            for o in day_orders:
+                oid = o.get("orderId")
+                if oid and oid not in seen:
+                    seen[oid] = o
+        except Exception as e:
+            print(f"  - 쿠팡 {date_from.strftime('%m/%d')} 조회 오류 (스킵): {e}")
+        time.sleep(0.3)
 
-    path = f"/v2/providers/openapi/apis/api/v4/vendors/{env['vendor_id']}/ordersheets"
-    query = (
-        f"createdAtFrom={created_from}"
-        f"&createdAtTo={created_to}"
-        f"&searchType=timeFrame"
-        f"&status=INSTRUCT"
-        f"&maxPerPage=50"
-    )
-
-    all_orders = []
-    page = 1
-
-    while True:
-        paged_query = query + f"&pageIndex={page}"
-        headers = _auth_header("GET", path, paged_query, env)
-        # params= 사용 금지 — requests가 URL을 재조합하면 서명 query와 불일치 발생
-        r = requests.get(
-            f"{API_BASE}{path}?{paged_query}",
-            headers=headers,
-            timeout=30,
-        )
-        if r.status_code != 200:
-            raise RuntimeError(f"쿠팡 주문 조회 실패 ({r.status_code}): {r.text[:300]}")
-
-        body = r.json()
-        data = body.get("data", []) or []
-        all_orders.extend(data)
-
-        # 다음 페이지 없으면 종료
-        if len(data) < 50:
-            break
-        page += 1
-        time.sleep(0.5)
-
-    return all_orders
+    return list(seen.values())
 
 
 def detect_special_orders(orders):
