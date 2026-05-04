@@ -41,6 +41,10 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN_ADS: ${{ secrets.TELEGRAM_BOT_TOKEN_ADS }}
+          TELEGRAM_CHAT_ID_ADS: ${{ secrets.TELEGRAM_CHAT_ID_ADS }}
+          TELEGRAM_BOT_TOKEN_OPS: ${{ secrets.TELEGRAM_BOT_TOKEN_OPS }}
+          TELEGRAM_CHAT_ID_OPS: ${{ secrets.TELEGRAM_CHAT_ID_OPS }}
           SMTP_HOST: ${{ vars.SMTP_HOST || 'smtp.gmail.com' }}
           SMTP_PORT: ${{ vars.SMTP_PORT || '587' }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
