@@ -79,9 +79,9 @@ def fetch_orders(days_back=1):
     while True:
         paged_query = query + f"&pageIndex={page}"
         headers = _auth_header("GET", path, paged_query, env)
+        # params= 사용 금지 — requests가 URL을 재조합하면 서명 query와 불일치 발생
         r = requests.get(
-            f"{API_BASE}{path}",
-            params=dict(p.split("=", 1) for p in paged_query.split("&")),
+            f"{API_BASE}{path}?{paged_query}",
             headers=headers,
             timeout=30,
         )
