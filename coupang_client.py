@@ -78,10 +78,11 @@ def _fetch_one_day(env, date_from, date_to):
     return orders
 
 
-def fetch_orders(days_back=2):
+def fetch_orders(days_back=14):
     """발주서 목록 조회 (INSTRUCT 상태 = 상품준비중/배송준비)
 
     쿠팡 API는 1회 요청 범위가 최대 24h이므로 days_back 일수만큼 1일 단위로 분할 호출.
+    status=INSTRUCT 필터로 이미 발송 처리된 건은 자동 제외되므로 넉넉하게 14일 조회.
     반환: 발주서 raw dict 리스트 (중복 orderId 제거)
     """
     env = _get_env()

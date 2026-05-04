@@ -67,7 +67,7 @@ def _fetch_all():
 
     coupang_orders = []
     try:
-        coupang_orders = coupang_client.fetch_orders(days_back=2)
+        coupang_orders = coupang_client.fetch_orders(days_back=14)
     except RuntimeError as e:
         if "미설정" in str(e):
             print("  - 쿠팡: API 키 미설정, 스킵")
