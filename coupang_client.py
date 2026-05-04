@@ -92,7 +92,7 @@ def fetch_orders(days_back=2):
     seen = {}
     for d in range(days_back):
         date_to = now - timedelta(days=d)
-        date_from = date_to - timedelta(days=1)
+        date_from = date_to - timedelta(hours=23, minutes=59)
         try:
             day_orders = _fetch_one_day(env, date_from, date_to)
             for o in day_orders:
