@@ -2,7 +2,7 @@
 헤비로버 주문 자동화 - 전체 파이프라인 (텔레그램 승인 플로우 포함)
 
 평일 오전 11시 실행:
-  1. 카페24 + 네이버 주문 조회
+  1. 카페24 + 네이버 + 쿠팡 주문 조회
   2. 신규/특이사항 있으면 → 텔레그램 알림 + 승인 대기
   3. 사장님 /done → 엑셀 생성
   4. 사장님 /cancel → 오늘 취소
@@ -26,12 +26,13 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 # 로컬 모듈
 sys.path.insert(0, str(Path(__file__).parent))
 import cafe24_client
+import coupang_client
 import naver_client
 import telegram_client
 from dada_excel import create_dada_file, validate_dada_file, DADA_COLUMNS
 
 
-def _summarize_specials(cafe24_specials, naver_specials):
+def _summarize_specials(cafe24_specials, naver_specials, coupang_specials=None):
     lines = []
     if cafe24_specials:
         lines.append(f"[카페24] {len(cafe24_specials)}건")
@@ -45,18 +46,35 @@ def _summarize_specials(cafe24_specials, naver_specials):
             lines.append(f"  - {s['order_id']}: {s['reason']}")
         if len(naver_specials) > 5:
             lines.append(f"  ...외 {len(naver_specials)-5}건")
+    if coupang_specials:
+        lines.append(f"[쿠팡] {len(coupang_specials)}건")
+        for s in coupang_specials[:5]:
+            lines.append(f"  - {s['order_id']}: {s['reason']}")
+        if len(coupang_specials) > 5:
+            lines.append(f"  ...외 {len(coupang_specials)-5}건")
     return "\n".join(lines)
 
 
 def _fetch_all():
-    """카페24 + 네이버 주문 조회 후 정리
+    """카페24 + 네이버 + 쿠팡 주문 조회 후 정리
 
     카페24: 7일치 조회 후 N20(배송준비중)만 필터 (상태 기반)
     네이버: 14일 윈도우로 PAYED 전수 조회 (며칠 전 결제·발송기한 초과 포함)
+    쿠팡: 2일치 INSTRUCT(상품준비중) 조회. API 키 미설정 시 자동 스킵.
     """
     cafe24_orders = cafe24_client.fetch_orders(days_back=7)
     naver_orders = naver_client.orders_pending_dispatch(days_back=14)
-    return cafe24_orders, naver_orders
+
+    coupang_orders = []
+    try:
+        coupang_orders = coupang_client.fetch_orders(days_back=2)
+    except RuntimeError as e:
+        if "미설정" in str(e):
+            print("  - 쿠팡: API 키 미설정, 스킵")
+        else:
+            print(f"  - 쿠팡 조회 오류 (스킵): {e}")
+
+    return cafe24_orders, naver_orders, coupang_orders
 
 
 def _is_weekday():
@@ -75,7 +93,7 @@ def run(skip_weekend_check=False):
 
     # 1) 주문 조회
     print("[1/5] 주문 조회 중...")
-    cafe24_orders, naver_orders = _fetch_all()
+    cafe24_orders, naver_orders, coupang_orders = _fetch_all()
 
     cafe24_df = cafe24_client.orders_to_dada_rows(cafe24_orders)
     # 네이버는 발주확인 완료된 주문(배송준비)만 엑셀에 포함
@@ -84,8 +102,10 @@ def run(skip_weekend_check=False):
         if w.get("productOrder", {}).get("placeOrderStatus") == "OK"
     ]
     naver_df = naver_client.orders_to_dada_rows(naver_ready_orders)
+    coupang_df = coupang_client.orders_to_dada_rows(coupang_orders)
     cafe24_specials = cafe24_client.detect_special_orders(cafe24_orders)
     naver_specials = naver_client.detect_special_orders(naver_orders)
+    coupang_specials = coupang_client.detect_special_orders(coupang_orders)
 
     # 네이버 진짜 신규주문 = placeOrderStatus=NOT_YET (발주확인 안 된 것)
     naver_new_count = sum(
@@ -101,13 +121,15 @@ def run(skip_weekend_check=False):
     # 전화번호 기준 구매자 수
     cafe24_buyers = cafe24_df["받는분전화번호"].nunique() if len(cafe24_df) else 0
     naver_buyers = naver_df["받는분전화번호"].nunique() if len(naver_df) else 0
+    coupang_buyers = coupang_df["받는분전화번호"].nunique() if len(coupang_df) else 0
 
     print(f"  - 카페24 배송준비: {cafe24_buyers}명")
     print(f"  - 스마트스토어 배송준비: {naver_buyers}명 (신규 {naver_new_count}건, 발송기한초과 {naver_overdue_count}건)")
-    print(f"  - 특이사항: 카페24 {len(cafe24_specials)}건 / 스마트스토어 {len(naver_specials)}건")
+    print(f"  - 쿠팡 배송준비: {coupang_buyers}명")
+    print(f"  - 특이사항: 카페24 {len(cafe24_specials)}건 / 스마트스토어 {len(naver_specials)}건 / 쿠팡 {len(coupang_specials)}건")
 
     # 2) 신규 주문 or 특이사항 있으면 승인 받기
-    need_approval = naver_new_count > 0 or cafe24_specials or naver_specials
+    need_approval = naver_new_count > 0 or cafe24_specials or naver_specials or coupang_specials
     if need_approval:
         print("\n[2/5] 텔레그램으로 승인 요청 중...")
         ss_line = f"스마트스토어: {naver_buyers}명 (신규 {naver_new_count}건"
@@ -120,7 +142,7 @@ def run(skip_weekend_check=False):
             f"카페24 배송준비: {cafe24_buyers}명",
             ss_line,
         ]
-        specials_text = _summarize_specials(cafe24_specials, naver_specials)
+        specials_text = _summarize_specials(cafe24_specials, naver_specials, coupang_specials)
         if specials_text:
             summary_parts.append("")
             summary_parts.append("⚠️ 확인 필요")
@@ -152,22 +174,24 @@ def run(skip_weekend_check=False):
 
         # 승인 후 주문 재조회 (사장님이 발주확인 처리했으므로)
         print("  - 처리 완료된 주문 재조회 중...")
-        cafe24_orders, naver_orders = _fetch_all()
+        cafe24_orders, naver_orders, coupang_orders = _fetch_all()
         cafe24_df = cafe24_client.orders_to_dada_rows(cafe24_orders)
         naver_ready_orders = [
             w for w in naver_orders
             if w.get("productOrder", {}).get("placeOrderStatus") == "OK"
         ]
         naver_df = naver_client.orders_to_dada_rows(naver_ready_orders)
+        coupang_df = coupang_client.orders_to_dada_rows(coupang_orders)
         cafe24_buyers = cafe24_df["받는분전화번호"].nunique() if len(cafe24_df) else 0
         naver_buyers = naver_df["받는분전화번호"].nunique() if len(naver_df) else 0
-        print(f"  - 재조회 결과: 카페24 {cafe24_buyers}명 / 스마트스토어 배송준비 {naver_buyers}명")
+        coupang_buyers = coupang_df["받는분전화번호"].nunique() if len(coupang_df) else 0
+        print(f"  - 재조회 결과: 카페24 {cafe24_buyers}명 / 스마트스토어 {naver_buyers}명 / 쿠팡 {coupang_buyers}명")
     else:
         print("\n[2/5] 특이사항 없음 → 승인 생략, 바로 진행")
 
     # 3) 엑셀 생성
     print("\n[3/5] 더다 양식 엑셀 생성 중...")
-    combined = pd.concat([cafe24_df, naver_df], ignore_index=True)
+    combined = pd.concat([cafe24_df, naver_df, coupang_df], ignore_index=True)
     combined = combined[DADA_COLUMNS]
 
     if len(combined) == 0:
@@ -183,7 +207,7 @@ def run(skip_weekend_check=False):
         print(f"  - 엑셀 생성 실패: {e}")
         return None, False
     print(f"  - 파일: {output_path}")
-    print(f"  - 총 {len(combined)}행 (카페24 {len(cafe24_df)} + 네이버 {len(naver_df)})")
+    print(f"  - 총 {len(combined)}행 (카페24 {len(cafe24_df)} + 네이버 {len(naver_df)} + 쿠팡 {len(coupang_df)})")
 
     # 4) 검증
     print("\n[4/5] 파일 검증 중...")
@@ -231,11 +255,13 @@ def run(skip_weekend_check=False):
     except Exception as e:
         print(f"  - OneDrive 업로드 오류: {e}")
 
+    coupang_line = f"\n- 쿠팡: {coupang_buyers}명" if coupang_buyers > 0 else ""
     result_msg = (
         f"✅ 엑셀 생성 완료\n"
         f"- 카페24: {cafe24_buyers}명\n"
-        f"- 스마트스토어: {naver_buyers}명\n"
-        f"- 총: {cafe24_buyers + naver_buyers}명\n"
+        f"- 스마트스토어: {naver_buyers}명"
+        f"{coupang_line}\n"
+        f"- 총: {cafe24_buyers + naver_buyers + coupang_buyers}명\n"
         f"- 검증: {'통과' if is_valid else '실패 - 확인 필요'}\n"
         f"- OneDrive: {'✓ 업로드 완료' if onedrive_ok else '✗ 실패 (텔레그램만 전송)'}"
     )
