@@ -307,11 +307,12 @@ Anthropic 결제 활성 후 자동으로 4역할 분석 재개됩니다.
     return text, html
 
 
-def main() -> int:
+def main(gt: dict | None = None) -> int:
     today = datetime.now(KST).strftime("%Y-%m-%d")
     try:
-        ss = _open_sheet()
-        gt = build_ground_truth(ss)
+        if gt is None:
+            ss = _open_sheet()
+            gt = build_ground_truth(ss)
         enriched = enrich(gt)
         rec_block = recommendation_log.format_for_prompt(days=7)
 

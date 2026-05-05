@@ -1348,14 +1348,11 @@ def _format_fallback(gt: dict, issues: list[str]) -> str:
 
 
 def run() -> dict:
-    """09:00 메인: 마트 4종 시트 갱신 + ground_truth 저장만 담당.
+    """09:00 메인: gt 1회 계산 → 마트/대시보드 갱신 → 텔레그램 → 이메일 순 실행.
 
-    텔레그램·이메일 발송은 별도 스크립트가 책임:
-    - 09:05 report_telegram_brief.py  → 텔레그램 30초 요약
-    - 09:10 report_email_daily.py     → 이메일 4역할 심층
-    - 일21:00 report_email_weekly.py  → 이메일 멀티 에이전트 주간
+    - 일21:00 report_email_weekly.py  → 이메일 멀티 에이전트 주간 (별도 유지)
     """
-    _log("=== 재구매 리포트 (마트 갱신) 시작 ===")
+    _log("=== 재구매 리포트 시작 ===")
     ss = _open_sheet()
     gt = build_ground_truth(ss)
 
@@ -1382,11 +1379,34 @@ def run() -> dict:
     except Exception as e:
         _log(f"⚠️ 대시보드 탭 갱신 실패: {e}")
 
-    # GT 저장 (감사 + 후속 스크립트들이 비교용으로 사용)
+    # GT 저장 (감사용)
     date_str = datetime.now(KST).strftime("%Y-%m-%d")
     gt_log = ANALYSIS_LOG_DIR / f"gt_{date_str}.json"
     gt_log.write_text(json.dumps(gt, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     _log(f"ground_truth 저장: {gt_log}")
+
+    # 텔레그램 요약 발송 (gt 재사용)
+    try:
+        _log("텔레그램 요약 발송 중...")
+        from report_telegram_brief import build_brief
+        msg = build_brief(gt)
+        send_message(msg, channel="report")
+        _log("✅ 텔레그램 발송 완료")
+    except Exception as e:
+        _log(f"⚠️ 텔레그램 발송 실패: {e}")
+        try:
+            send_message(f"🚨 텔레그램 요약 실패: {e}", channel="ops")
+        except Exception:
+            pass
+
+    # 이메일 심층 분석 발송 (gt 재사용)
+    try:
+        _log("이메일 심층 분석 발송 중...")
+        from report_email_daily import main as email_main
+        email_main(gt=gt)
+        _log("✅ 이메일 발송 완료")
+    except Exception as e:
+        _log(f"⚠️ 이메일 발송 실패: {e}")
 
     return {"status": "success", "issues": []}
 
