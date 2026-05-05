@@ -101,62 +101,109 @@ def build_brief(gt: dict) -> str:
 
     wow = enriched.get("WoW_비교") or {}
     matrix_wow = wow.get("당월_매출_WoW_pct")
-
     flags = enriched.get("이상치_플래그") or []
 
     today = datetime.now(KST).strftime("%Y-%m-%d")
-    headline = _build_headline(cur.get("매출"), mom, m1, rate_1to2, flags)
 
-    # 색상 플래그
-    flag_sales = "🔴" if (mom is not None and mom < -30) else ("🟡" if (mom is not None and mom < 0) else "🟢")
-    flag_1to2 = _flag_emoji(rate_1to2, 30, severity_pct=15)
-    flag_m1 = _flag_emoji(m1, 20, severity_pct=15)
-    flag_p50 = "🟢"  # 정상 범위 14~16일
+    # ── 주의/액션 항목 수집 ──────────────────────────────────
+    alerts = []  # (우선순위, 항목명, 현재값, 이유, 액션)
 
-    # 포맷 통일
-    mom_str = f"{mom:+.2f}%" if mom is not None else "—"
-    wow_str = f"{matrix_wow:+.2f}%" if matrix_wow is not None else None
-    rate_str = f"{rate_1to2:.2f}%" if rate_1to2 is not None else "—"
-    m1_str = f"{m1:.2f}%" if m1 is not None else "—"
+    if mom is not None and mom < -30:
+        alerts.append((
+            3,
+            "재구매 매출 급락",
+            f"전월대비 {mom:+.1f}%",
+            "한 달 사이 큰 폭 하락 — 광고 소재 피로 또는 계절 요인 가능성",
+            "광고 ROAS 확인 후 위너 소재 재투입 검토",
+        ))
+    elif mom is not None and mom < 0:
+        alerts.append((
+            1,
+            "재구매 매출 소폭 감소",
+            f"전월대비 {mom:+.1f}%",
+            "전월 대비 감소 — 5% 이내면 정상 변동 범위",
+            "이달 말까지 추이 모니터링",
+        ))
 
-    lines = [
-        f"📊 헤비로버 재구매 {today}",
-        "",
-        f"핵심: {headline}",
-        "",
-        "━━━ 주요 지표 ━━━",
-        f"{flag_sales} 당월 재구매 매출",
-        f"   {_format_kr_money(cur.get('매출'))}",
-        f"   전월대비 {mom_str} {_delta_arrow(mom)}" if mom is not None else "   전월대비 —",
-    ]
-    if wow_str is not None:
-        lines.append(f"   전주대비 {wow_str} {_delta_arrow(matrix_wow)}")
-    lines.append("")
+    if rate_1to2 is not None and rate_1to2 < 20:
+        alerts.append((
+            3,
+            "1→2 전환율 위험",
+            f"{rate_1to2:.1f}% (목표 30%)",
+            f"첫 구매 후 재구매로 이어지는 비율이 목표 대비 {round(30 - rate_1to2, 1)}%p 부족",
+            "구매 후 3일·10일 리마인드 메시지 발송 점검",
+        ))
+    elif rate_1to2 is not None and rate_1to2 < 25:
+        alerts.append((
+            2,
+            "1→2 전환율 주의",
+            f"{rate_1to2:.1f}% (목표 30%)",
+            f"목표 대비 {round(30 - rate_1to2, 1)}%p 부족 — 개선 여지 있음",
+            "재구매 유도 쿠폰 or 리마인드 타이밍 검토",
+        ))
 
-    lines.extend([
-        f"{flag_1to2} 1→2번째 구매 전환율",
-        f"   {rate_str} (목표 30%)",
-        "",
-        f"{flag_m1} 첫 구매 후 한달 재구매율",
-        f"   {m1_str} (목표 20%)",
-        "",
-        f"{flag_p50} 재구매 간격 중앙값",
-        f"   {p50}  (고객 절반이 이 기간 안에 다시 구매)",
-        "",
-    ])
+    if m1 is not None and m1 < 14:
+        alerts.append((
+            3,
+            "M+1 리텐션 위험",
+            f"{m1:.1f}% (목표 20%)",
+            f"첫 구매 후 한 달 내 돌아오는 비율 목표 대비 {round(20 - m1, 1)}%p 미달",
+            "첫 구매 고객 대상 Day 10 전후 쿠폰 발송 확인",
+        ))
+    elif m1 is not None and m1 < 17:
+        alerts.append((
+            1,
+            "M+1 리텐션 주의",
+            f"{m1:.1f}% (목표 20%)",
+            f"목표 대비 {round(20 - m1, 1)}%p 부족",
+            "CRM 시퀀스 발송 이력 확인",
+        ))
 
-    if flags:
-        lines.append("⚠️ 이상한 움직임 감지 (평균 대비 크게 벗어남):")
-        for f in flags[:3]:
-            direction = "급등" if f.get("방향") in ("급등", "개선") else "급락"
-            lines.append(f"  • {f.get('지표')} {direction}")
+    if matrix_wow is not None and abs(matrix_wow) > 20:
+        direction = "급등" if matrix_wow > 0 else "급락"
+        alerts.append((
+            2,
+            f"주간 매출 {direction}",
+            f"전주대비 {matrix_wow:+.1f}%",
+            "단기 급변 — 프로모션·광고 변화 여부 확인 필요",
+            "광고 예산·소재 변경 이력 대조",
+        ))
+
+    for f in flags[:2]:
+        direction = "급등" if f.get("방향") in ("급등", "개선") else "급락"
+        alerts.append((
+            1,
+            f"이상치: {f.get('지표')} {direction}",
+            f"z={f.get('z_score')}",
+            "평균 대비 통계적으로 크게 벗어남",
+            "메일 심층 분석 확인",
+        ))
+
+    alerts.sort(key=lambda x: x[0], reverse=True)
+
+    # ── 메시지 조립 ───────────────────────────────────────────
+    lines = [f"📊 헤비로버 재구매 {today}", ""]
+
+    if not alerts:
+        lines += [
+            "🟢 오늘 특이사항 없음",
+            "",
+            f"재구매 매출 전월대비 {mom:+.1f}%" if mom is not None else "",
+            f"1→2 전환율 {rate_1to2:.1f}%" if rate_1to2 is not None else "",
+            f"M+1 리텐션 {m1:.1f}%" if m1 is not None else "",
+        ]
     else:
-        lines.append("✓ 특이 이상치 없음")
+        for _, name, val, reason, action in alerts:
+            icon = "🔴" if _ == 3 else "🟡"
+            lines += [
+                f"{icon} {name} | {val}",
+                f"   이유: {reason}",
+                f"   액션: {action}",
+                "",
+            ]
 
-    lines.append("")
-    lines.append("📧 심층 분석 → 메일 확인")
-
-    return "\n".join(lines)
+    lines += ["📧 상세 → 메일 확인"]
+    return "\n".join(l for l in lines if l is not None)
 
 
 def main() -> int:
