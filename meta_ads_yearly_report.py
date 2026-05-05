@@ -32,6 +32,7 @@ from anthropic import Anthropic
 from dotenv import load_dotenv
 
 import email_sender
+from lib.glossary import glossary_details_html
 import telegram_client
 from meta_ads_funnel_analysis import overall_funnel, funnel_to_markdown, funnel_health_diagnosis
 
@@ -261,44 +262,51 @@ def load_funnel_aggregate(days=365):
 
 SYSTEM_PROMPT = """당신은 D2C 이커머스 Meta 광고 시니어 분석가다. HeavyLover(냉동 도시락 D2C, 20~30대 운동 직장인 남성 타겟) 1년치 누적 광고 성과를 종합 진단한다.
 
-**한 응답 안에 4명이 순차로 발언**한다.
+독자 수준: 마케팅·통계 용어 모름. 숫자는 알지만 전문 해석은 낯섦.
+목표: 1년 광고가 어땠는지, 다음 분기에 뭘 바꿔야 할지 읽고 나면 바로 알 수 있게.
+
+전문 용어는 반드시 첫 등장 시 괄호 안에 한국어로 풀어써야 한다:
+- ROAS → "ROAS(광고 1원당 돌아오는 매출)"
+- CPA → "CPA(고객 1명 구매하는 데 드는 광고비)"
+- CTR → "CTR(광고 본 사람 중 클릭한 비율)"
+- Frequency → "Frequency(같은 사람에게 광고가 노출된 평균 횟수)"
+- drop-off → "이탈(그 단계에서 구매를 포기한 사람 비율)"
+- P50 → "P50(우리 광고 성과 중간값)"
+
+**한 응답 안에 4개 블록이 순차로 작성**된다. 각 섹션은 반드시 모두 작성해야 하며 중간에 끊기면 안 된다.
 
 ---
 
-## 1. 분석가 (사실 정리)
-- 1년 종합 핵심 지표 표 (총 지출, ROAS, CTR, CPA, 노출→구매 종합 전환율)
-- 월별 추세 변곡점 (성장/정체/하락 구간)
-- 퍼널 단계별 평균 drop-off 명시
+## 📌 1년 핵심 요약 1줄
+1년 광고 성과에서 가장 중요한 사실을 평어체 1문장으로. 숫자 포함. 전문 용어 없이.
+
+## 📊 숫자 정리 (분석가)
+- 1년 종합 핵심 지표 표 (총 지출, ROAS, CTR, CPA, 노출→구매 전환율)
+- 월별 추세 변곡점 (성장/정체/하락 구간) — 전문 용어 없이 쉽게
+- 퍼널 단계별 평균 이탈률 명시 (예: "상품 페이지→결제 90% 이탈")
 - 요일별 패턴 (있으면)
 - 추측 금지, 입력 JSON 숫자만
 
-## 2. 전략가 (가설 + 시즌성)
-- 월별 변동의 가능 원인 3개 (시즌·신제품·크리에이티브 교체·예산)
-- 요일별 패턴이 의미하는 것 (B2C 휴일/주말 효과 등)
-- 위너 캠페인의 공통 패턴 (타겟·제품·후킹)
-- 패배 캠페인의 공통 패턴
-- 신뢰도(높음/중간/낮음) 명시
+## 🤔 왜 이런 패턴이 생겼을까? (원인 + 반박)
+가능한 원인 3개. 형식:
+- **원인 1** (확실성: 높음/중간/낮음): 쉬운 설명. 근거 숫자 1개.
+각 원인에 대해 "이것만으로 단정 못 하는 이유"도 한 줄씩.
+마지막에 "아직 데이터가 없어서 확인 못 한 것: ..." 추가.
 
-## 3. 회의주의자 (반박)
-- 1년 데이터의 시즌 한계 (겨울/여름 1번씩만 봄)
-- 캠페인 비교 한계 (예산 분배·타겟 다른데 ROAS만 비교 가능한가)
-- 퍼널 데이터 신뢰성 (CAPI 미설치 가능성, 픽셀 누락 등)
-- 결론 단정 금지
-
-## 4. 의사결정자 (1년 데이터 기반 액션 3~5개)
-- 위너 패턴 응용한 신규 캠페인 1개
-- 패배 패턴 즉시 정지 1~2개
-- 시즌별 예산 가이드 (다음 분기)
-- 퍼널 약점 단계 개선 액션
-- 형식: "(액션) → (예상 효과·정량) → (검증 지표·기간)"
+## ✅ 다음 분기 할 일 (의사결정자)
+구체적 액션 3~5개. 각 액션 형식:
+**(액션)**: (무엇을 왜) → (며칠/몇 주 후 어떤 숫자로 확인)
 
 ---
 
-**규칙**:
+**절대 규칙**:
 1. 입력 JSON 숫자만 사용. 창작 금지.
 2. 한국어 1500~2500자. 표·불릿 적극.
-3. 헤비로버 컨텍스트: ROAS 베이스라인 3.5, Cafe24 100% Meta 의존, M+1 리텐션 14% 개선이 1순위 (재구매 자동화와 맞물림), 시리얼 신제품 2026-06 출시.
-4. AI 화법 금지. 이모지 ✅⚠️🔴📊만 허용."""
+3. 전문용어는 반드시 첫 등장 시 괄호로 풀이. 이후 반복 사용 시 풀이 생략 가능.
+4. AI 화법 금지 ("~로 보입니다", "~일 수 있습니다"). 직접 말하기.
+5. 4개 블록 전부 완성. 도중에 끊기지 말 것.
+6. 헤비로버 컨텍스트: ROAS 3.5 기준선, Meta 광고 단독 의존, 시리얼 신제품 2026-06 출시.
+7. 이모지 최소 (📌📊🤔✅⚠️🔴만 허용)."""
 
 
 USER_TEMPLATE = """1년치 Meta 광고 ground truth:
@@ -333,25 +341,55 @@ def call_claude_4roles(ctx):
 
 
 def _md_to_html(md):
-    """간단 Markdown → HTML."""
+    """Markdown → HTML. 4블록 이모지(📌📊🤔✅)는 배경색 카드로 렌더링."""
+    import re
+    BLOCK_COLORS = {
+        "📌": ("#fff3cd", "#856404", "#ffc107"),
+        "📊": ("#e8f4f8", "#0c5460", "#17a2b8"),
+        "🤔": ("#f0f0f0", "#333333", "#6c757d"),
+        "✅": ("#d4edda", "#155724", "#28a745"),
+    }
+
+    def _bold(s):
+        return re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', s)
+
     lines = md.splitlines()
     out = []
     in_list = False
     in_table = False
+    in_block = False
+
+    def _close_all():
+        nonlocal in_list, in_table, in_block
+        if in_list:
+            out.append("</ul>"); in_list = False
+        if in_table:
+            out.append("</table>"); in_table = False
+        if in_block:
+            out.append("</div>"); in_block = False
+
     for line in lines:
         s = line.rstrip()
         if s.startswith("## "):
-            if in_list:
-                out.append("</ul>"); in_list = False
-            if in_table:
-                out.append("</table>"); in_table = False
-            out.append(f"<h2 style='color:#2c3e50;border-bottom:2px solid #667eea;padding-bottom:4px;margin-top:24px;'>{s[3:].strip()}</h2>")
+            _close_all()
+            title = s[3:].strip()
+            key = next((e for e in ("📌", "📊", "🤔", "✅") if e in title), "")
+            if key:
+                bg, fg, border = BLOCK_COLORS[key]
+                out.append(
+                    f"<div style='background:{bg};border-left:5px solid {border};"
+                    f"border-radius:0 8px 8px 0;padding:16px 18px;margin:20px 0 8px 0;'>"
+                    f"<div style='font-size:15px;font-weight:800;color:{fg};margin-bottom:10px;'>{title}</div>"
+                )
+                in_block = True
+            else:
+                out.append(f"<h2 style='color:#2c3e50;border-bottom:2px solid #667eea;padding-bottom:4px;margin-top:24px;'>{title}</h2>")
         elif s.startswith("- "):
             if in_table:
                 out.append("</table>"); in_table = False
             if not in_list:
                 out.append("<ul>"); in_list = True
-            out.append(f"<li>{s[2:].strip()}</li>")
+            out.append(f"<li style='margin:4px 0;'>{_bold(s[2:].strip())}</li>")
         elif s.startswith("|") and s.endswith("|"):
             if in_list:
                 out.append("</ul>"); in_list = False
@@ -360,29 +398,27 @@ def _md_to_html(md):
                 continue
             tag = "th" if not in_table else "td"
             if not in_table:
-                out.append("<table style='border-collapse:collapse;margin:8px 0;'>"); in_table = True
-            cells_html = "".join(
-                f"<{tag} style='border:1px solid #ddd;padding:6px 12px;'>{c}</{tag}>" for c in cells
-            )
+                out.append("<table style='border-collapse:collapse;margin:8px 0;width:100%;'>"); in_table = True
+            style = "border:1px solid #ddd;padding:6px 12px;background:#f0f0f0;font-weight:bold;" if tag == "th" \
+                else "border:1px solid #ddd;padding:6px 12px;"
+            cells_html = "".join(f"<{tag} style='{style}'>{_bold(c)}</{tag}>" for c in cells)
             out.append(f"<tr>{cells_html}</tr>")
         elif s == "---":
-            if in_list:
-                out.append("</ul>"); in_list = False
-            if in_table:
-                out.append("</table>"); in_table = False
+            _close_all()
             out.append("<hr style='border:none;border-top:1px solid #eee;margin:16px 0;'>")
         elif s == "":
             if in_list:
                 out.append("</ul>"); in_list = False
             if in_table:
                 out.append("</table>"); in_table = False
-            out.append("<br>")
         else:
-            out.append(f"<p style='margin:8px 0;'>{s}</p>")
+            out.append(f"<p style='margin:8px 0;line-height:1.7;'>{_bold(s)}</p>")
     if in_list:
         out.append("</ul>")
     if in_table:
         out.append("</table>")
+    if in_block:
+        out.append("</div>")
     return "\n".join(out)
 
 
@@ -633,7 +669,7 @@ def send_email_yearly(report):
     period = ctx.get("period_label", "?")
     today_label = datetime.now(KST).strftime("%Y-%m-%d")
 
-    body_html = _md_to_html(analysis)
+    body_html = glossary_details_html() + _md_to_html(analysis)
     html = _wrap_html(body_html, ctx, chart_cids=list(charts.keys()))
     fallback_tag = " (fallback)" if report["is_fallback"] else ""
     subject = f"📈 HeavyLover Meta 광고 종합 심층{fallback_tag} — {today_label}"

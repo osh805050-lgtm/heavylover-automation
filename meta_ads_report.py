@@ -337,8 +337,35 @@ def format_markdown_report(target_date, metrics, flags, validation, raw_data, se
     return "\n".join(lines)
 
 
+def _flag_reason_action(flag_str: str) -> tuple[str, str]:
+    """플래그 문자열에서 (이유, 액션) 쌍을 규칙 기반으로 반환."""
+    f = flag_str.lower()
+    if "k1" in f or "roas" in f:
+        return (
+            "광고비 대비 매출이 기준(2.8) 아래로 떨어짐",
+            "광고비 -30% 준비. 3일 연속이면 즉시 집행",
+        )
+    if "frequency" in f or "반복 노출" in f or "소재 교체" in f:
+        return (
+            "같은 사람에게 광고가 너무 많이 보여 피로도 높아짐",
+            "새 소재로 교체하거나 타겟 범위를 넓히기",
+        )
+    if "cpa" in f or "구매 비용" in f or "고객 1명" in f:
+        return (
+            "고객 1명 구매하는 데 드는 광고비가 기준 초과",
+            "타겟·소재 점검 — 클릭은 많은데 구매 안 되는 경우 결제 퍼널 확인",
+        )
+    if "학습" in f or "노출 1,000" in f:
+        return (
+            "광고 학습에 필요한 데이터가 부족한 상태",
+            "예산을 약간 늘리거나 기간을 더 두기 (최소 7일 유지)",
+        )
+    # 기타 플래그는 원문 그대로
+    return ("광고 지표에 주의 신호가 감지됨", "메일에서 상세 내용 확인")
+
+
 def format_telegram_summary(target_date, metrics, flags, ok, action_text=None):
-    """텔레그램 간결 요약 — 2단 구조 (헤드라인 / 상세 / 플래그 / 액션)."""
+    """텔레그램 간결 요약 — 핵심 한 줄 + 주의사항·이유·액션만."""
     if not ok:
         return (
             f"📈 [Meta광고]  {target_date}\n"
@@ -346,95 +373,62 @@ def format_telegram_summary(target_date, metrics, flags, ok, action_text=None):
             f"⚠️ 데이터 없음 (API 실패 또는 노출 없음)"
         )
 
-    def _verdict_emoji(actual, bench, higher_better):
-        """벤치 대비 판정 → 이모지 (모바일에서 한눈에)."""
-        if actual is None or bench is None or bench == 0:
+    def _roas_emoji(roas):
+        if roas is None:
             return "—"
-        ratio = actual / bench
-        if higher_better:
-            if ratio >= 1.5:
-                return "🟢"  # 우수
-            if ratio >= 1.0:
-                return "🔵"  # 평균 이상
-            if ratio >= 0.7:
-                return "🟡"  # 평균 미달
-            return "🔴"
-        else:  # 낮을수록 좋음
-            if ratio <= 0.7:
-                return "🟢"
-            if ratio <= 1.0:
-                return "🔵"
-            if ratio <= 1.5:
-                return "🟡"
-            return "🔴"
+        if roas >= BENCHMARK['roas'] * 1.5:
+            return "🟢"
+        if roas >= BENCHMARK['roas']:
+            return "🔵"
+        if roas >= KILL_CRITERIA['K1_roas_min']:
+            return "🟡"
+        return "🔴"
 
     spend = metrics.get("spend")
     roas = metrics.get("roas")
     purchases = metrics.get("purchases")
     purchase_value = metrics.get("purchase_value_krw")
-    ctr = metrics.get("ctr_pct")
-    cpc = metrics.get("cpc_krw")
-    cpa = metrics.get("cpa_krw")
-    freq = metrics.get("frequency")
+    funnel_line = metrics.get("_funnel_summary")
 
     lines = []
-    # ═══ 헤더
+
+    # ═══ 헤더 + 핵심 한 줄
     lines.append(f"📈 [Meta광고]  {target_date}")
     lines.append("━━━━━━━━━━━━━━━━━━")
-
-    # ═══ 헤드라인 (가장 중요한 3개 — 매출·구매·ROAS)
-    lines.append("◆ 핵심 성과")
-    lines.append(f"  지출   {_fmt_num(spend, 0, '원')}")
-    lines.append(f"  매출   {_fmt_num(purchase_value, 0, '원')}")
-    lines.append(f"  구매   {_fmt_num(purchases, 0)}건")
-    roas_em = _verdict_emoji(roas, BENCHMARK['roas'], True)
-    lines.append(f"  ROAS   {_fmt_num(roas, 2)}  {roas_em}  (벤치 {BENCHMARK['roas']})")
+    roas_em = _roas_emoji(roas)
+    lines.append(
+        f"ROAS {_fmt_num(roas, 2)} {roas_em}  "
+        f"지출 {_fmt_num(spend, 0, '원')}  "
+        f"구매 {_fmt_num(purchases, 0)}건"
+    )
     lines.append("")
 
-    # ═══ 효율 지표 (한 블록에)
-    lines.append("◆ 광고 효율")
-    ctr_em = _verdict_emoji(ctr, BENCHMARK['ctr_pct'], True)
-    lines.append(f"  클릭률(CTR)      {_fmt_num(ctr, 2, '%')}  {ctr_em}  (기준 {BENCHMARK['ctr_pct']}%)")
-    cpc_em = _verdict_emoji(cpc, BENCHMARK['cpc_krw'], False)
-    lines.append(f"  클릭당 비용(CPC) {_fmt_num(cpc, 0, '원')}  {cpc_em}  (기준 {BENCHMARK['cpc_krw']:,}원)")
-    cpa_em = _verdict_emoji(cpa, BENCHMARK['cpa_krw'], False)
-    lines.append(f"  구매 비용(CPA)   {_fmt_num(cpa, 0, '원')}  {cpa_em}  (기준 {BENCHMARK['cpa_krw']:,}원)")
-    # Frequency는 별도 — 범위 안이면 OK
-    freq_em = "🔵"
-    if freq is not None:
-        if freq > 5:
-            freq_em = "🔴"
-        elif freq > BENCHMARK['frequency_high']:
-            freq_em = "🟡"
-    lines.append(f"  반복 노출(Freq)  {_fmt_num(freq, 2)}회  {freq_em}  (적정 {BENCHMARK['frequency_low']}~{BENCHMARK['frequency_high']}회)")
-    lines.append("")
+    # ═══ 오늘 신경 쓸 것 (플래그 + 퍼널)
+    lines.append("━━━ 오늘 신경 쓸 것 ━━━")
 
-    # ═══ 플래그 (있을 때만, 시선 끌도록 ▶ 사용)
-    if flags:
-        lines.append("◆ 자동 플래그")
-        for f in flags:
-            # 기존 flag에 이미 ⚠️가 있으면 그대로, 없으면 ▶ 추가
-            if not f.startswith(("⚠️", "🔴", "▶")):
-                f = f"▶ {f}"
-            lines.append(f"  {f}")
-        lines.append("")
+    alert_items = []
+    for f in flags:
+        reason, action = _flag_reason_action(f)
+        alert_items.append((f, reason, action))
 
-    # ═══ 퍼널 (가장 큰 drop-off — 행동 가능한 인사이트)
-    funnel_line = metrics.get("_funnel_summary")
     if funnel_line:
-        lines.append("◆ 퍼널 약점")
-        lines.append(f"  {funnel_line}")
-        lines.append("")
+        alert_items.append((
+            f"퍼널 이탈: {funnel_line}",
+            "결제 단계에서 고객 절반 이상이 이탈하고 있음",
+            "배송비 사전 표시 확인 or 결제 버튼 위치 점검",
+        ))
 
-    # ═══ Claude 액션 코멘트 (마지막 — 읽으면 즉시 행동 가능)
-    if action_text:
-        lines.append("◆ Claude 액션")
-        # 들여쓰기 통일 — 기존 텍스트의 줄들 앞에 2칸 공백
-        for line in action_text.splitlines():
-            if line.strip():
-                lines.append(f"  {line}")
-            else:
-                lines.append("")
+    if not alert_items:
+        lines.append("🟢 이상 없음")
+    else:
+        for i, (flag_text, reason, action) in enumerate(alert_items):
+            if i > 0:
+                lines.append("─────────────────")
+            lines.append(f"⚠️ {reason}")
+            lines.append(f"→ {action}")
+
+    lines.append("")
+    lines.append("📧 상세 분석 → 메일 확인")
 
     return "\n".join(lines)
 

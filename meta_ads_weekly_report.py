@@ -14,11 +14,13 @@ Meta 광고 주간 리포트 (캠페인별, 직전 주 대비 비교)
 
 import io
 import json
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import email_sender
+from dotenv import load_dotenv
 from meta_ads_client import (
     extract_action,
     extract_action_value,
@@ -27,6 +29,7 @@ from meta_ads_client import (
     fetch_campaign_insights,
     last_n_days_kst,
 )
+from lib.glossary import glossary_details_html
 
 # Windows cp949 콘솔 대비
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
@@ -331,7 +334,7 @@ def render_html(cur_range, prev_range, rows, totals, errors):
         err_items = "".join(f"<li>{e}</li>" for e in errors)
         err_html = f'<div class="err"><b>경고</b><ul>{err_items}</ul></div>'
 
-    return f"<html><head>{css}</head><body>{head}{err_html}{totals_table}{highlight}{campaigns_table}</body></html>"
+    return f"<html><head>{css}</head><body>{head}{err_html}{totals_table}{highlight}{campaigns_table}{{claude_section}}{{glossary_section}}</body></html>"
 
 
 def render_text(cur_range, prev_range, rows, totals, errors):
@@ -418,6 +421,156 @@ def totals_changes(cur, prev):
     return changes
 
 
+_WEEKLY_SYSTEM_PROMPT = """당신은 D2C 이커머스 Meta 광고 주간 성과 분석 시스템이다. HeavyLover(냉동 도시락 D2C, 20~30대 운동 직장인 남성 타겟) 광고 주간 성과를 진단한다.
+
+독자 수준: 마케팅·통계 용어 모름. 숫자는 알지만 전문 해석은 낯섦.
+목표: 5분 안에 읽고 이번 주 광고가 어땠는지, 다음 주에 뭘 해야 할지 바로 알 수 있게.
+
+전문 용어는 반드시 첫 등장 시 괄호 안에 한국어로 풀어써야 한다:
+- ROAS → "ROAS(광고 1원당 돌아오는 매출)"
+- CPA → "CPA(고객 1명 구매하는 데 드는 광고비)"
+- CTR → "CTR(광고 본 사람 중 클릭한 비율)"
+
+**응답은 반드시 아래 3개 블록 순서대로. 블록 사이 빈 줄 1개.**
+
+---
+
+## 📌 이번 주 핵심 1줄
+지난주 대비 가장 중요한 변화를 평어체 1문장으로. 숫자 포함. 전문 용어 없이.
+예시: "이번 주는 광고비가 5% 늘었는데 구매는 12% 줄어 고객 1명 사는 비용이 지난주보다 18% 높아졌습니다."
+
+---
+
+## 🤔 왜 이런 변화가 생겼을까?
+이유 2~3가지를 쉬운 말로. 형식:
+- **이유 1** (확실성: 높음/중간/낮음): 쉬운 설명 1~2문장. 근거 숫자 1개만.
+- **이유 2** ...
+마지막에 "아직 데이터가 없어서 확인 못 한 것: ..." 한 줄 추가.
+
+---
+
+## ✅ 다음 주 할 일 1가지
+구체적으로 딱 1가지. 형식:
+**할 일**: (무엇을) (왜) (언제까지)
+**기대 효과**: 잘 되면 어떤 숫자가 얼마나 바뀌는지
+**확인 방법**: X일 후 어떤 수치를 보면 됨
+**안 되면**: 다음 대안
+
+---
+
+**절대 규칙**:
+1. 입력 JSON 숫자만 사용. 창작·추측 금지.
+2. 한국어. 전문용어는 반드시 첫 등장 시 괄호로 풀이.
+3. AI 화법 금지 ("~로 보입니다", "~일 수 있습니다"). 직접 말하기.
+4. 3개 블록 전부 완성. 도중에 끊기지 말 것.
+5. "개선하자", "검토하자" 같은 모호한 표현 금지 — 구체적 행동만.
+6. 헤비로버 상황: ROAS 3.5가 기준선. 결제 단계 이탈이 가장 큰 문제."""
+
+ENV_PATH = Path(__file__).parent / ".env"
+WEEKLY_CLAUDE_MODEL = "claude-sonnet-4-6"
+
+
+def _call_claude_weekly(totals, comparison, cur_range, prev_range):
+    """주간 데이터를 Claude에게 넘겨 3블록 분석 반환. 실패 시 None."""
+    load_dotenv(ENV_PATH, override=True)
+    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return None
+
+    ctx = {
+        "current_range": f"{cur_range[0]} ~ {cur_range[1]}",
+        "previous_range": f"{prev_range[0]} ~ {prev_range[1]}",
+        "totals_current": totals["current"],
+        "totals_previous": totals["previous"],
+        "totals_changes": {k: v["label"] for k, v in totals["changes"].items()},
+        "campaigns": [
+            {
+                "name": r["campaign_name"],
+                "current": r["current"],
+                "changes": {k: v["label"] for k, v in r["changes"].items()},
+                "flagged": r["flagged"],
+            }
+            for r in comparison
+        ][:15],
+        "static_benchmark": {"roas": 2.5, "cpa_krw": 30000, "ctr_pct": 1.2},
+    }
+
+    try:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model=WEEKLY_CLAUDE_MODEL,
+            max_tokens=2000,
+            system=_WEEKLY_SYSTEM_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"이번 주({ctx['current_range']}) Meta 광고 주간 성과 데이터:\n\n"
+                    f"```json\n{json.dumps(ctx, ensure_ascii=False, indent=2, default=str)}\n```\n\n"
+                    "위 3블록 형식대로 주간 심층 분석 작성."
+                ),
+            }],
+        )
+        return resp.content[0].text.strip()
+    except Exception as e:
+        print(f"주간 Claude 호출 실패: {e}")
+        return None
+
+
+def _weekly_md_to_html(md):
+    """주간 Claude 분석 마크다운 → HTML. 재구매 이메일과 동일 배경색 카드."""
+    import re
+    BLOCK_COLORS = {
+        "📌": ("#fff3cd", "#856404", "#ffc107"),
+        "🤔": ("#f0f0f0", "#333333", "#6c757d"),
+        "✅": ("#d4edda", "#155724", "#28a745"),
+    }
+
+    def _bold(s):
+        s = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', s)
+        return s
+
+    lines = md.splitlines()
+    out = []
+    in_list = False
+    in_block = False
+
+    def _close():
+        nonlocal in_list, in_block
+        if in_list:
+            out.append("</ul>"); in_list = False
+        if in_block:
+            out.append("</div>"); in_block = False
+
+    for line in lines:
+        s = line.rstrip()
+        if s.startswith("## "):
+            _close()
+            title = s[3:].strip()
+            key = next((e for e in ("📌", "🤔", "✅") if e in title), "")
+            bg, fg, border = BLOCK_COLORS.get(key, ("#f8f9fa", "#2c3e50", "#6c757d"))
+            out.append(
+                f"<div style='background:{bg};border-left:5px solid {border};"
+                f"border-radius:0 8px 8px 0;padding:16px 18px;margin:20px 0 8px 0;'>"
+                f"<div style='font-size:15px;font-weight:800;color:{fg};margin-bottom:10px;'>{title}</div>"
+            )
+            in_block = True
+        elif s.startswith("- "):
+            if not in_list:
+                out.append("<ul style='margin:6px 0;padding-left:18px;'>"); in_list = True
+            out.append(f"<li style='margin:5px 0;line-height:1.6;'>{_bold(s[2:].strip())}</li>")
+        elif s == "---":
+            _close()
+        elif s == "":
+            if in_list:
+                out.append("</ul>"); in_list = False
+        else:
+            out.append(f"<p style='margin:6px 0;line-height:1.7;'>{_bold(s)}</p>")
+
+    _close()
+    return "\n".join(out)
+
+
 def save_artifact(cur_range, html, text, meta):
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     stem = f"{cur_range[0]}_to_{cur_range[1]}"
@@ -459,8 +612,25 @@ def run():
         "changes": totals_changes(cur_total, prev_total),
     }
 
-    html = render_html((cur_since, cur_until), (prev_since, prev_until), comparison, totals, errors)
+    html_raw = render_html((cur_since, cur_until), (prev_since, prev_until), comparison, totals, errors)
     text = render_text((cur_since, cur_until), (prev_since, prev_until), comparison, totals, errors)
+
+    # Claude 주간 분석 (3블록) + 용어 풀이
+    print("Claude 주간 분석 호출 중...")
+    claude_md = _call_claude_weekly(totals, comparison, (cur_since, cur_until), (prev_since, prev_until))
+    if claude_md:
+        claude_html = (
+            "<hr style='margin:32px 0;border:none;border-top:2px solid #dee2e6;'>"
+            "<h2 style='color:#2c3e50;font-size:17px;margin-bottom:4px;'>📊 이번 주 인사이트 (Claude 분석)</h2>"
+            + _weekly_md_to_html(claude_md)
+        )
+        print("Claude 주간 분석 완료")
+    else:
+        claude_html = "<p style='color:#888;font-size:13px;'>Claude 분석 생략 (API 미응답)</p>"
+        print("Claude 분석 스킵")
+
+    html = html_raw.replace("{claude_section}", claude_html).replace("{glossary_section}", glossary_details_html())
+
     meta = {
         "current_range": [cur_since, cur_until],
         "previous_range": [prev_since, prev_until],
