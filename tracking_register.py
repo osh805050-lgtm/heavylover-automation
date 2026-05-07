@@ -23,6 +23,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 sys.path.insert(0, str(Path(__file__).parent))
 import cafe24_client
+import coupang_client
 import naver_client
 import telegram_client
 
@@ -74,14 +75,21 @@ def find_today_excel():
 
 
 def read_tracking_excel(path: Path):
-    """더다 송장 엑셀 읽기. 카페24/SS 분류 + 전화번호 기준 구매자 수 반환.
+    """더다 송장 엑셀 읽기. 카페24/SS/쿠팡 분류 + 전화번호 기준 구매자 수 반환.
+
+    분류 기준:
+      - 카페24: 주문번호에 하이픈 포함 (YYYYMMDD-NNNNNNN)
+      - 스마트스토어: 16자리 숫자, "20"으로 시작
+      - 쿠팡: 그 외 (13자리 숫자 등)
 
     Returns:
         dict: {
             "cafe24": [(order_id, item_code, tracking_no)],
             "naver": [(product_order_id, tracking_no)],
-            "cafe24_buyers": int,  # 전화번호 unique
+            "coupang": [(order_id, tracking_no)],
+            "cafe24_buyers": int,
             "naver_buyers": int,
+            "coupang_buyers": int,
             "filename": str,
         }
     """
@@ -123,8 +131,10 @@ def read_tracking_excel(path: Path):
 
     cafe24_rows = []
     naver_rows = []
+    coupang_rows = []
     cafe24_phones = set()
     naver_phones = set()
+    coupang_phones = set()
 
     for _, row in df.iterrows():
         order_no = _to_str(row.get("주문번호", ""))
@@ -140,17 +150,24 @@ def read_tracking_excel(path: Path):
             cafe24_rows.append((order_no, item_code, tracking))
             if phone:
                 cafe24_phones.add(phone)
-        else:
-            # 스마트스토어: 16자리 숫자
+        elif len(order_no) == 16 and order_no.startswith("20"):
+            # 스마트스토어: 16자리, "20"으로 시작
             naver_rows.append((order_no, tracking))
             if phone:
                 naver_phones.add(phone)
+        else:
+            # 쿠팡: 그 외 (13자리 등)
+            coupang_rows.append((order_no, tracking))
+            if phone:
+                coupang_phones.add(phone)
 
     return {
         "cafe24": cafe24_rows,
         "naver": naver_rows,
+        "coupang": coupang_rows,
         "cafe24_buyers": len(cafe24_phones),
         "naver_buyers": len(naver_phones),
+        "coupang_buyers": len(coupang_phones),
         "filename": path.name,
     }
 
@@ -183,9 +200,10 @@ def run_from_excel():
 
     cafe24_items = data["cafe24"]
     naver_items = data["naver"]
-    total_buyers = data["cafe24_buyers"] + data["naver_buyers"]
+    coupang_items = data["coupang"]
+    total_buyers = data["cafe24_buyers"] + data["naver_buyers"] + data["coupang_buyers"]
 
-    if not cafe24_items and not naver_items:
+    if not cafe24_items and not naver_items and not coupang_items:
         telegram_client.send_message("⚠️ 등록할 송장이 없습니다.", channel="ops")
         return
 
@@ -193,7 +211,7 @@ def run_from_excel():
     telegram_client.send_message(
         f"📦 송장 등록 시작\n"
         f"파일: {data['filename']}\n"
-        f"카페24 {data['cafe24_buyers']}명 + SS {data['naver_buyers']}명 = 총 {total_buyers}명",
+        f"카페24 {data['cafe24_buyers']}명 + SS {data['naver_buyers']}명 + 쿠팡 {data['coupang_buyers']}명 = 총 {total_buyers}명",
         channel="ops",
     )
 
@@ -276,16 +294,45 @@ def run_from_excel():
                 break
         _time.sleep(0.5)  # 호출 간격
 
+    # 쿠팡: orderId 중복 제거 후 vendorItemId 조회 → 등록
+    coupang_success, coupang_fail = 0, []
+    seen_coupang = {}
+    for order_id, tracking in coupang_items:
+        if order_id not in seen_coupang:
+            seen_coupang[order_id] = tracking
+
+    if seen_coupang:
+        print("[쿠팡] vendorItemId 조회 중 (fetch_orders)...")
+        for order_id, tracking in seen_coupang.items():
+            try:
+                vendor_item_ids = coupang_client.get_vendor_item_ids(order_id)
+                if not vendor_item_ids:
+                    coupang_fail.append(f"{order_id}: vendorItemId 조회 실패 (INSTRUCT 상태 아닐 수 있음)")
+                    continue
+                ok = True
+                for vid in vendor_item_ids:
+                    r = coupang_client.register_tracking(order_id, vid, tracking)
+                    if r.status_code not in (200, 201):
+                        ok = False
+                        coupang_fail.append(f"{order_id}/{vid}: {r.text[:80]}")
+                if ok:
+                    coupang_success += 1
+            except Exception as e:
+                coupang_fail.append(f"{order_id}: {e}")
+
     # 5) 완료 알림
     result_msg = (
         f"✅ 송장 등록 완료\n\n"
         f"카페24: {cafe24_success}/{len(seen_cafe24)}건 성공\n"
-        f"스마트스토어: {naver_success}/{len(seen_naver)}건 성공"
+        f"스마트스토어: {naver_success}/{len(seen_naver)}건 성공\n"
+        f"쿠팡: {coupang_success}/{len(seen_coupang)}건 성공"
     )
     if cafe24_fail:
         result_msg += "\n\n카페24 실패:\n" + "\n".join(f"  - {e}" for e in cafe24_fail[:5])
     if naver_fail:
         result_msg += "\n\n스마트스토어 실패:\n" + "\n".join(f"  - {e}" for e in naver_fail[:5])
+    if coupang_fail:
+        result_msg += "\n\n쿠팡 실패:\n" + "\n".join(f"  - {e}" for e in coupang_fail[:5])
 
     telegram_client.send_message(result_msg, channel="ops")
     print(result_msg)

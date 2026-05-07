@@ -164,3 +164,33 @@ def orders_to_dada_rows(orders):
         })
 
     return pd.DataFrame(rows)
+
+
+def get_vendor_item_ids(order_id):
+    """orderId로 vendorItemId 목록 조회 (최근 14일 INSTRUCT 주문에서 탐색)"""
+    orders = fetch_orders(days_back=14)
+    for o in orders:
+        if str(o.get("orderId", "")) == str(order_id):
+            return [str(it.get("vendorItemId")) for it in o.get("orderItems", []) if it.get("vendorItemId")]
+    return []
+
+
+def register_tracking(order_id, vendor_item_id, tracking_no, carrier_code="KGB"):
+    """쿠팡 송장번호 등록 — PUT orders/{orderId}/orderitems/{vendorItemId}/shipments
+
+    carrier_code: KGB=로젠택배 (쿠팡 기준)
+    """
+    env = _get_env()
+    path = (
+        f"/v2/providers/openapi/apis/api/v4/vendors/{env['vendor_id']}"
+        f"/orders/{order_id}/orderitems/{vendor_item_id}/shipments"
+    )
+    body = {
+        "deliveryCode": carrier_code,
+        "invoiceNumber": str(tracking_no),
+        "splitShipping": False,
+        "changeShippingInfo": False,
+    }
+    headers = _auth_header("PUT", path, "", env)
+    r = requests.put(f"{API_BASE}{path}", json=body, headers=headers, timeout=30)
+    return r
