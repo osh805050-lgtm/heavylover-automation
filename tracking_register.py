@@ -279,8 +279,8 @@ def run_from_excel():
     # 5) 완료 알림
     result_msg = (
         f"✅ 송장 등록 완료\n\n"
-        f"카페24: {cafe24_success}/{len(cafe24_items)}건 성공\n"
-        f"스마트스토어: {naver_success}/{len(naver_items)}건 성공"
+        f"카페24: {cafe24_success}/{len(seen_cafe24)}건 성공\n"
+        f"스마트스토어: {naver_success}/{len(seen_naver)}건 성공"
     )
     if cafe24_fail:
         result_msg += "\n\n카페24 실패:\n" + "\n".join(f"  - {e}" for e in cafe24_fail[:5])
