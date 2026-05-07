@@ -302,21 +302,20 @@ def run_from_excel():
             seen_coupang[order_id] = tracking
 
     if seen_coupang:
-        print("[쿠팡] vendorItemId 조회 중 (fetch_orders)...")
+        print("[쿠팡] shipmentBoxId/vendorItemId 조회 중 (fetch_orders)...")
         for order_id, tracking in seen_coupang.items():
             try:
-                vendor_item_ids = coupang_client.get_vendor_item_ids(order_id)
-                if not vendor_item_ids:
-                    coupang_fail.append(f"{order_id}: vendorItemId 조회 실패 (INSTRUCT 상태 아닐 수 있음)")
+                info = coupang_client.get_order_shipping_info(order_id)
+                if not info or not info["vendorItemIds"]:
+                    coupang_fail.append(f"{order_id}: 주문 정보 조회 실패 (INSTRUCT 상태 아닐 수 있음)")
                     continue
-                ok = True
-                for vid in vendor_item_ids:
-                    r = coupang_client.register_tracking(order_id, vid, tracking)
-                    if r.status_code not in (200, 201):
-                        ok = False
-                        coupang_fail.append(f"{order_id}/{vid}: {r.text[:80]}")
-                if ok:
+                r = coupang_client.register_tracking(
+                    order_id, info["shipmentBoxId"], info["vendorItemIds"], tracking
+                )
+                if r.status_code in (200, 201):
                     coupang_success += 1
+                else:
+                    coupang_fail.append(f"{order_id}: {r.text[:100]}")
             except Exception as e:
                 coupang_fail.append(f"{order_id}: {e}")
 

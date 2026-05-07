@@ -166,33 +166,49 @@ def orders_to_dada_rows(orders):
     return pd.DataFrame(rows)
 
 
-def get_vendor_item_ids(order_id):
-    """orderId로 vendorItemId 목록 조회 (최근 14일 INSTRUCT 주문에서 탐색)"""
+def get_order_shipping_info(order_id):
+    """orderId로 shipmentBoxId + vendorItemId 목록 조회 (최근 14일 INSTRUCT 주문에서 탐색)
+
+    Returns:
+        dict | None: {"shipmentBoxId": str, "vendorItemIds": [str, ...]}
+    """
     orders = fetch_orders(days_back=14)
     for o in orders:
         if str(o.get("orderId", "")) == str(order_id):
-            return [str(it.get("vendorItemId")) for it in o.get("orderItems", []) if it.get("vendorItemId")]
-    return []
+            return {
+                "shipmentBoxId": str(o.get("shipmentBoxId", "")),
+                "vendorItemIds": [str(it.get("vendorItemId")) for it in o.get("orderItems", []) if it.get("vendorItemId")],
+            }
+    return None
 
 
-def register_tracking(order_id, vendor_item_id, tracking_no, carrier_code="KGB"):
-    """쿠팡 송장번호 등록 — POST orders/{orderId}/orderitems/{vendorItemId}/shipments
+def register_tracking(order_id, shipment_box_id, vendor_item_ids, tracking_no, carrier_code="KDEXP"):
+    """쿠팡 송장번호 등록 — POST /orders/invoices (배열 방식)
 
-    carrier_code: KGB=로젠택배 (쿠팡 기준)
+    carrier_code: KDEXP=로젠택배 (쿠팡 기준)
+    vendor_item_ids: list[str] — 주문 내 모든 vendorItemId
     """
     env = _get_env()
-    path = (
-        f"/v2/providers/openapi/apis/api/v4/vendors/{env['vendor_id']}"
-        f"/orders/{order_id}/orderitems/{vendor_item_id}/shipments"
-    )
+    path = f"/v2/providers/openapi/apis/api/v4/vendors/{env['vendor_id']}/orders/invoices"
+    if isinstance(vendor_item_ids, str):
+        vendor_item_ids = [vendor_item_ids]
+
+    dtos = [
+        {
+            "shipmentBoxId": int(shipment_box_id),
+            "orderId": int(order_id),
+            "vendorItemId": int(vid),
+            "deliveryCompanyCode": carrier_code,
+            "invoiceNumber": str(tracking_no),
+            "splitShipping": False,
+            "preSplitShipped": False,
+            "estimatedShippingDate": "",
+        }
+        for vid in vendor_item_ids
+    ]
     body = {
         "vendorId": env["vendor_id"],
-        "orderId": str(order_id),
-        "vendorItemId": str(vendor_item_id),
-        "deliveryCode": carrier_code,
-        "invoiceNumber": str(tracking_no),
-        "splitShipping": False,
-        "changeShippingInfo": False,
+        "orderSheetInvoiceApplyDtos": dtos,
     }
     headers = _auth_header("POST", path, "", env)
     r = requests.post(f"{API_BASE}{path}", json=body, headers=headers, timeout=30)
