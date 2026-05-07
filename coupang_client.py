@@ -176,7 +176,7 @@ def get_vendor_item_ids(order_id):
 
 
 def register_tracking(order_id, vendor_item_id, tracking_no, carrier_code="KGB"):
-    """쿠팡 송장번호 등록 — PUT orders/{orderId}/orderitems/{vendorItemId}/shipments
+    """쿠팡 송장번호 등록 — POST orders/{orderId}/orderitems/{vendorItemId}/shipments
 
     carrier_code: KGB=로젠택배 (쿠팡 기준)
     """
@@ -186,11 +186,14 @@ def register_tracking(order_id, vendor_item_id, tracking_no, carrier_code="KGB")
         f"/orders/{order_id}/orderitems/{vendor_item_id}/shipments"
     )
     body = {
+        "vendorId": env["vendor_id"],
+        "orderId": str(order_id),
+        "vendorItemId": str(vendor_item_id),
         "deliveryCode": carrier_code,
         "invoiceNumber": str(tracking_no),
         "splitShipping": False,
         "changeShippingInfo": False,
     }
-    headers = _auth_header("PUT", path, "", env)
-    r = requests.put(f"{API_BASE}{path}", json=body, headers=headers, timeout=30)
+    headers = _auth_header("POST", path, "", env)
+    r = requests.post(f"{API_BASE}{path}", json=body, headers=headers, timeout=30)
     return r
