@@ -3,9 +3,13 @@
     "purpose": "PSST 4P 양식의 사업별 배점·심사 포인트·탈락 패턴 박제",
     "last_updated": "2026-04-28",
     "update_when": "공고 갱신 시 / 신청 직후 평가표 변경 확인 시",
-    "source_priority": ["공식 공고문", "K-Startup 공지", "심사위원 코멘트(submissions-log)", "추정"]
+    "source_priority": [
+      "공식 공고문",
+      "K-Startup 공지",
+      "심사위원 코멘트(submissions-log)",
+      "추정"
+    ]
   },
-
   "psst_default": {
     "P": {
       "name": "Problem (문제정의·시장분석)",
@@ -68,16 +72,23 @@
       ]
     }
   },
-
   "programs": {
     "초기창업패키지": {
       "max_funding": 100000000,
       "deadline_window": "2026-07 자격 만료",
       "section_mapping": {
-        "P": ["문제인식 (PSST의 P 그대로)"],
-        "S_solution": ["실현가능성 (Practicability)"],
-        "S_scale": ["성장전략 (Scalability)"],
-        "T": ["팀 구성 (Team)"]
+        "P": [
+          "문제인식 (PSST의 P 그대로)"
+        ],
+        "S_solution": [
+          "실현가능성 (Practicability)"
+        ],
+        "S_scale": [
+          "성장전략 (Scalability)"
+        ],
+        "T": [
+          "팀 구성 (Team)"
+        ]
       },
       "weight_override": {
         "P": 25,
@@ -90,18 +101,41 @@
         "지난 1년 매출·재구매·자동화 인프라 = 자산",
         "1억 사용계획의 단가 근거 = 견적서·과거 집행 단가 인용"
       ],
-      "doc_format": "PSST 양식 (창업진흥원 표준 .hwp)",
-      "evaluation_method": "서류 → 발표 (피칭 5분 + Q&A 10분)"
+      "hook_template": "혁신성_시장검증",
+      "mandatory_sections": ["ESG경영", "인력고용계획"],
+      "appendix_required": true,
+      "funding_justification_naming": "검증 자본 가속",
+      "interview_questions": [
+        {"key": "Q1_시작계기", "question": "이 사업을 시작한 진짜 계기 (본인이 1호 고객이 된 순간)?", "purpose": "1인칭 서사 디테일", "answer_length": "3~5줄"},
+        {"key": "Q2_3년차_자격_왜", "question": "3년차 마지막 자격을 왜 지금 이 사업에 쓰려는가?", "purpose": "성숙도 + 시급성 명분", "answer_length": "2~3줄"},
+        {"key": "Q3_심사위원_의심", "question": "심사위원이 가장 의심할 만한 부분은?", "purpose": "공감 유도 문장 재료", "answer_length": "1~3줄"},
+        {"key": "Q4_페인_디테일", "question": "본인이 직접 겪은 시장 검증 디테일 3개 (구체적 숫자·시점·금액)?", "purpose": "P 섹션 살아있는 디테일", "answer_length": "각 1줄"},
+        {"key": "Q5_12개월_KPI", "question": "1억 자금 들어간 후 12개월 내 자신 있는 KPI 1개?", "purpose": "Scale 섹션 핵심 명제", "answer_length": "1줄"},
+        {"key": "Q6_망하는_시나리오", "question": "솔직히, 이 사업이 망하는 시나리오는?", "purpose": "부록 B 정직성 + 리스크 대응", "answer_length": "2~3줄"}
+      ],
+      "expected_announcement": "신청 후 약 2~3개월 (매년 7~9월 발표 예상)"
     },
-
     "용인시_온라인플랫폼": {
       "max_funding": null,
       "deadline_window": "1차 서류 통과 상태",
       "section_mapping": {
-        "P": ["사업 필요성"],
-        "S_solution": ["사업 내용"],
-        "S_scale": ["사업 추진계획·기대효과"],
-        "T": ["수행 역량"]
+        "P": [
+          "지원 필요성 — 추진목적 및 배경",
+          "지원 필요성 — 사업을 통해 달성하고자 하는 목표"
+        ],
+        "S_solution": [
+          "기업 및 제품개요 — 기업 특장점",
+          "기업 및 제품개요 — 주요 제품 소개"
+        ],
+        "S_scale": [
+          "사업추진 현황 및 계획 — 사업 추진 현황",
+          "사업추진 현황 및 계획 — 사업 추진 계획",
+          "향후 계획 및 기대효과 — 활용 계획",
+          "향후 계획 및 기대효과 — 기대효과 (매출·고용·홍보)"
+        ],
+        "T": [
+          "추진일정"
+        ]
       },
       "weight_override": {
         "P": 20,
@@ -114,18 +148,37 @@
         "지자체 사업이라 지역경제 기여(고용·세수) 명시",
         "온라인 플랫폼 = 자사몰·SS 운영 실적 강조"
       ],
+      "hook_template": "지역_고용",
+      "mandatory_sections": ["지역경제기여", "용인시정책정렬"],
+      "appendix_required": false,
+      "funding_justification_naming": "지역 고용 갭",
+      "interview_questions": [
+        {"key": "Q1_시작계기", "question": "용인시에 본사가 있어서 본인이 직접 겪은 구체적 이점/제약은?", "purpose": "지역 연결 살아있는 디테일", "answer_length": "2~3줄"},
+        {"key": "Q2_지역채용_변화", "question": "용인시 지역 채용 1명이 본인 사업에 미치는 구체적 변화는?", "purpose": "고용 효과 정성", "answer_length": "2줄"},
+        {"key": "Q3_심사위원_의심", "question": "용인시 심사위원이 가장 의심할 만한 부분은?", "purpose": "공감 유도", "answer_length": "1~2줄"},
+        {"key": "Q4_정책정렬", "question": "용인시 정책 우선순위(디지털전환·지역경제) 중 본인 사업과 가장 강하게 연결되는 1개?", "purpose": "정부 우선순위 매칭", "answer_length": "1~2줄"},
+        {"key": "Q5_플랫폼_실적", "question": "자사몰·SS 운영 중 가장 자랑스러운 자동화·KPI 1개?", "purpose": "온라인 플랫폼 운영 자산 입증", "answer_length": "1줄"}
+      ],
       "doc_format": "지자체 자체 양식 (PSST 아님 — 어댑터 필요)",
-      "evaluation_method": "서류 (1차 통과) → 발표 추정"
+      "evaluation_method": "서류 (1차 통과) → 발표 추정",
+      "expected_announcement": "1차 통과 — 2차 발표 2026 Q3 예상"
     },
-
     "KOTRA_내수기업_수출기업화": {
       "max_funding": null,
       "deadline_window": "TBD",
       "section_mapping": {
-        "P": ["국내 시장 한계·해외 진출 필요성"],
-        "S_solution": ["해외 진출 전략·제품 경쟁력"],
-        "S_scale": ["수출 목표·바이어 발굴 계획"],
-        "T": ["수행 역량·해외 사업 경험"]
+        "P": [
+          "국내 시장 한계·해외 진출 필요성"
+        ],
+        "S_solution": [
+          "해외 진출 전략·제품 경쟁력"
+        ],
+        "S_scale": [
+          "수출 목표·바이어 발굴 계획"
+        ],
+        "T": [
+          "수행 역량·해외 사업 경험"
+        ]
       },
       "weight_override": {
         "P": 20,
@@ -138,18 +191,37 @@
         "레토르트 파우치 병행 옵션 (Amazon JP/US)",
         "해외 ODM·바이어 매칭 의향"
       ],
+      "hook_template": "수출_해외페르소나",
+      "mandatory_sections": ["해외페르소나", "수출이력_또는_근거"],
+      "appendix_required": true,
+      "funding_justification_naming": "수출 인프라 부재",
+      "interview_questions": [
+        {"key": "Q1_시장선택_이유", "question": "왜 이 시장(일본/미국)을 골랐나? 본인이 직접 만나거나 조사한 해외 페르소나 1명?", "purpose": "1인칭 시장 선택 디테일", "answer_length": "3~4줄"},
+        {"key": "Q2_핵심자산", "question": "국내 검증 → 해외 복제가 가능한 핵심 자산 1개 (왜 이게 해외에서도 통하나)?", "purpose": "S섹션 핵심 차별점", "answer_length": "2~3줄"},
+        {"key": "Q3_심사위원_의심", "question": "KOTRA 심사위원이 가장 의심할 부분 (해외 경험 부족 등)?", "purpose": "공감 유도", "answer_length": "1~2줄"},
+        {"key": "Q4_해외조사_디테일", "question": "본인이 직접 한 해외 시장 조사 디테일 2개 (구체적 숫자·날짜·소스)?", "purpose": "P 섹션 살아있는 디테일", "answer_length": "각 1~2줄"},
+        {"key": "Q5_수출리스크", "question": "수출 시 가장 큰 리스크와 본인 대응 방안은?", "purpose": "부록 B 정직성", "answer_length": "2~3줄"}
+      ],
       "doc_format": "KOTRA 자체 양식 (PSST 아님 — 어댑터 필요)",
-      "evaluation_method": "서류 + 인터뷰"
+      "evaluation_method": "서류 + 인터뷰",
+      "expected_announcement": "합격 통지 완료"
     },
-
     "지식재산바우처": {
       "max_funding": null,
       "deadline_window": "TBD",
       "section_mapping": {
-        "P": ["IP 확보 필요성"],
-        "S_solution": ["보호 대상 (상표·디자인·특허)"],
-        "S_scale": ["IP 활용 사업 효과"],
-        "T": ["IP 관리 역량"]
+        "P": [
+          "IP 확보 필요성"
+        ],
+        "S_solution": [
+          "보호 대상 (상표·디자인·특허)"
+        ],
+        "S_scale": [
+          "IP 활용 사업 효과"
+        ],
+        "T": [
+          "IP 관리 역량"
+        ]
       },
       "weight_override": {
         "P": 20,
@@ -162,12 +234,40 @@
         "디자인 등록 (시리얼 패키지)",
         "분량 작음 → 토론 라운드 1회로 축약 가능"
       ],
+      "hook_template": "IP_보호시급성",
+      "mandatory_sections": ["IP보호계획", "분쟁리스크"],
+      "appendix_required": false,
+      "funding_justification_naming": "상표 분쟁 노출",
+      "interview_questions": [
+        {"key": "Q1_위협사례", "question": "IP 미등록 상태에서 본인이 겪은(또는 들은) 위협 사례 1건?", "purpose": "P 섹션 시급성 디테일", "answer_length": "2~3줄"},
+        {"key": "Q2_기여방식", "question": "등록 후 12개월 내 IP가 사업에 기여하는 구체적 방식 1개 (예: 네이버 브랜드관 입점)?", "purpose": "Scale 섹션 ROI", "answer_length": "1~2줄"},
+        {"key": "Q3_도용시나리오", "question": "경쟁사가 본인 브랜드를 도용할 가능성이 가장 높은 시나리오?", "purpose": "분쟁 리스크 정량화", "answer_length": "1~2줄"},
+        {"key": "Q4_보호범위", "question": "보호하고 싶은 1순위 (상표/디자인/특허) + 그 이유?", "purpose": "선택과 집중", "answer_length": "1줄"}
+      ],
       "doc_format": "바우처 신청서 (간략)",
-      "evaluation_method": "서류 약식"
+      "evaluation_method": "서류 약식",
+      "expected_announcement": "상시 모집 — 신청 후 약 1개월 내 통보"
     },
-
     "강한소상공인_혁신유형": {
       "_doc_source": "proposals/knowledge/legacy/_program_docs/2026_강한소상공인_공고문.md (page 12, 라인 377~394 정확 인용)",
+      "section_mapping": {
+        "P": [
+          "사업 참여 목적 및 필요성 — 참여 목적",
+          "사업 참여 목적 및 필요성 — 필요성"
+        ],
+        "S_solution": [
+          "사업성 — 사업 내용·제품·서비스 시장성 및 경쟁력",
+          "사업성 — 창의성·독창성 및 사업 성공전략"
+        ],
+        "S_scale": [
+          "성장성 — 향후 사업계획 및 자금계획",
+          "성장성 — 기대효과 및 성과창출 가능성",
+          "성장성 — 파트너사 협업을 통한 고도화 방안"
+        ],
+        "T": [
+          "주요성과 — 기업의 성과 및 성장 이력"
+        ]
+      },
       "max_funding": 100000000,
       "stage_funding": {
         "성장지원_초기": 3000000,
@@ -184,7 +284,6 @@
         "전국오디션_강한": 60
       },
       "fail_threshold": "평가항목별 점수가 배점의 60% 미달 시 종합점수 무관 자동 탈락",
-
       "official_rubric_total": 100,
       "official_rubric_categories": {
         "사업_적합도": {
@@ -214,7 +313,6 @@
           "section_in_v5": "S | Scale-up (성장 목표·실행 로드맵·신제품 전략·자금 계획·기대효과·파트너사 협업)"
         }
       },
-
       "bonus_points": {
         "_rule": "최대 1건만 인정 (중복 불가). 1단계 서류평가에만 반영. 증빙서류 미제출 시 자동 불인정.",
         "후보": [
@@ -225,7 +323,6 @@
         ],
         "헤비로버_해당여부": "없음 확인 (2026-04-29). 신사업창업사관학교 미수료. 가점 0점으로 산정."
       },
-
       "special_focus": [
         "혁신 유형은 '개인의 라이프스타일(취향·가치)을 반영한 창의·혁신 아이템' 정의. v5 '벌크업 운동인 라이프스타일' 톤 유지 적절.",
         "60% 미달 자동탈락 룰 → 8개 평가항목 중 어느 하나도 60% 미달 안 되도록 균형 작성 필수",
@@ -235,7 +332,18 @@
         "혁신 유형 가점 후보(신사업창업사관학교 2점 등) 보유 여부 확인 → 증빙 첨부",
         "신청자격: 소상공인기본법 제2조 — 사용자가 현재 소상공인 자격 유지 여부 확인 필요"
       ],
-
+      "hook_template": "실측KPI_운영자금갭",
+      "mandatory_sections": ["기업개요", "파트너협업", "경쟁사시각화"],
+      "appendix_required": true,
+      "funding_justification_naming": "운영자금 gap",
+      "interview_questions": [
+        {"key": "Q1_시작계기", "question": "이 사업을 시작한 진짜 계기 (본인이 1호 고객이 된 순간)?", "purpose": "1인칭 서사 디테일", "answer_length": "3~5줄"},
+        {"key": "Q2_갭_인식순간", "question": "운영자금 gap을 본인이 처음 인식한 순간 (구체적 시점·숫자)?", "purpose": "자금 정당성 핵심 명제", "answer_length": "2~3줄"},
+        {"key": "Q3_심사위원_의심", "question": "심사위원이 가장 의심할 만한 부분 (도시락 회사가 시리얼? 등)?", "purpose": "공감 유도 문장 재료", "answer_length": "1~3줄"},
+        {"key": "Q4_페인_디테일", "question": "본인이 직접 겪은 페인 디테일 3개 (구체적 숫자·시점·금액 — 예: 닭가슴살 한 달 못 감, 배달 70만원, 점심 30분)?", "purpose": "P 섹션 살아있는 디테일", "answer_length": "각 1줄"},
+        {"key": "Q5_자금없을때_시나리오", "question": "이 1억 없이 6개월 후 사업 시나리오는?", "purpose": "필요성 정당화 (반사실적 명분)", "answer_length": "2~3줄"},
+        {"key": "Q6_파트너_핵심", "question": "4개 파트너사(나비야·골든팜·더다·KOTRA) 중 본인이 가장 자랑스러운 협업 1건의 디테일?", "purpose": "파트너협업 15점 강화", "answer_length": "2~3줄"}
+      ],
       "v5_baseline": {
         "_path": "proposals/knowledge/legacy/강한소상공인_혁신유형_사업계획서_v5.md",
         "현재상태": "PSST 4P 구조로 작성됨 (155줄). 평가표 8개 항목 매핑은 v6에서 진행.",
@@ -254,10 +362,10 @@
           "TAM 6.5조·SAM 4,110억은 출처 OK / SOM 15억은 자체 추정 → 추정 근거 강화 필요",
           "가점 후보(신사업창업사관학교 등) 해당 여부 미박제"
         ]
-      }
+      },
+      "expected_announcement": "신청 후 약 2~3개월 (2026-08 예상, 추정)"
     }
   },
-
   "common_kpi_required": {
     "must_cite": [
       "2026-04 MTD 매출 (4/22 기준): 30,000,000원",
@@ -275,7 +383,6 @@
       "심사위원이 검색해서 못 찾으면 즉시 탈락"
     ]
   },
-
   "fail_patterns_universal": {
     "_description": "모든 사업에 공통 적용되는 5대 탈락 패턴 (proposal-devil 공격 포인트)",
     "1": "P가 일반론 — '운동에 관심 많은 MZ' 같은 추상. 헤비로버 자체 데이터 미사용.",

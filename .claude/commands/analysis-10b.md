@@ -3,6 +3,7 @@
 헤비로버 10억 달성 7명 전문가 × 10 Round 심층 분석. 각 Round 결과를 파일로 저장하고 자동 순차 진행.
 
 ## 사전 점검
+0. **재실행 차단**: `docs/analysis_10b/rounds/`에 기존 산출물 파일 있으면 즉시 중단 후 사용자에게 "기존 산출물이 있습니다. 재실행 시 수만 토큰 소모됩니다. 정말 재실행하시겠습니까? (덮어쓰기/취소)" 묻고 명시 승인 시에만 진행.
 1. `data/analysis_10b/unit_economics.json` 존재 확인
 2. `data/meta_ads/daily_campaign.csv` 존재 확인
 3. `docs/analysis_10b/rounds/` 디렉토리 확인 (없으면 생성)

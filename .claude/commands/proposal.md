@@ -11,17 +11,36 @@ argument-hint: <사업명>
 
 ## 사전 점검 (시작 전 필수)
 
-1. `proposals/knowledge/psst-rubric.json` 읽고 `programs.{사업명}` 블록 존재 확인. 없으면 사용자에게 "공고문 URL 또는 평가표 알려주세요" 묻고 중단.
+0. **재실행 차단**: `proposals/outputs/{사업명}-*-final.md` 또는 `*-v3.md` 등 최종 산출물 파일 있으면 즉시 중단 후 사용자에게 "{사업명} 사업계획서 산출물이 이미 있습니다. 재실행 시 60~106분 + 수만 토큰 소모됩니다. 새 라운드 진행하시겠습니까? (예/아니오/이어쓰기)" 묻고 명시 승인 시에만 진행.
+1. `proposals/knowledge/psst-rubric.json` 읽고 `programs.{사업명}` 블록 존재 확인. 없으면 → **`proposal-rubric-extractor` 자동 호출** (공고문 PDF/URL 입력 받아 자동 등재). 등재 완료 후 본 흐름 진입.
 2. `proposals/knowledge/heavylover-skeleton.md` 갱신일 확인. 30일 초과 시 사용자에게 "skeleton 갱신부터 권고" 알림.
 3. `proposals/outputs/` 디렉토리 존재 확인.
-4. 사용자에게 1줄 안내: "$ARGUMENTS 사업계획서 7역할 2라운드 빌드업을 시작합니다. 30~60분 소요. 각 단계 산출물은 proposals/outputs/에 저장됩니다."
+4. 사용자에게 1줄 안내: "$ARGUMENTS 사업계획서 7역할 빌드업을 시작합니다. 60~106분 소요 (인터뷰 + 공격 루프 포함). 각 단계 산출물은 proposals/outputs/에 저장됩니다."
+
+## Round -1 — 인터뷰 (★ 신규, drafter 호출 전 필수)
+
+`proposal-interviewer` 에이전트 호출.
+- 입력: 사업명 = $ARGUMENTS
+- 처리: psst-rubric.json의 `programs.{사업명}.interview_questions` 5~7개를 AskUserQuestion으로 사용자에게 묻고 답변 박제
+- 출력: `proposals/outputs/{사업명}-{YYYY-MM-DD}-interview.yaml`
+- 완료 후 사용자에게 인터뷰 통계 보고 (자세히 답변 N개, 간단 답변 N개, 미응답 N개)
+
+**중요**: 이 단계가 PDF v4 수준 산출의 핵심. 사용자가 모든 질문에 "답변 안 함" 선택해도 진행은 가능하나, 그 경우 산출물 품질이 70% 수준으로 떨어짐.
 
 ## Round 0 — Draft (단독)
 
 `proposal-drafter` 에이전트 호출.
-- 입력: 사업명 = $ARGUMENTS
+- 입력: 사업명 = $ARGUMENTS + **interview.yaml (1순위 입력)**
 - 출력: `proposals/outputs/{사업명}-{YYYY-MM-DD}-v0.md`
+- v0 yaml 헤더에 `redefinition_candidates` 3개 박제 확인
 - 완료 후 사용자에게 v0 경로 보고 + 자가 점검표 통과 여부 1줄.
+
+## Round 0.5 — 재정의 문장 선택 (★ 신규 AskUserQuestion 1회)
+
+v0의 `redefinition_candidates` 3개를 사용자에게 보여주고 1개 선택 받음.
+- AskUserQuestion 1회 (60초 timeout)
+- timeout 시 첫 후보 자동 선택
+- 선택 결과를 `proposals/outputs/{사업명}-{YYYY-MM-DD}-redefinition.txt`에 박제 → 이후 final-revisor가 본문 핵심 위치에 박음
 
 ## Round 1 — 검증 (3개 병렬)
 
@@ -60,29 +79,108 @@ v1 산출 후, 순서대로:
 - 보강 지시: ❌ 환각 인용 제거. ⚠️ 출처 약함 보강.
 - 출력: `proposals/outputs/{사업명}-{YYYY-MM-DD}-v2.md`
 
-### Step 2-5: `proposal-devil` 호출
+### Step 2-5: `proposal-devil` 호출 (R2 — 1회차)
 - 입력: v2
 - 출력: `...-devil-attack.md`
-- 종합 판정 분기:
-  - 🟢 합격 후보 → final 단계로
-  - 🟡 보강 필요 → drafter 호출해 v3 재작성 (devil-attack.md를 입력으로) → devil 재검증 1회 → 결과가 🟢/🟡이면 final, 🔴이면 중단
-    - **무한 루프 방지**: v3 후 재검증은 1회만. 그 이후 🔴 나오면 자동 중단.
-  - 🔴 재작성 필수 → drafter 호출해 v3-full 재작성 (v0 수준 재시작) → 단, 이 루프도 1회만. 재작성 후도 🔴이면 사용자에게 "구조적 문제 있음, 공고문 재검토 필요" 보고 후 중단.
+- 이 단계에서는 종합 판정과 무관하게 **반드시 Round 3으로 진입** (v2 → final-revisor가 v3 강제 재작성)
+
+## Round 3 — Final-revisor 강제 재작성 + 공격 루프 (★ 신규)
+
+### Step 3-1: `proposal-final-revisor` 호출 (1회차)
+- 입력: v2 + interview.yaml + fact-check.md + devil-attack.md + competitor.md + budget-audit.md + consistency.md + redefinition.txt + reference-criteria.md
+- 처리: fact-check ❌ 100% 강제 정정 (recommended 자동 적용) + devil 🔴/🟡 모두 반영 + 4축 톤 규칙 적용 + 인터뷰 답변 박제 + 부록 A/B 자동 분리
+- 출력: `proposals/outputs/{사업명}-{YYYY-MM-DD}-v3.md` + `appendix-A-evaluator.md` + `appendix-B-pending.md` + `submit-checklist.md`
+
+### Step 3-2: `brand-voice-reviewer` 가드레일 호출 (1회만)
+- 입력: v3.md
+- 처리: 18개 언어 규칙 위반 검출 (Tier 1 강제, Tier 2 권고, Tier 3 카운트, Tier 4 권고)
+- 출력: `proposals/outputs/{사업명}-{YYYY-MM-DD}-voice-guardrail.md`
+- 분기:
+  - 🟢/🟡 통과 → Step 3-3 진입
+  - 🔴 (Tier 1 위반 ≥ 1건) → final-revisor 1회만 재호출 → v3 재생성 → 다시 Step 3-2 통과 확인 → Step 3-3 진입
+
+### Step 3-3: 공격 루프 (devil ↔ final-revisor 최대 2회)
+
+**1회차 공격**:
+- `proposal-devil` 호출 (공격 루프 모드)
+- 입력: v3.md + 이전 devil-attack.md (같은 문장 중복 공격 금지용)
+- 출력: `proposals/outputs/{사업명}-{YYYY-MM-DD}-devil-attack-r1.md`
+- L1 자랑 검출 + L2 가짜 디테일 + L3 섹션 단절 + L4 공감 부재 + 기존 7대 패턴 모두 적용
+
+**1회차 판정**:
+- 🟢 통과 (🔴 0개 + 🟡 2개 이하) → v3 그대로 final 승격, **공격 루프 종료**
+- 🟡 재작성 필요 → `proposal-final-revisor` 재호출 (v3.1 생성) → 2회차 공격 진입
+- 🔴 다수 위반 → `proposal-final-revisor` 재호출 (v3.1 생성) → 2회차 공격 진입
+
+**2회차 공격** (1회차 미통과 시):
+- `proposal-devil` 호출 (입력: v3.1 + 이전 회차 devil-attack-r1.md)
+- 출력: `devil-attack-r2.md`
+
+**2회차 판정**:
+- 🟢 통과 → v3.1 final 승격, **공격 루프 종료**
+- 🟡/🔴 미통과 → `proposal-final-revisor` 재호출 (v3.2 생성) → **루프 종료, v3.2를 final로 승격하되 사용자에게 "공격 루프 2회 후 잔여 약점 N건 수동 검토 권장" 보고**
+
+**무한 루프 방지**: 공격 루프는 최대 2회 (즉 v3.2까지). 그 이후 미통과 시 자동 종료 + 수동 검토 보고.
 
 ## Final 단계
 
-devil 🟢 판정 후:
-1. v2 또는 최종 vN을 `final.md`로 복사
-2. **자동 폴더·서류 셋업 실행**:
+공격 루프 종료 후:
+1. 통과한 v3.x (v3 / v3.1 / v3.2)를 `final.md`로 복사
+2. 부록 A·B + submit-checklist는 그대로 유지
+
+### Step F-1: 사이클 회고 보고서 자동 생성 (학습 루프)
+
+`proposal-drafter`를 마지막으로 한 번 더 호출. 입력: 이번 사이클의 모든 산출물 (v0~final, rubric-map, consistency, budget-audit, competitor, fact-check, devil-attack).
+출력: `proposals/lessons/cycle-{사업명}-{YYYY-MM-DD}.md`
+
+회고 보고서 표준 항목:
+- **이번 사이클 메타**: 사업명, 시작~종료 시간, 최종 판정, 라운드별 보강 횟수
+- **잘 작동한 표현 Top 5**: rubric-mapper에서 ✅ Keep + 평가항목 직접 매칭 + fact-checker ✅ 동시 만족 문장
+- **새로 발견된 약점 패턴**: devil이 처음 검출한 패턴 (universal·기존 1~7번에 없던 것) — 다음 사이클 universal에 추가 후보
+- **rubric 미커버 항목**: rubric-mapper 요약 통계의 미커버 key_points 목록 — 다음 skeleton 갱신 후보
+- **분량 통계**: 섹션별 단어 수·skeleton 직접 인용 비율(목표 70~80%)
+- **다음 사이클 권고**: skeleton 보강 항목 1~3개, drafter 가이드 강화 1~3개
+
+### Step F-2: submissions-log stub 자동 생성 (외부 결과 입력 대기 상태)
+
+`proposal-drafter`를 호출. AI가 알 수 있는 7개 칸은 자동 채움, 결과·점수·reviewer 코멘트 4개 칸은 빈칸으로 둔다.
+
+출력: `proposals/knowledge/submissions-log/{사업명}-{YYYY-MM-DD}.md`
+
+**자동 채움 항목 (7개)**:
+- 사업명 ($ARGUMENTS)
+- 신청일 (오늘 날짜)
+- 발표 예정일 (`psst-rubric.json` `programs.{사업명}.expected_announcement` — 없으면 "미정")
+- 신청 금액 (`psst-rubric.json` `programs.{사업명}.max_funding`)
+- 최종 제출본 경로 (`proposals/outputs/{사업명}-{날짜}-final.md`)
+- 사이클 회고 경로 (`proposals/lessons/cycle-{사업명}-{날짜}.md`)
+- 산출물 12종 경로 인덱스 (v0~final, rubric-map·consistency·budget-audit·competitor·fact-check·devil-attack)
+
+**빈칸 유지 항목 (4개 — 사용자가 결과 통지 후 작성)**:
+- 결과 (합격/탈락/보류)
+- 평가표 점수
+- reviewer_comments
+- 회고 (잘된 점·약점·다음 교훈)
+
+stub 생성 후 사용자에게 1줄 안내: "submissions-log stub 생성 완료. 결과 통지 받으면 4개 빈칸만 채워주세요. 경로: ..."
+
+### Step F-3: 자동 폴더·서류 셋업 + 양식 섹션 분리 실행
    ```
    python tools/setup_proposal_folder.py $ARGUMENTS {YYYY-MM-DD}
+   python tools/generate_submission_sections.py $ARGUMENTS {YYYY-MM-DD}
    ```
-   이 스크립트가 자동으로:
+   첫 번째 스크립트가 자동으로:
    - `사업/지원사업/{날짜} {사업명}/` 폴더 생성 (제출서류·심사자료·산출물_md 하위 폴더 포함)
    - final.md → Word 파일 변환 후 폴더에 저장
    - 모든 md 산출물 → 산출물_md 폴더에 복사
    - 컴퓨터에서 필요 서류 자동 탐색 후 제출서류 폴더에 복사
    - 제출_체크리스트.md 생성 (구비된 서류 ✅ / 직접 준비 필요 ⚠️ 구분)
+
+   두 번째 스크립트가 자동으로:
+   - psst-rubric.json의 section_mapping 참조
+   - final.md를 P/S_solution/S_scale/T 섹션으로 분리
+   - 사업별 양식 섹션명에 맞게 매핑하여 `복붙용_섹션분리.txt` 생성
+   - HWP/Word 양식 열고 섹션별로 붙여넣기만 하면 됨
 
 3. 사용자에게 최종 보고:
 
@@ -93,6 +191,7 @@ devil 🟢 판정 후:
 **최종본**: proposals/outputs/{사업명}-{YYYY-MM-DD}-final.md
 **지원사업 폴더**: 사업/지원사업/{날짜} {사업명}/
 **Word 파일**: {사업명}_사업계획서_{날짜}.docx
+**복붙용 섹션 분리본**: 사업/지원사업/{날짜} {사업명}/복붙용_섹션분리.txt
 
 ### 생성된 모든 산출물 (감사 추적용)
 - v0.md → v1.md → v2-draft.md → v2.md → [v3.md] → final.md
@@ -101,15 +200,22 @@ devil 🟢 판정 후:
 
 ### 지원사업 폴더 구성
 - 📄 {사업명}_사업계획서_{날짜}.docx — Word 수정 가능 최종본
+- 📄 복붙용_섹션분리.txt — HWP/Word 양식 섹션별 붙여넣기용
 - 📁 제출서류/ — 자동 구비된 서류 + 직접 준비 필요 목록
 - 📁 산출물_md/ — 전체 md 파일 (감사 추적)
 - ✅ 제출_체크리스트.md — 구비 현황 + 직접 준비 필요 항목
+
+### 양식 제출 방법 (복붙용_섹션분리.txt 사용)
+1. 복붙용_섹션분리.txt 열기
+2. 【양식 섹션】 헤더 아래 내용을 복사
+3. HWP/Word 양식의 해당 칸에 붙여넣기
+4. 글자 수 제한·양식 지침에 맞게 최종 편집
 
 ### 사용자 직접 액션 필수
 1. 제출_체크리스트.md 열어서 ⚠️ 항목 직접 준비
 2. fact-check.md의 ✅ 출처 URL 본인이 1회 클릭 확인
 3. devil-attack.md Q&A 10개 답변 연습
-4. 신청 후 결과 → `proposals/knowledge/submissions-log/{사업명}-{날짜}.json` 작성
+4. 신청 후 결과 → `proposals/knowledge/submissions-log/{사업명}-{날짜}.md` 작성
 
 ### 합격률 추정
 - 시스템 첫 사이클: +20% (J커브 학습효과 미실현)
@@ -118,18 +224,28 @@ devil 🟢 판정 후:
 
 ## 안전 규칙
 
-- 모든 에이전트 호출은 **proposal-** 접두사 7개 중에서만. 다른 에이전트(blog-writer 등) 호출 금지.
+- 모든 에이전트 호출은 **proposal-** 접두사 9개 중에서만 (drafter, rubric-mapper, consistency, budget-auditor, competitor, fact-checker, devil, **interviewer**, **final-revisor**, **rubric-extractor**) + 가드레일은 **brand-voice-reviewer** 1회만 허용.
 - 산출물 저장 전 `proposals/outputs/` 디렉토리 실재 확인.
 - 사용자가 도중 중단하면 마지막 산출물 경로 알려주고 종료.
 - 토론 중 환각·창작 의심 시 즉시 중단하고 사용자에게 보고.
 
-## 미지원 사업명 처리
+## 미지원 사업명 처리 (★ 자동화)
 
 `psst-rubric.json`의 `programs`에 없는 사업명 입력 시:
-1. WebSearch로 공고문 검색 권고
-2. 공고문 URL 받으면 `psst-rubric.json`에 신규 블록 추가 후 재시작
-3. 사용자가 양식 제공 시 PSST 매핑 어댑터 작성 후 재시작
+1. **사용자에게 1줄 안내**: "{사업명} 평가 기준이 시스템에 없습니다. proposal-rubric-extractor를 호출해 공고문에서 자동 추출하겠습니다."
+2. `proposal-rubric-extractor` 호출 (Haiku, ~$0.05, 5분)
+3. extractor가 사용자에게 공고문 PDF/URL + 사업 성격 입력 받아 평가표·special_focus·interview_questions 자동 생성
+4. 사용자 승인 후 psst-rubric.json append
+5. 등재 완료 후 본 흐름 진입 (Round -1 인터뷰부터)
 
 ## 작업 시작
 
-위 흐름을 그대로 실행. 첫 단계: `proposal-drafter` 호출 (사업명 = $ARGUMENTS).
+위 흐름을 그대로 실행:
+1. 사전 점검 (재실행 차단, 사업 등재 여부 확인)
+2. **Round -1**: `proposal-interviewer` 호출 (★ 신규, 5~7개 인터뷰 질문)
+3. **Round 0**: `proposal-drafter` 호출 (interview.yaml 1순위 입력)
+4. **Round 0.5**: 재정의 문장 후보 3개 중 사용자 선택 (AskUserQuestion 1회)
+5. **Round 1**: rubric-mapper + consistency + budget-auditor 병렬 → drafter v1
+6. **Round 2**: competitor → drafter v2-draft → fact-checker → drafter v2 → devil
+7. **Round 3**: final-revisor → brand-voice-reviewer 가드레일 → 공격 루프 (devil ↔ final-revisor 최대 2회)
+8. **Final**: 통과한 v3.x를 final로 승격 + 회고 + submissions-log + 폴더 셋업

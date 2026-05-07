@@ -3,6 +3,12 @@
 > 이 파일은 [작업 종류 매칭 시 grep 검색] / [월말 회고] / [에이전트 시작 전 위험 점검] 시 로드됩니다. CLAUDE.md §13의 정본입니다.
 > 마지막 갱신: 2026-05-01 · 갱신 주기: 즉시 누적 (실수 발생 시)
 
+- **2026-05-04** ㉜ | **QARP 병렬 백테스트 중 parquet 캐시 경합으로 결손율 37~74% 발생** → 4프로세스가 동시에 `prices.parquet`를 읽기/쓰기하면서 파일이 절반만 써진 상태에서 다른 프로세스가 읽음. 결과 CAGR 차이 19%p → INCONSISTENT 판정. Monitor "OK" 집계도 "INCONSISTENT" 문자열을 grep해 오판 | **하지 말 것**: parquet 캐시 공유 프로세스는 병렬 실행 금지. 데이터 레이어를 1회 로드 후 백테스트만 N회 반복하는 구조로 설계. Monitor 완료 판정 grep 패턴은 성공+실패 모두 포함 확인.
+
+- **2026-05-04** ㉛ | **QARP screener engine.py의 _stage3_value가 `max_peg` 키를 하드코딩으로 참조** → config yaml에 해당 키가 없는 변형 실행 시 `KeyError: 'max_peg'`로 즉시 실패. verify_run.py에서도 `--config` 인자를 `run_once()`에 전달 안 해 변형 config가 baseline과 동일하게 작동하는 silent bug 동시 발생 | **하지 말 것**: config dict에서 조건별 키를 `c["key"]`로 직접 참조 금지. 옵션 조건은 반드시 `c.get("key")` 또는 `if "key" in c:` 패턴 사용. 함수 인자 추가 시 호출 스택 전체(caller, caller의 caller)까지 전달 여부 확인.
+
+- **2026-05-04** ㉚ | **GitHub Actions yml에 채널별 Secrets 주입 누락으로 텔레그램 채널 분리 미작동** → `TELEGRAM_CHAT_ID_ADS` 등 4개 Secrets가 GitHub에 등록되어 있었으나 yml env 블록에 추가 안 해서 코드가 읽지 못함. 서버 `.env`만 확인하고 yml 주입 여부 검증 안 해 "정상"으로 오판. 광고 리포트가 `Heavyrover_ads`가 아닌 기본 채팅으로 발송 지속 | **하지 말 것**: Secrets 등록 확인만으로 완료 판단 금지. yml `env:` 블록에 `${{ secrets.XXX }}` 실제 주입 여부까지 반드시 코드로 확인.
+
 - **2026-05-01** ㉙ | **MCP google-sheets 활성 상태에서 OneDrive 동기화 폴더 안의 산출물 5개 동시 손실** (proposals/outputs, docs/analysis_10b/rounds, docs/strategy/outputs, docs/expansion/outputs, data/analysis_10b/sheets) → file-history 백업으로 37개 복원했으나 round-10·proposal 에이전트 7개·expansion domain 12개 등 미복원 | **하지 말 것**: OneDrive 동기화 폴더 안에서 npm/npx/MCP 서버 실행 시 .gitignore된 폴더 손실 위험. 산출물은 반드시 git 추적, 또는 비OneDrive 폴더로 프로젝트 이전.
 
 - **2026-05-01** ㉘ | `/proposal` 강한소상공인 폴더 셋업 시 **KOTRA 합격통지서를 제출 서류 목록에 자동 포함** → 공고문 확인 안 하고 사업계획서 본문에 "KOTRA 합격" 언급 있다는 이유만으로 추가. 강한소상공인 제출 요건엔 없음 | **하지 말 것**: 사업별 제출 서류 목록은 **공고문 원문 직접 확인**한 항목만 포함. 사업계획서 본문 언급 ≠ 제출 요건. setup_proposal_folder.py 사업별 서류 맵 변경 시 공고문 PDF 재확인 후 추가.

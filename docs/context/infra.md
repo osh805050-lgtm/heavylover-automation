@@ -15,36 +15,40 @@
 - 금액 기준: **총 상품구매금액** (네이버 포인트·자체 쿠폰은 판매자 비용)
 - 취소 필터: 취소/환불/반품 (교환은 유지)
 
-## 플랫폼 API (2026-04-23)
+## 플랫폼 API (2026-05-05)
 - **Cafe24**: OAuth 완료 (`mall.read_order` + `mall.write_order`)
 - **스마트스토어**: Vultr 프록시(158.247.215.170:8443) 경유
+- **쿠팡 Wing**: Open API 연동 완료. HMAC-SHA256 인증. 키 만료 2026-10-31 (10일 전 텔레그램 알림 자동)
 - **PlusCL**: Open API 존재. `/open/item_out` 출고서 조회. 인증값 5개 발급 대기
-- **Meta Ads**: API → Apps Script 트리거 → 시트 append (구축 예정)
+- **Meta Ads**: System User Token (무기한), GitHub Actions cron 자동 리포트
 
 ## 주문 자동화 파이프라인
 - 실행: Vultr (158.247.215.170, Ubuntu 22.04) 24시간
 - 코드: 로컬 `heavylover-automation/`, 서버 `/root/heavylover-automation/`
-- 핵심 파일: `run_automation.py`, `cafe24_client.py`, `naver_client.py`, `dada_excel.py`, `telegram_client.py`, `tracking_register.py`
+- 핵심 파일: `run_automation.py`, `cafe24_client.py`, `naver_client.py`, `coupang_client.py`, `dada_excel.py`, `telegram_client.py`, `tracking_register.py`, `notify_key_expiry.py`
 - Cron:
-  - `0 11 * * 1-5` → 엑셀 + OneDrive + 텔레그램
+  - `0 11 * * 1-5` → 카페24+SS+쿠팡 3채널 통합 엑셀 + OneDrive + 텔레그램
   - `0 13 * * 1-5` → PlusCL 송장 → 카페24/SS 자동 등록
-- OneDrive: rclone "더다 양식" 폴더 자동 업로드
-- 텔레그램: `@heavyrover_order_osh_bot`, `/done`·`/cancel` 승인
+  - `*/5 * * * *` → `tracking_command_handler.py` 텔레그램 `/tracking` 명령 폴링 (5분 간격)
+- OneDrive: rclone `바탕 화면/사업/더다 3pl/더다 양식/` 자동 업로드
+- 텔레그램: ops 채널, `/done`·`/cancel` 승인
 - 프록시: Squid 8443, 자동 재시작
 - 택배사: 로젠 (단일)
-  - 카페24: `0004` (이 몰에서 `0001`은 자체배송)
-  - 네이버: `KGB` (합병 이력으로 `LOGEN` 무효)
-  - PlusCL `tran_comp_code` 사용 불필요
+  - 카페24: `0004`
+  - 네이버: `KGB`
+- 쿠팡: Wing에서 수동 발주확인(ACCEPT→INSTRUCT) 후 자동 집계. 안심번호 배송 가능 확인.
 
 ## 자동화 상태
 | 기능 | 상태 |
 |---|---|
-| 11시 엑셀 생성 | ✅ |
+| 11시 엑셀 생성 (3채널) | ✅ 카페24 + SS + 쿠팡 |
 | OneDrive 업로드 | ✅ |
 | 텔레그램 승인 | ✅ |
 | 13시 송장 등록 | ⏳ PlusCL 인증 5개 대기 |
 | 카페24 N10→N20 전환 | 수동 (API 불가) |
 | SS 신규→발주확인 | 수동 (API 한계) |
+| 쿠팡 발주확인 (ACCEPT→INSTRUCT) | 수동 (Wing에서 처리) |
+| 쿠팡 API 키 만료 알림 | ✅ 2026-10-21 자동 알림 |
 | 08:30 시트 sync (Vultr `/root/heavylover-repurchase/`) | ✅ **매일** (주말 포함). 카페24 + SS 5상태(구매확정·결제완료·발송·배송중·배송완료) |
 | 09:00 재구매 리포트 + 마트 4종 갱신 | ✅ **매일** mart_monthly/cohort/stage/summary 시트 자동 갱신 + 텔레그램 (Anthropic 401 시 fallback 원시 숫자) |
 | 04:00 카페24 OAuth 자동 갱신 | ✅ **매일** refresh_token 만료 방지. 실패 시 텔레그램 알림 |

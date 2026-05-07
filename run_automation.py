@@ -160,14 +160,14 @@ def run(skip_weekend_check=False):
 
         telegram_client.send_message("\n".join(summary_parts), channel="ops")
 
-        print("  - 사장님 응답 대기 중 (최대 2시간)...")
-        cmd = telegram_client.wait_for_command(["/done", "/cancel"], timeout_seconds=7200, channel="ops")
+        print("  - 사장님 응답 대기 중 (최대 3시간)...")
+        cmd = telegram_client.wait_for_command(["/done", "/cancel"], timeout_seconds=10800, channel="ops")
         if cmd == "/cancel":
             telegram_client.send_message("❌ 자동화 취소됨. 오늘은 엑셀 생성 안 함.", channel="ops")
             print("  - 취소됨")
             return None, True
         if cmd is None:
-            telegram_client.send_message("⏰ 2시간 대기 타임아웃. 엑셀 생성 건너뜀.", channel="ops")
+            telegram_client.send_message("⏰ 3시간 대기 타임아웃. 엑셀 생성 건너뜀.", channel="ops")
             print("  - 타임아웃")
             return None, True
         print(f"  - 승인 받음 ({cmd})")

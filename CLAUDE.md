@@ -1,6 +1,6 @@
 # CLAUDE.md — HeavyLover 운영 컨텍스트
 
-**최종 업데이트**: 2026-04-30 (rev. 10) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
+**최종 업데이트**: 2026-05-04 (rev. 11) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
 
 > **외부 컨텍스트 우선 참조 규칙**: 정보 부족 시 추측 금지. 다음 위치를 먼저 Glob/Read 후 결정한다.
 > - 작업 종류별 회피 규칙: `docs/lessons/patterns.md`
@@ -45,6 +45,11 @@
 - 🔄 냉동 도시락 직수출 (KOTRA 결과 의존)
 - 🔄 Lovable·Cursor 도입 (효율 입증 시)
 - 🔄 해외향 SaaS (승현 1인 단독)
+
+### 세션 분리 규칙
+- **무거운 분석 끝나면** `git commit` 후 `exit` → 다음 작업은 새 `claude` 시작 (컨텍스트 초기화로 토큰 절감)
+- **단순 코딩** (변수명·로그 추가·boilerplate): 새 세션에서 시작
+- **이어가려면**: `claude --resume` 또는 `claude -r`
 
 ### 세션 시작 체크
 - 호칭 **"승현님"**
@@ -226,60 +231,16 @@
 
 ---
 
-## 8. Meta 광고 (요약)
+## 8. Meta 광고
 
-> 상세 — 벤치마크 표, 자동 플래그, CBO/ABO 전략, ASC 활성화 조건, 스케일업 정책 전부: **`docs/context/ads.md`**
-> 자동화 코드 동기 정본: `docs/meta-ads/benchmarks.md` (`meta_ads_report.py` 상수와 동기). 작업 시: meta-ads-analyst 서브에이전트 호출.
+> 상세 전부: **`docs/context/ads.md`** (벤치마크·플래그·전략·스케일업·cron·데이터 저장)
+> 작업 시: meta-ads-analyst 서브에이전트 호출. 코드 정본: `docs/meta-ads/benchmarks.md`
 
-### 자동화 (2026-04-29 E2E 검증 완료)
-
-**3가지 cron**:
-- 매일 09:00 KST — `meta_ads_report.py` (일일 + 텔레그램 ads채널 + 이메일 4역할)
-- 매주 월요일 09:00 KST — `meta_ads_winner_patterns.py` (위너 패턴) + `refresh_meta_token.py` (토큰 상태 체크)
-- **매주 일요일 09:00 KST — `meta_ads_yearly_report.py` (1년 종합 4역할 + 퍼널 이탈 + 계절성)** ⭐
-
-**데이터 흐름**: Graph API → metrics 계산 → KRW 환산(1,450원/USD 고정) → CSV+Sheets 누적 → 자사 P50(14일+) → Claude 4역할(opus-4-7, 4000토큰) → 텔레그램 ads채널 + 이메일 4역할 심층 + 차트 4종 인라인
-
-**가독성 표준 (2026-04-28 v2)**:
-- 텔레그램: 2단 구조 (헤드라인 → 효율 → 플래그 → 퍼널 → Claude 액션) + 색상 이모지 판정 (🟢🔵🟡🔴) + ◆ 섹션 헤더
-- 이메일: KPI 카드 4개(지출·매출·ROAS·CPA, 배경색이 판정값) + 약점/강점 경고 박스(빨강/초록 좌측바) + 본문 흰 카드 격리
-
-**광고 계정**: `act_445075134545178` (HEAVY ROVER, 통화 USD → KRW 환산)
-**토큰**: System User Token (무기한, 만료 없음) ✅ — 2026-04-29 발급 완료. `META_APP_ID`/`META_APP_SECRET` 미등록이므로 `refresh_meta_token.py`는 상태 체크만
-**수신자 (EMAIL_TO)**: `osh805050@gmail.com`, `ohkm8050@naver.com`, `musclecipe@naver.com` (3명, 이메일 멀티 발송)
-
-**텔레그램 4채널 분리 (2026-04-29 완료)**:
-- ops: 발주·송장·OAuth 갱신·자동화 오류 (기존 단일 봇 역할 유지 + 채널 분리)
-- report: 재구매 09:05 요약
-- ads: Meta 광고 일일/주간/종합 KPI ← 광고 리포트 수신 채널
-- govt: 정부지원 적합 공고
-- `.env` + GitHub Secrets 9개 키 모두 등록 완료
-
-**데이터 저장**:
-- `data/meta_ads/daily.csv` — 계정 합계 (107일 누적, 2025-11-27~2026-04-28)
-- `data/meta_ads/daily_campaign.csv` — 캠페인별 (205행 / 13개 캠페인)
-- `data/meta_ads/raw/{date}.json` — 감사용 원본 (퍼널 분석 입력, .gitignore)
-- `data/meta_ads/winner_patterns.jsonl` — 위너 광고 누적
-- Google Sheets — 재구매 시트와 공유 (`GOOGLE_SHEETS_ID=REPURCHASE_SHEET_ID`):
-  - `Meta_Ads_Daily` / `Meta_Ads_Daily_Campaign` / `Meta_Ads_Winners`
-
-### 5개월 베이스라인 (2026-04-28 검증)
-- 누적 ROAS 3.77 (벤치 2.5 대비 +51%)
-- 5개월 지출 1,313만원 / 매출 4,944만원 / 구매 732건
-- 평균 CTR 1.70% / CPC 367원 / CPA 17,932원 — 모든 지표 벤치 우수
-- **퍼널 약점 1순위**: 콘텐츠→장바구니 1.94% (98% 이탈, 상세페이지 개선)
-- **퍼널 약점 2순위**: 결제→구매 49.85% (결제 마찰 — 배송비·결제수단·회원가입)
-- 위너: 26.2.21 테스트 abo (ROAS 6.20), 25.10.25 슬라이드+릴스 (4.31, 42일 장수)
-- 패배: 26.3.7 중간과정 abo (ROAS 0), 26.4.2 스케일 abo (3.02 / 113만원)
-
-### 필수 비교 지표
-- CPC·CTR·전환율·ROAS·CPA — 각 지표 업계 평균 대비 + 자사 P50 듀얼 표기
-- 핵심 벤치: ROAS 평균 2.5 / 우수 4.0+, CPA 평균 30,000원 / 우수 20,000원-
-
-### 광고 카피 자동 생성 (장기, 60일 누적 후)
-- 위너 광고 기획 패턴 누적 → Claude가 약점 보완 카피 5개 변형 생성
-- 이미지·영상 AI 생성 제외 (식품 D2C 효과 미달)
-- 자동 광고매니저 푸시 제외 (광고비 사고 위험, 사람 승인 유지)
+- 광고 계정: `act_445075134545178` / System User Token (무기한) ✅
+- cron: 매일 09:00 일일 / 매주 월 위너패턴 / 매주 일 종합 (E2E 검증 완료 2026-04-29)
+- 텔레그램 4채널: ops·report·ads·govt 분리 완료
+- 5개월 누적 ROAS 3.77 / 위너 6.20 / 결제 전환율 49.85% (최대 병목)
+- 핵심 벤치: ROAS 우수 4.0+, CPA 우수 20,000원-
 
 ---
 
@@ -376,74 +337,12 @@ heavylover-automation/
 
 ---
 
-## 13. 실험 노트 (요약)
-
-> 정본 — 시간순 원시 로그(13건+): **`docs/lessons/failures.md`**
-> 회피 패턴 — 작업 종류별 카테고리 10개 (§자동화점검·§외부API다루기·§시간중복처리·§데이터범위와분석분리·§엑셀편집·§출력관리·§지역자격필터·§환경컨텍스트·**§수치현행성검증·§제출요건정본확인·§파일안전성**): **`docs/lessons/patterns.md`**
-
-### 활용 흐름
-1. **작업 시작 전** patterns.md 카테고리 인덱스(10개)와 §0 안전규칙 요약 8개 매칭. hook이 키워드 기반으로 해당 섹션 자동 주입 (`.claude/hooks/inject-patterns.py`)
-2. 깊게 들어갈 필요 시 → `failures.md` grep (예: `grep "SS sync" docs/lessons/failures.md`)
-3. 신규 실수 발생 시 → `failures.md` 상단에 한 줄 추가 + **즉시 `patterns.md` 해당 카테고리도 보강** + 사용자에게 "failures.md에 기록했습니다" 보고
-4. 1회 발생으로도 patterns.md 반영 (3회 대기 없음)
-
-### 최근 5건 (전체는 failures.md, 자세한 사고 리포트는 docs/incidents/)
-- **2026-04-28** ㉑ | E2E 검증 가설3 발견: `is_shipping_overdue`가 `placeOrderStatus` 미체크 → PAYED+CANCEL 7건을 "발송기한초과"로 오판정. OK 체크 추가 + detect_special_orders에 PAYED+CANCEL 분기 — **외부 API 상태 enum 두 종류 이상이면 둘 다 함께 평가**
-- **2026-04-28** ⑱ | Vultr `/root/heavylover-automation/`이 git clone 아닌 단순 복사 폴더 → 어제 패치 미반영 → 오늘 11시 26건 누락 재발. .git 이식 + deploy-vultr.yml 자동 배포 신설
-- **2026-04-28** ⑰ | "git push 완료" 보고 후 origin/main 미검증 — push 직후 `git log origin/main` + 서버 `git log -1` 이중 실측
-- **2026-04-28** ⑯ | Meta USD vs KRW 가정 — 첫 응답에서 통화 필드 확인, 환산 함수 일관 적용
-- **2026-04-28** ① | SS hours_back=24 + 평일 cron(1-5)로 금~일 결제분 영구 누락 — orders_pending_dispatch 14일 PAYED 전수로 전환
-
----
-
----
-
 ## 14. 전략 분석 요약 (2026-04-29 완료)
 
-> 상세 원본: `docs/analysis_10b/`, `docs/strategy/outputs/`, `docs/expansion/outputs/`
-> Word 요약본: 바탕화면 `헤비로버_확장전략_2026-04-29.docx`
-
-### 단계별 완료 현황
-| 단계 | 내용 | 산출물 |
-|---|---|---|
-| Stage 1~3 | Unit Economics · Bridge 시나리오 · 코어팬 분석 | `data/analysis_10b/` |
-| Stage 4 | IC 진단 리포트 8섹션 (뻔한 답변 차단 구조) | `docs/analysis_10b/_master.md` |
-| Stage 5 | 5에이전트 갑론을박 5라운드 → Kill Criteria 8개 → 6개월 로드맵 | `docs/strategy/outputs/` |
-| Stage 6 | 6도메인 Proposer+Challenger 12명 토론 → 실행 우선순위 확정 | `docs/expansion/outputs/` |
-
-### 핵심 확정 사실 (데이터 실측)
-- **P50 10일** (기존 15일 가정 수정) — 구매 후 10일이 재구매 트리거 골든타임
-- **M+1 실측 12.8%** (가정치 14% 아님) — 2026-03 코호트 9.8%로 K2 경계
-- **결제 전환율 49.85%** — 광고비의 절반이 결제 단계에서 소실 (가장 큰 병목)
-- **위너 캠페인 AOV 81,918원** vs 현행 60,375원 — ROAS 격차는 AOV 차이가 원인
-- **SS 재구매율 43%** — Meta 광고 지연 효과 가능성 미검증 (50만원 실험으로 4주 내 확인 가능)
-
-### Kill Criteria 8개 (확정 — 매주 자동 모니터링)
-| # | 기준 | 측정 주기 | 트리거 액션 | 현재 상태 |
-|---|---|---|---|---|
-| K1 | ROAS < 2.8 | 매주 월요일 | 광고비 -30% | 3.51 (여유 있음) |
-| K2 | M+1 < 12% 3개월 연속 | 월 1회 | 신규 획득 정지 검토 | 9.8% (⚠️ 이미 미달) |
-| K3 | 월매출 < 3,500만 2개월 | 월 1회 | 광고비 구조 재검토 | ~3,800만 (300만 여유) |
-| K4 | 상생자금 탈락 | 즉시 | 시리얼 50% 축소 | **거의 확정 (6,000만원)** |
-| K5 | 시리얼 프리오더 500봉 미달 | 출시 후 1회 | 시리얼 광고 보류 | 6월 출시 예정 |
-| K6 | AOV < 58,000 2개월 | 매주 | 광고 타겟 리셋 | 59,964 (⚠️ 2,000원 여유) |
-| K7 | LTV/CAC < 1.5 (60일) | 월 1회 | 광고 -50% + UE 재진단 | 1.79 (양호) |
-| K8 | 1주 현금 음수 4주 연속 | 매주 | 인건비 구조 긴급 검토 | 미모니터링 |
-
-### 6개월 로드맵 핵심 액션 (확정)
-| ID | 액션 | 담당 | 기한 |
-|---|---|---|---|
-| ACT-01 | 박재영 역할 명세 작성 | 승현님 | **05-06** |
-| ACT-02 | 결제 퍼널 개선 (배송비·소셜로그인 완료 → 남은 원인: 비회원구매·간편결제·배송일 표시) | 승현님 | 진행중 |
-| ACT-03 | 2026-02 코호트 원인 분석 | Claude | ✅ 완료 (2026-04-30) |
-| ACT-04 | 재구매 그룹 분류 인프라 + GA4 연동 | Claude | 이번 주 |
-| ACT-05 | 광고 소재 변경 ("2박스로 2주치") | 승현님 | 05-07 |
-| ACT-06 | SS 소규모 광고 실험 (Meta→SS 50만원) | 승현님 | 05-10 |
-| ACT-07 | 복지몰 베네피아 파일럿 입점 | 승현님 | 05-10 |
-| ACT-08 | 상생자금 현장실사 준비 | 승현님 | 실사 통보 후 |
-
-### 탈락 확정 제안 (재논의 불필요)
-- **TikTok 파일럿**: 흑자선 미달 + 1인 운영 병목 + 전환 추적 불가 3가지 동시 해당
+> 상세 원본: `docs/analysis_10b/_master.md`, `docs/strategy/outputs/`, `docs/expansion/outputs/`
+> Kill Criteria 8개(K1~K8) + 6개월 로드맵(ACT-01~08) + 탈락 확정 제안: 위 경로 참조.
+> 핵심 수치(P50·M+1·ROAS·AOV)는 §4에 통합됨. 재실행 불필요 (산출물 존재).
+> 탈락 확정: TikTok 파일럿 (흑자선 미달 + 1인 운영 병목 + 전환 추적 불가)
 
 ---
 

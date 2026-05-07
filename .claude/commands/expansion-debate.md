@@ -6,6 +6,7 @@
 ## 실행 순서
 
 ### Step 0: 사전 점검
+- **재실행 차단**: `docs/expansion/outputs/`에 기존 산출물 파일(예: `expansion-synthesis.md` 또는 도메인별 결과) 있으면 즉시 중단 후 사용자에게 "기존 6도메인 토론 산출물이 있습니다. 재실행 시 40~60분 + 수만 토큰 소모됩니다. 정말 재실행하시겠습니까?" 묻고 명시 승인 시에만 진행.
 - `docs/strategy/outputs/` 디렉토리에서 최신 `*-08_6m_roadmap.md` 파일 존재 확인 (날짜 무관, 가장 최근 것 사용)
 - `data/analysis_10b/unit_economics.json` 존재 확인
 - `docs/expansion/outputs/` 디렉토리 존재 확인 (없으면 생성)
