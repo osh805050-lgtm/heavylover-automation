@@ -128,17 +128,17 @@ def orders_to_dada_rows(orders):
         receiver = order.get("receiver", {})
         order_items = order.get("orderItems", [])
 
-        # 상품명: 여러 품목이면 첫 번째 + 외 N건
+        # 등록옵션명: 여러 품목이면 첫 번째 + 외 N건
         if not order_items:
             continue
-        item_names = [it.get("vendorItemName", "") for it in order_items]
+        item_names = [it.get("sellerProductItemName", "") for it in order_items]
         product_name = item_names[0]
         if len(item_names) > 1:
             product_name += f" 외 {len(item_names) - 1}건"
 
         # 상품상세: 전 품목 수량 합산 표시
         detail_parts = [
-            f"{it.get('vendorItemName', '')} x{it.get('shippingCount', 1)}"
+            f"{it.get('sellerProductItemName', '')} x{it.get('shippingCount', 1)}"
             for it in order_items
         ]
         product_detail = " / ".join(detail_parts)
