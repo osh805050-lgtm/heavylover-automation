@@ -13,11 +13,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from anthropic import Anthropic
@@ -34,6 +35,7 @@ except Exception:
     pass
 
 KST = timezone(timedelta(hours=9))
+DATA_LAG_DAYS = 7  # 취소·환불 backfill 윈도우 (sheets_sync.py BACKFILL_DAYS와 동일)
 ENV_PATH = Path(__file__).parent / ".env"
 
 ANALYSIS_LOG_DIR = Path(__file__).parent / "logs"
@@ -258,25 +260,53 @@ def _extract_interval_stats(ws) -> dict:
 
 # 새 시트엔 단계별 전환율 평탄 탭이 없음. 코호트 전환율로 대체.
 def _extract_stage_flat(ws) -> list[dict]:
-    """30일/60일 코호트 전환율의 평균을 단계 형태로 변환 (호환용)."""
+    """30일/60일 코호트 전환율의 평균을 단계 형태로 변환 (호환용).
+
+    elapsed-time gate: 관찰 윈도우가 실제로 끝난 코호트만 평균에 포함.
+    - 30일 gate = 코호트 첫날 + 30일 + DATA_LAG_DAYS
+    - 60일 gate = 코호트 첫날 + 60일 + DATA_LAG_DAYS
+    """
     rows = _extract_cohort_stage(ws)
     if not rows:
         return []
-    completed = [r for r in rows if r["30일_전환율"] is not None and r["첫구매자수"] >= 5]
-    if not completed:
+    today = date.today()
+
+    def _days_elapsed(cohort_month_str: str) -> int:
+        try:
+            cy, cmo = map(int, cohort_month_str.split("-"))
+            return (today - date(cy, cmo, 1)).days
+        except (ValueError, AttributeError):
+            return 0
+
+    gate_30 = 30 + DATA_LAG_DAYS
+    gate_60 = 60 + DATA_LAG_DAYS
+
+    completed_30 = [r for r in rows
+                    if r["30일_전환율"] is not None and r["첫구매자수"] >= 5
+                    and _days_elapsed(r["코호트월"]) >= gate_30]
+    completed_60 = [r for r in rows
+                    if r["60일_전환율"] is not None and r["첫구매자수"] >= 5
+                    and _days_elapsed(r["코호트월"]) >= gate_60]
+
+    if not completed_30:
         return []
-    last3 = completed[-3:]
-    avg30 = round(sum(r["30일_전환율"] or 0 for r in last3) / len(last3), 2)
-    avg60 = round(sum(r["60일_전환율"] or 0 for r in last3) / len(last3), 2)
-    base = sum(r["첫구매자수"] for r in last3)
-    conv30 = sum(r["30일_전환수"] for r in last3)
-    conv60 = sum(r["60일_전환수"] for r in last3)
-    return [
-        {"단계": "1→2", "기준고객수": base, "전환고객수": conv60, "전환율": avg60,
-         "해석": f"60일 누적, 최근 3개월({last3[0]['코호트월']}~{last3[-1]['코호트월']}) 평균"},
+
+    last3_30 = completed_30[-3:]
+    avg30 = round(sum(r["30일_전환율"] or 0 for r in last3_30) / len(last3_30), 2)
+    base = sum(r["첫구매자수"] for r in last3_30)
+    conv30 = sum(r["30일_전환수"] for r in last3_30)
+
+    result = [
         {"단계": "1→2_30일", "기준고객수": base, "전환고객수": conv30, "전환율": avg30,
-         "해석": "30일 빠른 전환 지표"},
+         "해석": f"30일 빠른 전환, 최근 3개월({last3_30[0]['코호트월']}~{last3_30[-1]['코호트월']}) 평균"},
     ]
+    if completed_60:
+        last3_60 = completed_60[-3:]
+        avg60 = round(sum(r["60일_전환율"] or 0 for r in last3_60) / len(last3_60), 2)
+        conv60 = sum(r["60일_전환수"] for r in last3_60)
+        result.insert(0, {"단계": "1→2", "기준고객수": base, "전환고객수": conv60, "전환율": avg60,
+                          "해석": f"60일 누적, 최근 3개월({last3_60[0]['코호트월']}~{last3_60[-1]['코호트월']}) 평균"})
+    return result
 
 
 def build_ground_truth(spreadsheet) -> dict:
@@ -359,9 +389,22 @@ def build_ground_truth(spreadsheet) -> dict:
     cohort_trend_1to2["변화_pp"] = _delta(cohort_trend_1to2)
     cohort_trend_2to3["변화_pp"] = _delta(cohort_trend_2to3)
 
-    # M+N 리텐션 — 완결된 최신 코호트 (M+1 기준 6개월 이상 지난 것)
+    # M+N 리텐션 — 각 코호트에 완결 메타데이터 부여 후 완결분만 필터
+    # is_complete: 코호트 다음 달 말일 + DATA_LAG_DAYS 이후에만 True
+    # 예) 2026-04 코호트 → m1_window_end = 2026-05-31 → 2026-06-07 이후에야 완결
     mn = _extract_mn(tabs.get("mn_retention"))
-    mn_completed = [m for m in mn if m.get("M+1") is not None]
+    for m in mn:
+        cohort_str = m.get("코호트월", "")
+        try:
+            cy, cmo = map(int, cohort_str.split("-"))
+            next_first = date(cy + (cmo // 12), (cmo % 12) + 1, 1)
+            m1_window_end = next_first - timedelta(days=1)
+            m["is_complete"] = now.date() > m1_window_end + timedelta(days=DATA_LAG_DAYS)
+            m["m1_window_end"] = m1_window_end.isoformat()
+        except (ValueError, AttributeError):
+            m["is_complete"] = False
+            m["m1_window_end"] = None
+    mn_completed = [m for m in mn if m.get("is_complete") and m.get("M+1") is not None]
 
     gt = {
         "리포트_날짜": now.strftime("%Y-%m-%d"),
@@ -1263,8 +1306,11 @@ def validate(text: str, gt: dict) -> list[str]:
         if phrase in text:
             issues.append(f"금지 표현 감지: '{phrase}'")
 
-    # 2. 필수 섹션 키워드
-    required_keywords = ["당월", "전월", "1→2", "2→3"]
+    # 2. 필수 섹션 키워드 — 실제 데이터 유무에 따라 동적 생성
+    required_keywords = ["당월", "전월", "1→2"]
+    stage = gt.get("단계별_전환율_현재", {}).get("통합", [])
+    if any(s.get("단계") == "2→3" and s.get("전환율") is not None for s in stage):
+        required_keywords.append("2→3")
     for kw in required_keywords:
         if kw not in text:
             issues.append(f"필수 섹션 누락: '{kw}' 언급 없음")
@@ -1311,7 +1357,8 @@ def generate_report_with_retry(gt: dict, max_retries: int = 3) -> tuple[str | No
             _log(f"  ✅ 시도 #{attempt} 통과")
             return report, []
 
-        _log(f"  ❌ 시도 #{attempt} 검증 실패 ({len(issues)}건):")
+        report_hash = hashlib.sha1(report.encode()).hexdigest()[:8]
+        _log(f"  [VALIDATION_FALLBACK] 시도 #{attempt} 검증 실패 ({len(issues)}건) hash={report_hash}:")
         for i in issues:
             _log(f"     - {i}")
         last_issues = issues
