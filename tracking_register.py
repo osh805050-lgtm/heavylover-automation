@@ -5,12 +5,16 @@
 실행 주기: Vultr cron 5분마다 /tracking 명령 폴링
 """
 
+import csv
 import glob
 import io
 import os
+import re
 import sys
+from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 import pandas as pd
 import requests
@@ -50,6 +54,36 @@ CAFE24_LOGEN = "0004"
 
 # 네이버 deliveryCompanyCode
 NAVER_LOGEN = "KGB"  # 로젠택배 (네이버 시스템에선 KGB 코드)
+
+# 결과 CSV 저장 디렉터리 (run 단위 영속 로그)
+TRACKING_RESULTS_DIR = Path(__file__).parent / "data" / "tracking"
+
+
+@dataclass
+class TrackingResult:
+    """송장 등록 1건 결과 (CSV 영속화용)"""
+    channel: str            # cafe24 | naver | coupang
+    order_id: str
+    item_code: str          # cafe24=order_item_code, naver=productOrderId, coupang=vendorItemId
+    tracking_no: str
+    status: str             # sent | failed | skipped | conflict_existing
+    api_response_code: str  # HTTP code 또는 카테고리 (예: "exception", "rate_limit")
+    api_response_body: str  # 응답 본문 truncate (200자)
+
+
+class TrackingParseError(ValueError):
+    """엑셀 파싱 단계에서 명확히 reject해야 할 입력 — 운영자 액션 필요"""
+    pass
+
+
+# 송장번호: 보통 10~16자리 숫자. 한국 택배 표준 (안전하게 6~20자리 허용)
+_VALID_TRACKING_RE = re.compile(r"^\d{6,20}$")
+# SS productOrderId: 16자리 숫자, "20"으로 시작 (연도 prefix)
+_VALID_SS_ORDER_RE = re.compile(r"^20\d{14}$")
+# 카페24 주문번호: YYYYMMDD-NNNNNNN 또는 비슷한 하이픈 포함 형식
+_VALID_CAFE24_ORDER_RE = re.compile(r"^\d{6,10}-\d{4,10}$")
+# 쿠팡 orderId: 13자리 정도 숫자 (안전하게 8~15자리 허용)
+_VALID_COUPANG_ORDER_RE = re.compile(r"^\d{8,15}$")
 
 def find_today_excel():
     """OneDrive 바탕화면에서 오늘 날짜 송장 엑셀만 다운로드 후 경로 반환.
@@ -93,41 +127,75 @@ def read_tracking_excel(path: Path):
             "filename": str,
         }
     """
-    # xls는 xlrd로 cp949 읽기, xlsx는 openpyxl
+    # 핵심: 송장번호·주문번호는 반드시 string dtype으로 읽어야 함
+    # int(float(s)) 변환 시 16자리 SS productOrderId가 부동소수점 오차로 마지막 자리 손실
+    # → 엉뚱한 주문에 송장 등록되는 high-severity 결함
     suffix = path.suffix.lower()
     if suffix == ".xls":
         import xlrd
         wb = xlrd.open_workbook(str(path), encoding_override="cp949")
         ws = wb.sheet_by_index(0)
         headers = ws.row_values(0)
-        rows = [ws.row_values(i) for i in range(1, ws.nrows)]
+        rows = []
+        for i in range(1, ws.nrows):
+            row_vals = []
+            for col_idx, val in enumerate(ws.row_values(i)):
+                ctype = ws.cell_type(i, col_idx)
+                # xlrd cell types: 0=empty, 1=text, 2=number, 3=date, 4=bool, 5=error
+                # 숫자형 셀(ctype=2)도 string으로 정확하게 보존 (정수일 경우 소수점 제거만)
+                if ctype == 2 and isinstance(val, float):
+                    if val.is_integer():
+                        row_vals.append(str(int(val)))
+                    else:
+                        # 비정수 float은 송장번호로 부적합 — 원형 보존
+                        row_vals.append(repr(val))
+                else:
+                    row_vals.append(val)
+            rows.append(row_vals)
         df = pd.DataFrame(rows, columns=headers)
     else:
-        df = pd.read_excel(path)
+        # openpyxl 엔진은 dtype=str로 읽어야 16자리 정수가 1.234E+15로 손실되지 않음
+        df = pd.read_excel(path, dtype=str)
 
-    def _to_str(val):
-        """숫자형 셀값을 문자열로 변환 (과학적 표기·부동소수점 오차 방지)"""
-        if val is None or (isinstance(val, float) and pd.isna(val)):
+    def _normalize_id(val, *, field_name: str, row_idx: int) -> str:
+        """주문번호/송장번호 셀을 string으로 안전 변환.
+
+        - 부동소수점·과학적 표기는 reject (이미 정밀도 손실됐을 가능성)
+        - 공백/None/'nan'은 빈 문자열 반환 (호출 측에서 skip)
+        - 숫자만 남기되 자릿수 검증은 호출 측에서 채널별로 수행
+        """
+        if val is None:
             return ""
+        if isinstance(val, float):
+            if pd.isna(val):
+                return ""
+            # float 자체로 들어온 시점 = 이미 dtype=str 분기 실패한 상황
+            # 정수 float은 자릿수 16 미만이면 복원 가능, 그 이상은 reject
+            if val.is_integer() and abs(val) < 1e15:
+                return str(int(val))
+            raise TrackingParseError(
+                f"행 {row_idx+2} '{field_name}' 컬럼이 부동소수점({val!r})으로 읽혔습니다. "
+                f"엑셀 셀 서식을 '텍스트'로 변경 후 다시 업로드해주세요."
+            )
         s = str(val).strip()
-        if not s or s == "nan":
+        if not s or s.lower() == "nan":
             return ""
-        # xlrd가 과학적 표기 문자열로 반환하는 경우 (예: 2.02604287400767E15)
-        # Decimal로 파싱해야 부동소수점 오차 없이 정확한 정수 복원 가능
-        if "E" in s.upper() and "." in s:
-            try:
-                from decimal import Decimal
-                return str(int(Decimal(s)))
-            except Exception:
-                pass
-        # 일반 숫자 (float → int)
-        try:
-            return str(int(float(s)))
-        except Exception:
-            return s
-
-    df["송장번호"] = df["송장번호"].apply(_to_str)
-    df["주문번호"] = df["주문번호"].apply(_to_str)
+        # 과학적 표기 (1.234E+15) — 정밀도 손실 의심, reject
+        if re.search(r"[eE][+\-]?\d", s):
+            raise TrackingParseError(
+                f"행 {row_idx+2} '{field_name}' 컬럼에 과학적 표기('{s}') 값이 있습니다. "
+                f"엑셀 셀 서식을 '텍스트'로 변경 후 다시 업로드해주세요."
+            )
+        # 끝의 .0 제거 (정수형 float이 string으로 들어온 경우)
+        if re.fullmatch(r"\d+\.0+", s):
+            s = s.split(".")[0]
+        # 잔여 소수점 — 송장/주문번호는 정수이어야 함
+        if "." in s:
+            raise TrackingParseError(
+                f"행 {row_idx+2} '{field_name}' 컬럼에 소수점 포함 값('{s}')이 있습니다. "
+                f"엑셀 셀 서식을 '텍스트'로 변경 후 다시 업로드해주세요."
+            )
+        return s
 
     cafe24_rows = []
     naver_rows = []
@@ -136,30 +204,48 @@ def read_tracking_excel(path: Path):
     naver_phones = set()
     coupang_phones = set()
 
-    for _, row in df.iterrows():
-        order_no = _to_str(row.get("주문번호", ""))
-        tracking = _to_str(row.get("송장번호", ""))
-        phone = str(row.get("수취인 휴대전화", "") or row.get("수취인 전화", "")).strip()
+    for idx, row in df.iterrows():
+        order_no = _normalize_id(row.get("주문번호", ""), field_name="주문번호", row_idx=idx)
+        tracking = _normalize_id(row.get("송장번호", ""), field_name="송장번호", row_idx=idx)
+        phone_raw = row.get("수취인 휴대전화") or row.get("수취인 전화") or ""
+        phone = str(phone_raw).strip() if phone_raw is not None else ""
 
-        if not order_no or not tracking or tracking == "nan":
+        if not order_no or not tracking:
             continue
+
+        # 송장번호 형식 검증 (모든 채널 공통)
+        if not _VALID_TRACKING_RE.match(tracking):
+            raise TrackingParseError(
+                f"행 {idx+2} 송장번호('{tracking}')가 숫자 6~20자리 형식을 벗어납니다."
+            )
 
         # 카페24: YYYYMMDD-NNNNNNN 형식 (하이픈 포함)
         if "-" in order_no:
-            item_code = str(row.get("주문 상품코드", "")).strip()
+            if not _VALID_CAFE24_ORDER_RE.match(order_no):
+                raise TrackingParseError(
+                    f"행 {idx+2} 카페24 주문번호('{order_no}') 형식 이상."
+                )
+            item_code = ""
+            raw_item = row.get("주문 상품코드", "")
+            if raw_item is not None and not (isinstance(raw_item, float) and pd.isna(raw_item)):
+                item_code = str(raw_item).strip()
             cafe24_rows.append((order_no, item_code, tracking))
             if phone:
                 cafe24_phones.add(phone)
-        elif len(order_no) == 16 and order_no.startswith("20"):
+        elif _VALID_SS_ORDER_RE.match(order_no):
             # 스마트스토어: 16자리, "20"으로 시작
             naver_rows.append((order_no, tracking))
             if phone:
                 naver_phones.add(phone)
-        else:
-            # 쿠팡: 그 외 (13자리 등)
+        elif _VALID_COUPANG_ORDER_RE.match(order_no):
+            # 쿠팡: 8~15자리 숫자
             coupang_rows.append((order_no, tracking))
             if phone:
                 coupang_phones.add(phone)
+        else:
+            raise TrackingParseError(
+                f"행 {idx+2} 주문번호('{order_no}')가 어느 채널 형식에도 맞지 않습니다."
+            )
 
     return {
         "cafe24": cafe24_rows,
@@ -170,6 +256,84 @@ def read_tracking_excel(path: Path):
         "coupang_buyers": len(coupang_phones),
         "filename": path.name,
     }
+
+
+def _dedup_by_order(
+    items: List[tuple],
+    *,
+    channel: str,
+    order_idx: int = 0,
+    item_idx: Optional[int] = None,
+    tracking_idx: int = -1,
+) -> Tuple[dict, List[TrackingResult]]:
+    """주문 단위 dedup. 같은 주문에 다른 송장번호가 있으면 reject.
+
+    Returns:
+        kept: dict[(channel, order_id, item_code)] = (order_id, item_code, tracking_no)
+              item_code는 입력에 없거나 빈 경우 "" — 단일 패키지로 간주.
+        conflicts: 같은 주문/아이템에 다른 송장번호가 있어 reject된 항목 (TrackingResult, status="skipped")
+    """
+    kept: dict = {}
+    conflicts: List[TrackingResult] = []
+    # 주문 단위 트래킹 번호 추적 (같은 주문 다중 행에 다른 송장이면 충돌)
+    order_trackings: dict = {}
+
+    for row in items:
+        order_id = row[order_idx]
+        tracking = row[tracking_idx]
+        item_code = row[item_idx].strip() if item_idx is not None and row[item_idx] else ""
+
+        # 같은 주문에 다른 송장번호가 들어오면 충돌 — 자동 등록 차단
+        prev_trackings = order_trackings.setdefault(order_id, set())
+        prev_trackings.add(tracking)
+        if len(prev_trackings) > 1:
+            conflicts.append(TrackingResult(
+                channel=channel,
+                order_id=order_id,
+                item_code=item_code,
+                tracking_no=tracking,
+                status="skipped",
+                api_response_code="conflict_multi_tracking",
+                api_response_body=f"order has multiple trackings: {sorted(prev_trackings)}",
+            ))
+            continue
+
+        # item-level 키: (channel, order_id, item_code)
+        # item_code 비어있으면 단일 패키지 — order 단위로만 dedup
+        key = (channel, order_id, item_code)
+        if key not in kept:
+            kept[key] = (order_id, item_code, tracking)
+        # 같은 (order, item) 중복 라인은 동일 송장이면 무시 (조용히)
+    return kept, conflicts
+
+
+def _write_run_csv(results: List[TrackingResult]) -> Optional[Path]:
+    """run 단위 결과 CSV 영속화.
+
+    경로: data/tracking/run_YYYYMMDD_HHMMSS.csv
+    """
+    if not results:
+        return None
+    TRACKING_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = TRACKING_RESULTS_DIR / f"run_{ts}.csv"
+    fieldnames = [
+        "channel", "order_id", "item_code", "tracking_no",
+        "status", "api_response_code", "api_response_body",
+    ]
+    with open(out_path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        for r in results:
+            w.writerow(asdict(r))
+    return out_path
+
+
+def _truncate_body(text, limit: int = 200) -> str:
+    if text is None:
+        return ""
+    s = str(text).replace("\n", " ").replace("\r", " ")
+    return s[:limit]
 
 
 def run_from_excel():
@@ -191,9 +355,16 @@ def run_from_excel():
 
     print(f"  파일: {excel_path.name}")
 
-    # 2) 엑셀 파싱
+    # 2) 엑셀 파싱 (string-dtype 강제, scientific notation reject)
     try:
         data = read_tracking_excel(excel_path)
+    except TrackingParseError as e:
+        # 운영자가 액션 가능한 명확한 메시지
+        telegram_client.send_message(
+            f"⚠️ 엑셀 파싱 실패 — 자동 등록 중단\n{e}",
+            channel="ops",
+        )
+        return
     except Exception as e:
         telegram_client.send_message(f"⚠️ 엑셀 읽기 실패: {e}", channel="ops")
         return
@@ -217,32 +388,81 @@ def run_from_excel():
 
     # 4) 송장 등록
     print("[등록] 카페24 + 스마트스토어 송장 등록 중...")
+    results: List[TrackingResult] = []
     cafe24_success, cafe24_fail = 0, []
     naver_success, naver_fail = 0, []
 
-    # 카페24: 주문번호 중복 제거 후 API로 order_item_code 조회
-    seen_cafe24 = {}
-    for order_id, _, tracking in cafe24_items:
-        if order_id not in seen_cafe24:
-            seen_cafe24[order_id] = tracking
+    # 카페24: (channel, order_id, item_code) 튜플 키로 dedup
+    seen_cafe24, cafe24_conflicts = _dedup_by_order(
+        cafe24_items, channel="cafe24",
+        order_idx=0, item_idx=1, tracking_idx=2,
+    )
+    results.extend(cafe24_conflicts)
+    for c in cafe24_conflicts:
+        cafe24_fail.append(f"{c.order_id}: 송장번호 충돌 (수동 확인 필요)")
 
-    for order_id, tracking in seen_cafe24.items():
+    # 카페24는 같은 order의 모든 item을 한 번에 등록 → order_id 단위로 묶음
+    cafe24_orders_to_register: dict = {}
+    for (_, order_id, item_code), (_, _, tracking) in seen_cafe24.items():
+        cafe24_orders_to_register.setdefault(order_id, {"tracking": tracking, "item_codes": set()})
+        if item_code:
+            cafe24_orders_to_register[order_id]["item_codes"].add(item_code)
+
+    for order_id, info in cafe24_orders_to_register.items():
+        tracking = info["tracking"]
+        excel_item_codes = sorted(info["item_codes"])
         try:
+            # API로 order_item_code 조회 (엑셀 item_code는 product code일 수 있어 신뢰 불가)
             item_codes = cafe24_client.get_order_item_codes(order_id)
             if not item_codes:
                 cafe24_fail.append(f"{order_id}: order_item_code 조회 실패")
+                results.append(TrackingResult(
+                    channel="cafe24", order_id=order_id,
+                    item_code=",".join(excel_item_codes),
+                    tracking_no=tracking, status="failed",
+                    api_response_code="lookup_empty",
+                    api_response_body="get_order_item_codes returned empty",
+                ))
                 continue
             r = register_tracking_cafe24(order_id, item_codes, tracking, CAFE24_LOGEN)
+            api_codes_str = ",".join(item_codes) if isinstance(item_codes, list) else str(item_codes)
             if r.status_code in (200, 201):
                 cafe24_success += 1
+                results.append(TrackingResult(
+                    channel="cafe24", order_id=order_id, item_code=api_codes_str,
+                    tracking_no=tracking, status="sent",
+                    api_response_code=str(r.status_code),
+                    api_response_body=_truncate_body(r.text),
+                ))
             elif r.status_code == 422 and "cannot change" in r.text:
-                cafe24_success += 1  # 이미 배송중 등록된 건 — 성공으로 처리
+                # 이미 배송중 등록된 건 — 성공 카운트엔 포함하되 status는 conflict_existing로 박제
+                cafe24_success += 1
+                results.append(TrackingResult(
+                    channel="cafe24", order_id=order_id, item_code=api_codes_str,
+                    tracking_no=tracking, status="conflict_existing",
+                    api_response_code="422",
+                    api_response_body=_truncate_body(r.text),
+                ))
             else:
                 cafe24_fail.append(f"{order_id}: {r.text[:80]}")
+                results.append(TrackingResult(
+                    channel="cafe24", order_id=order_id, item_code=api_codes_str,
+                    tracking_no=tracking, status="failed",
+                    api_response_code=str(r.status_code),
+                    api_response_body=_truncate_body(r.text),
+                ))
         except Exception as e:
             cafe24_fail.append(f"{order_id}: {e}")
+            results.append(TrackingResult(
+                channel="cafe24", order_id=order_id,
+                item_code=",".join(excel_item_codes),
+                tracking_no=tracking, status="failed",
+                api_response_code="exception",
+                api_response_body=_truncate_body(str(e)),
+            ))
 
-    # SS: 엑셀 주문번호 부동소수점 손실 보정 — API 현재 발송대기 주문과 앞 15자리 매칭
+    # SS: 엑셀 주문번호 부동소수점 손실 보정 — string-dtype 강제 후엔 보정 불필요할 수 있으나
+    # 과거 손실된 데이터 호환성 위해 매칭 로직은 유지
     actual_naver_orders = naver_client.orders_pending_dispatch(days_back=7)
     actual_ids = {
         o.get("productOrder", {}).get("productOrderId", ""): True
@@ -250,30 +470,54 @@ def run_from_excel():
     }
 
     def _fix_naver_id(excel_id):
-        """엑셀 주문번호(마지막 자리 소실)를 실제 SS 주문번호로 보정."""
+        """이미 16자리 정상 ID면 그대로. 길이 부족 시 prefix 매칭."""
         if excel_id in actual_ids:
             return excel_id
-        prefix = excel_id[:15]
-        for real_id in actual_ids:
-            if real_id.startswith(prefix):
-                return real_id
-        return excel_id  # 보정 실패 시 원본 유지
+        # 16자리 미만 (구 데이터 호환) — 앞 15자리로 prefix 매칭
+        if len(excel_id) >= 15:
+            prefix = excel_id[:15]
+            for real_id in actual_ids:
+                if real_id.startswith(prefix):
+                    return real_id
+        return excel_id
 
-    seen_naver = {}
+    # SS: (channel, order_id) item_code 없음 — order_id 단위 dedup
+    seen_naver: dict = {}
+    naver_conflicts: List[TrackingResult] = []
+    naver_order_trackings: dict = {}
     for product_order_id, tracking in naver_items:
         fixed_id = _fix_naver_id(product_order_id)
+        prev = naver_order_trackings.setdefault(fixed_id, set())
+        prev.add(tracking)
+        if len(prev) > 1:
+            naver_conflicts.append(TrackingResult(
+                channel="naver", order_id=fixed_id, item_code="",
+                tracking_no=tracking, status="skipped",
+                api_response_code="conflict_multi_tracking",
+                api_response_body=f"order has multiple trackings: {sorted(prev)}",
+            ))
+            continue
         if fixed_id not in seen_naver:
             seen_naver[fixed_id] = tracking
+    results.extend(naver_conflicts)
+    for c in naver_conflicts:
+        naver_fail.append(f"{c.order_id}: 송장번호 충돌 (수동 확인 필요)")
 
     import time as _time
     for product_order_id, tracking in seen_naver.items():
+        last_status = "failed"
+        last_code = ""
+        last_body = ""
         for attempt in range(3):  # RATE_LIMIT 시 최대 3회 재시도
             try:
                 r = register_tracking_naver(product_order_id, tracking, NAVER_LOGEN)
+                last_code = str(r.status_code)
+                last_body = _truncate_body(r.text)
                 if r.status_code == 200:
                     result = r.json().get("data", {})
                     if result.get("successProductOrderIds"):
                         naver_success += 1
+                        last_status = "sent"
                         break
                     else:
                         fail_info = result.get("failProductOrderInfos", [{}])
@@ -282,6 +526,7 @@ def run_from_excel():
                             _time.sleep(3)
                             continue
                         naver_fail.append(f"{product_order_id}: {msg}")
+                        last_body = _truncate_body(msg)
                         break
                 elif "RATE_LIMIT" in r.text and attempt < 2:
                     _time.sleep(3)
@@ -291,15 +536,37 @@ def run_from_excel():
                     break
             except Exception as e:
                 naver_fail.append(f"{product_order_id}: {e}")
+                last_code = "exception"
+                last_body = _truncate_body(str(e))
                 break
+        results.append(TrackingResult(
+            channel="naver", order_id=product_order_id, item_code="",
+            tracking_no=tracking, status=last_status,
+            api_response_code=last_code, api_response_body=last_body,
+        ))
         _time.sleep(0.5)  # 호출 간격
 
-    # 쿠팡: orderId 중복 제거 후 vendorItemId 조회 → 등록
+    # 쿠팡: order_id 단위 dedup
     coupang_success, coupang_fail = 0, []
-    seen_coupang = {}
+    seen_coupang: dict = {}
+    coupang_conflicts: List[TrackingResult] = []
+    coupang_order_trackings: dict = {}
     for order_id, tracking in coupang_items:
+        prev = coupang_order_trackings.setdefault(order_id, set())
+        prev.add(tracking)
+        if len(prev) > 1:
+            coupang_conflicts.append(TrackingResult(
+                channel="coupang", order_id=order_id, item_code="",
+                tracking_no=tracking, status="skipped",
+                api_response_code="conflict_multi_tracking",
+                api_response_body=f"order has multiple trackings: {sorted(prev)}",
+            ))
+            continue
         if order_id not in seen_coupang:
             seen_coupang[order_id] = tracking
+    results.extend(coupang_conflicts)
+    for c in coupang_conflicts:
+        coupang_fail.append(f"{c.order_id}: 송장번호 충돌 (수동 확인 필요)")
 
     if seen_coupang:
         print("[쿠팡] shipmentBoxId/vendorItemId 조회 중 (fetch_orders)...")
@@ -308,21 +575,55 @@ def run_from_excel():
                 info = coupang_client.get_order_shipping_info(order_id)
                 if not info or not info["vendorItemIds"]:
                     coupang_fail.append(f"{order_id}: 주문 정보 조회 실패 (INSTRUCT 상태 아닐 수 있음)")
+                    results.append(TrackingResult(
+                        channel="coupang", order_id=order_id, item_code="",
+                        tracking_no=tracking, status="failed",
+                        api_response_code="lookup_empty",
+                        api_response_body="get_order_shipping_info returned empty",
+                    ))
                     continue
+                vendor_items_str = ",".join(str(v) for v in info["vendorItemIds"])
                 r = coupang_client.register_tracking(
                     order_id, info["shipmentBoxId"], info["vendorItemIds"], tracking
                 )
                 if r.status_code in (200, 201):
                     coupang_success += 1
+                    results.append(TrackingResult(
+                        channel="coupang", order_id=order_id,
+                        item_code=vendor_items_str,
+                        tracking_no=tracking, status="sent",
+                        api_response_code=str(r.status_code),
+                        api_response_body=_truncate_body(r.text),
+                    ))
                 else:
                     coupang_fail.append(f"{order_id}: {r.text[:100]}")
+                    results.append(TrackingResult(
+                        channel="coupang", order_id=order_id,
+                        item_code=vendor_items_str,
+                        tracking_no=tracking, status="failed",
+                        api_response_code=str(r.status_code),
+                        api_response_body=_truncate_body(r.text),
+                    ))
             except Exception as e:
                 coupang_fail.append(f"{order_id}: {e}")
+                results.append(TrackingResult(
+                    channel="coupang", order_id=order_id, item_code="",
+                    tracking_no=tracking, status="failed",
+                    api_response_code="exception",
+                    api_response_body=_truncate_body(str(e)),
+                ))
 
-    # 5) 완료 알림
+    # 5) 결과 CSV 영속화 (idempotency ledger 역할)
+    csv_path = None
+    try:
+        csv_path = _write_run_csv(results)
+    except Exception as e:
+        print(f"⚠️ 결과 CSV 저장 실패: {e}")
+
+    # 6) 완료 알림
     result_msg = (
         f"✅ 송장 등록 완료\n\n"
-        f"카페24: {cafe24_success}/{len(seen_cafe24)}건 성공\n"
+        f"카페24: {cafe24_success}/{len(cafe24_orders_to_register)}건 성공\n"
         f"스마트스토어: {naver_success}/{len(seen_naver)}건 성공\n"
         f"쿠팡: {coupang_success}/{len(seen_coupang)}건 성공"
     )
@@ -332,6 +633,8 @@ def run_from_excel():
         result_msg += "\n\n스마트스토어 실패:\n" + "\n".join(f"  - {e}" for e in naver_fail[:5])
     if coupang_fail:
         result_msg += "\n\n쿠팡 실패:\n" + "\n".join(f"  - {e}" for e in coupang_fail[:5])
+    if csv_path:
+        result_msg += f"\n\n📄 결과 로그: {csv_path}"
 
     telegram_client.send_message(result_msg, channel="ops")
     print(result_msg)

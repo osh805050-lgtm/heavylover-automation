@@ -474,8 +474,12 @@ def _fallback_text(target_date, metrics, flags, error_msg):
 
 def send_daily_email(target_date, metrics, self_bench, flags,
                     recent_trend, campaigns, winner_patterns,
-                    sheet_url="", raw_account_rows=None):
-    """일일 심층 메일 발송. 성공 True / 실패 False."""
+                    sheet_url="", raw_account_rows=None,
+                    partial_data=False, partial_reasons=None):
+    """일일 심층 메일 발송. 성공 True / 실패 False.
+
+    partial_data=True면 subject에 [PARTIAL] prefix + 본문 상단에 누락 데이터 명시.
+    """
     ctx = _build_context(target_date, metrics, self_bench, flags,
                          recent_trend, campaigns, winner_patterns,
                          raw_account_rows=raw_account_rows)
@@ -491,13 +495,33 @@ def send_daily_email(target_date, metrics, self_bench, flags,
     # Claude 4역할 호출
     analysis, err = call_claude_4roles(ctx)
 
+    # partial_data prefix용 배너
+    partial_banner_md = ""
+    partial_banner_html = ""
+    if partial_data:
+        reasons_text = ", ".join(partial_reasons) if partial_reasons else "일부 fetch 실패"
+        partial_banner_md = (
+            f"\n\n⚠️ **[PARTIAL] 부분 데이터 경고**\n"
+            f"누락: {reasons_text}\n"
+            f"history(시계열) append는 건너뛰었습니다. 본 메일의 캠페인/adset 단위 수치는 누락 가능성 있음.\n\n"
+        )
+        partial_banner_html = (
+            f"<div style='background:#fff3cd;border:1px solid #ffc107;padding:12px;margin:8px 0;'>"
+            f"<b>⚠️ [PARTIAL] 부분 데이터 경고</b><br>"
+            f"누락: {reasons_text}<br>"
+            f"history(시계열) append는 건너뛰었습니다. 본 메일의 캠페인/adset 단위 수치는 누락 가능성 있음."
+            f"</div>"
+        )
+
     if analysis:
-        body_html = glossary_details_html() + _md_to_html(analysis)
+        body_html = partial_banner_html + glossary_details_html() + _md_to_html(analysis)
         html = _wrap_html(body_html, target_date, chart_cids=list(charts.keys()),
                           sheet_url=sheet_url, ctx=ctx)
-        text_body = analysis
+        text_body = partial_banner_md + analysis
         model_short = "Opus" if "opus" in CLAUDE_MODEL else "Sonnet"
         subject = f"📈 HeavyLover Meta 광고 일일 [{model_short}] — {target_date}"
+        if partial_data:
+            subject = f"[PARTIAL] {subject}"
     else:
         # 크레딧 부족 여부를 ops 채널에 별도 알림
         if err and "credit balance is too low" in str(err).lower():
@@ -511,11 +535,13 @@ def send_daily_email(target_date, metrics, self_bench, flags,
                 )
             except Exception:
                 pass
-        text_body = _fallback_text(target_date, metrics, flags, err or "분석 실패")
-        body_html = glossary_details_html() + _md_to_html(text_body)
+        text_body = partial_banner_md + _fallback_text(target_date, metrics, flags, err or "분석 실패")
+        body_html = partial_banner_html + glossary_details_html() + _md_to_html(text_body)
         html = _wrap_html(body_html, target_date, chart_cids=list(charts.keys()),
                           sheet_url=sheet_url, ctx=ctx)
         subject = f"⚠️ HeavyLover Meta 광고 일일 (fallback) — {target_date}"
+        if partial_data:
+            subject = f"[PARTIAL] {subject}"
 
     try:
         email_sender.send_email(

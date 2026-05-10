@@ -1,0 +1,96 @@
+{
+  "_meta": {
+    "purpose": "사업계획서 final 단계 제출 서류 자동 매칭 정의 (개인 신분 서류는 키워드+사용자 confirm 기반)",
+    "last_updated": "2026-05-11",
+    "update_when": "신청 사업별 추가 서류 발생 시 / 키워드 오매칭 발생 시",
+    "schema_version": 1,
+    "notes": [
+      "default_docs: 거의 모든 정부지원사업 공통 제출 서류",
+      "programs.{사업명}.additional_docs: 사업별 추가 서류 (default_docs 외)",
+      "required_metadata는 사용자에게 confirm 요구할 때 보여줄 검증 힌트 (자동 검증 아님)"
+    ]
+  },
+  "default_docs": [
+    {
+      "key": "사업자등록증",
+      "keywords": ["사업자등록증", "business_registration", "사업자_등록증"],
+      "extensions": ["pdf", "jpg", "jpeg", "png"],
+      "required_metadata": ["사업자번호 10자리 일치", "발급일자 1년 이내"],
+      "sensitive": false
+    },
+    {
+      "key": "통장사본",
+      "keywords": ["통장사본", "통장_사본", "bankbook", "계좌사본"],
+      "extensions": ["pdf", "jpg", "jpeg", "png"],
+      "required_metadata": ["계좌번호 패턴", "본인(법인) 명의"],
+      "sensitive": true
+    },
+    {
+      "key": "4대보험가입자명부",
+      "keywords": ["4대보험", "가입자명부", "national_pension", "보험가입자"],
+      "extensions": ["pdf", "xlsx"],
+      "required_metadata": ["발급일자 3개월 이내"],
+      "sensitive": true
+    },
+    {
+      "key": "HACCP인증서",
+      "keywords": ["HACCP", "haccp", "안전관리인증"],
+      "extensions": ["pdf", "jpg", "jpeg", "png"],
+      "required_metadata": ["인증 유효기간 미경과"],
+      "sensitive": false
+    },
+    {
+      "key": "OEM협약서",
+      "keywords": ["OEM", "oem", "공급협약", "제조위탁"],
+      "extensions": ["pdf", "hwp", "docx"],
+      "required_metadata": ["계약 유효기간", "제조업체 직인"],
+      "sensitive": false
+    },
+    {
+      "key": "법인등기부등본",
+      "keywords": ["등기부등본", "법인등기", "corporate_registry"],
+      "extensions": ["pdf"],
+      "required_metadata": ["발급일자 3개월 이내"],
+      "sensitive": false
+    },
+    {
+      "key": "임대차계약서",
+      "keywords": ["임대차", "임대계약", "lease"],
+      "extensions": ["pdf", "hwp", "docx"],
+      "required_metadata": ["계약 유효기간", "임차인 명의 일치"],
+      "sensitive": true
+    },
+    {
+      "key": "주민등록등본",
+      "keywords": ["주민등록등본", "주민_등본", "resident_registration"],
+      "extensions": ["pdf"],
+      "required_metadata": ["발급일자 3개월 이내", "주민번호 뒷자리 마스킹"],
+      "sensitive": true
+    },
+    {
+      "key": "납세증명서",
+      "keywords": ["납세증명", "납세_증명", "tax_clearance"],
+      "extensions": ["pdf"],
+      "required_metadata": ["발급일자 1개월 이내"],
+      "sensitive": false
+    },
+    {
+      "key": "신용등급확인서",
+      "keywords": ["신용등급", "credit_rating"],
+      "extensions": ["pdf"],
+      "required_metadata": ["발급일자 3개월 이내"],
+      "sensitive": true
+    }
+  ],
+  "programs": {
+    "강한소상공인": {
+      "additional_docs": []
+    },
+    "초기창업패키지": {
+      "additional_docs": []
+    },
+    "KOTRA": {
+      "additional_docs": []
+    }
+  }
+}

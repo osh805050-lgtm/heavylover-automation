@@ -71,7 +71,12 @@ def collect_layer1(log):
 
 
 def collect_layer2(log, days_back=2):
-    """2차 - 네이버 메일 스캔"""
+    """2차 - 네이버 메일 스캔.
+
+    Returns:
+        (normalized_items, ok_flag) — Codex 2026-05-10: 사이트 다운을 "0건 수집"으로
+        오해하지 않기 위해 정상/실패 플래그를 분리해 호출자에 전달한다.
+    """
     log.info(f"Layer 2 시작: 네이버 메일 IMAP 스캔 (최근 {days_back}일)")
     try:
         items = naver_mail_client.scan_govt_announcements(days_back=days_back)
@@ -89,11 +94,11 @@ def collect_layer2(log, days_back=2):
                 "raw": {"mail_sender": it["sender"]},
             })
         log.info(f"Layer 2 완료: {len(normalized)}건")
-        return normalized
+        return normalized, True
     except Exception as e:
         log.error(f"Layer 2 실패: {e}")
         log.error(traceback.format_exc())
-        return []
+        return [], False
 
 
 _SENDER_AGENCY_MAP = [
@@ -588,6 +593,247 @@ def build_telegram_message(scored_items, stats_l1, count_l2, today_str):
     return "\n\n".join(msgs)
 
 
+# ─────────────────────────────────────────────────────────────────
+# Codex review 2026-05-10 보강 — source health / Layer 4 fail-closed / seen-key dedup
+# ─────────────────────────────────────────────────────────────────
+
+SEEN_KEYS_PATH = Path(__file__).parent / "data" / "govt_radar" / "seen_keys.json"
+
+
+def _build_source_health(stats_l1: dict, count_l2: int, layer2_ok: bool) -> dict:
+    """소스별 수집 결과를 통합 health dict로 빌드.
+
+    Args:
+        stats_l1: govt_sources.fetch_all이 돌려준 dict[name, int|"ERROR: ..."]
+        count_l2: Layer 2(네이버 메일) 수집 건수
+        layer2_ok: Layer 2 정상 여부 (collect_layer2 예외 발생 시 False)
+
+    Returns:
+        {source_name: {"ok": bool, "count": int, "error": str|None}}
+    """
+    health = {}
+    for name, val in (stats_l1 or {}).items():
+        if isinstance(val, int):
+            health[name] = {"ok": True, "count": val, "error": None}
+        else:
+            err = str(val).replace("ERROR: ", "", 1)
+            health[name] = {"ok": False, "count": 0, "error": err}
+
+    health["네이버메일(Layer2)"] = {
+        "ok": layer2_ok,
+        "count": count_l2 if layer2_ok else 0,
+        "error": None if layer2_ok else "IMAP 스캔 실패",
+    }
+    return health
+
+
+def _check_outage(source_health: dict, log) -> tuple[bool, list[str]]:
+    """소스 다운 감지. ops 채널 알림 필요 여부 + 실패 소스 목록 반환.
+
+    트리거:
+      - 성공률 < 50%
+      - 또는 전체 0건이면서 실패한 소스가 1건 이상
+    """
+    if not source_health:
+        return False, []
+    total = len(source_health)
+    ok_count = sum(1 for h in source_health.values() if h["ok"])
+    failed = [name for name, h in source_health.items() if not h["ok"]]
+    total_items = sum(h["count"] for h in source_health.values())
+
+    success_ratio = ok_count / total if total else 1.0
+    outage = (success_ratio < 0.5) or (total_items == 0 and failed)
+
+    log.info(
+        "source health: %d/%d ok (%.0f%%) · 총 %d건 · 실패=%s",
+        ok_count, total, success_ratio * 100, total_items, failed or "-",
+    )
+    return outage, failed
+
+
+def _send_ops_alert(text: str, log) -> bool:
+    """ops 채널에 운영 알림 (실패해도 main 흐름 차단 안 함)."""
+    try:
+        ok = telegram_client.send_message(text[:4090], channel="ops")
+        return bool(ok)
+    except Exception as e:
+        log.error(f"ops 알림 발송 실패: {e}")
+        return False
+
+
+def _announcement_stable_key(item: dict) -> str:
+    """공고 식별용 stable key (URL → announcement_id → title fallback)."""
+    import hashlib as _h
+    raw_meta = item.get("raw") or {}
+    pid = raw_meta.get("pblancId") or raw_meta.get("pbancSn") or ""
+    url = (item.get("url") or "").strip()
+    title = (item.get("title") or "").strip()[:80]
+    base = url or pid or title
+    return _h.md5(base.encode("utf-8")).hexdigest()[:16]
+
+
+def _content_hash(item: dict) -> str:
+    """공고 본문 변경 감지용 해시 (제목+마감일+본문요약)."""
+    import hashlib as _h
+    title = (item.get("title") or "").strip()
+    deadline = item.get("deadline") or ""
+    body = (item.get("body_excerpt") or "")[:300]
+    raw = f"{title}|{deadline}|{body}"
+    return _h.md5(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def _load_seen_keys() -> dict:
+    """seen_keys.json 로드. 스키마: {key: {"hash": str, "first_seen": "YYYY-MM-DD", "last_seen": "..."}}."""
+    if not SEEN_KEYS_PATH.exists():
+        return {}
+    try:
+        return json.loads(SEEN_KEYS_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        # 파일 손상 시 초기화 (한 번 누적 잃지만 dedup만 잠시 약화)
+        logging.getLogger("govt_radar").warning(
+            f"seen_keys.json 손상 — 초기화: {e}"
+        )
+        return {}
+
+
+def _save_seen_keys(seen: dict) -> None:
+    """atomic write — tempfile + os.replace (도중 크래시 시 누적 손상 방지)."""
+    SEEN_KEYS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SEEN_KEYS_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(seen, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, SEEN_KEYS_PATH)
+
+
+def _classify_seen(items: list, seen: dict, today_iso: str) -> tuple[list, list]:
+    """공고를 (신규, 갱신) 두 리스트로 분류. 기존(변경 없음)은 알림 제외.
+
+    Side effect: 각 item에 'seen_status' 필드 추가 ("new"|"updated"|"known").
+    """
+    new_items = []
+    updated_items = []
+    for it in items:
+        key = _announcement_stable_key(it)
+        h = _content_hash(it)
+        prev = seen.get(key)
+        if prev is None:
+            it["seen_status"] = "new"
+            new_items.append(it)
+        elif prev.get("hash") != h:
+            it["seen_status"] = "updated"
+            updated_items.append(it)
+        else:
+            it["seen_status"] = "known"
+        # in-memory 업데이트 (저장은 발송 성공 후)
+        it["_seen_key"] = key
+        it["_content_hash"] = h
+    return new_items, updated_items
+
+
+def _commit_seen_keys(items: list, seen: dict, today_iso: str) -> None:
+    """발송 성공 후 seen 누적 갱신 + 디스크 atomic write."""
+    for it in items:
+        key = it.get("_seen_key")
+        h = it.get("_content_hash")
+        if not key:
+            continue
+        if key in seen:
+            seen[key]["last_seen"] = today_iso
+            seen[key]["hash"] = h
+        else:
+            seen[key] = {"hash": h, "first_seen": today_iso, "last_seen": today_iso}
+    _save_seen_keys(seen)
+
+
+def _apply_layer4_fail_closed(scored: list, log) -> tuple[int, str | None]:
+    """Layer 4 실패 감지 → 해당 항목을 'eligibility_unverified' 티어로 다운그레이드.
+
+    eligibility_checker.batch_check는 API 실패 시 예외 던지지 않고
+    {"eligible": "unsure", "reason": "API 실패: ..."}로 inline 표시한다.
+    여기서 그 결과를 재해석:
+      - score≥5 + eligibility 미수행 또는 'API 실패' reason → fail-closed 다운그레이드
+      - 50% 이상이 'API 실패'면 시스템 전체 outage 간주 → ops 알림 메시지 반환
+
+    Returns:
+        (downgraded_count, ops_alert_message_or_None)
+    """
+    api_failed = []
+    high_score_total = 0
+    for s in scored:
+        if (s.get("score") or 0) < 5:
+            continue
+        # batch_check이 검증 대상에서 제외한 항목(타지역·제외)도 high_score_total에서 빼지 않음
+        if (s.get("tier") or "").startswith(("타지역", "제외")):
+            continue
+        high_score_total += 1
+        elig = s.get("eligibility") or {}
+        reason = elig.get("reason") or ""
+        if "API 실패" in reason or "파싱 실패" in reason:
+            api_failed.append(s)
+
+    if not api_failed:
+        return 0, None
+
+    # 다운그레이드: 발송은 별도 그룹, 캘린더·다이제스트에서는 제외
+    for s in api_failed:
+        s["tier"] = "eligibility_unverified"
+        s["tags"] = (s.get("tags") or []) + ["LLM_UNVERIFIED"]
+
+    log.warning(
+        f"Layer 4 fail-closed: {len(api_failed)}/{high_score_total}건 자격검증 미수행 (API 실패) → 다운그레이드"
+    )
+
+    # outage 임계치: 절반 이상 실패 또는 5건 이상 실패
+    failure_ratio = len(api_failed) / max(high_score_total, 1)
+    if failure_ratio >= 0.5 or len(api_failed) >= 5:
+        # 가장 흔한 에러 메시지 추출
+        sample_reason = (api_failed[0].get("eligibility") or {}).get("reason", "unknown")
+        msg = (
+            f"🚨 Anthropic API 실패 — Layer 4 자격검증 skip\n"
+            f"실패: {len(api_failed)}/{high_score_total}건 (score≥5)\n"
+            f"샘플: {sample_reason[:120]}\n"
+            f"→ 해당 항목은 'eligibility_unverified' 티어로 발송됨 (수동 확인 필요)"
+        )
+        return len(api_failed), msg
+    return len(api_failed), None
+
+
+def _build_unverified_messages(scored: list, today_str: str) -> list[str]:
+    """Layer 4 fail-closed 항목 별도 텔레그램 메시지 그룹."""
+    unverified = [s for s in scored if (s.get("tier") or "") == "eligibility_unverified"]
+    if not unverified:
+        return []
+    DIVIDER = "━━━━━━━━━━━━━━━━━━━"
+    lines = [
+        f"⚠️ 자격검증 미수행 — {len(unverified)}건 수동 확인 필요",
+        f"({today_str} · Anthropic API 실패로 Layer 4 skip)",
+        DIVIDER,
+        "",
+    ]
+    for idx, s in enumerate(unverified, 1):
+        title = _clean_title(s.get("title", ""), max_len=58)
+        d_label, signal = _fmt_deadline(s.get("deadline"), s.get("deadline_days"))
+        lines.append(f"{signal} #U{idx} [{s.get('score', 0)}] {title}")
+        lines.append(f"   📅 {d_label}")
+        if s.get("agency"):
+            lines.append(f"   🏛 {s['agency'][:40]}")
+        if s.get("url"):
+            lines.append(f"   🔗 {_short_url(s['url'])}")
+        lines.append("")
+    msgs = []
+    cur = []
+    cur_len = 0
+    for ln in lines:
+        if cur_len + len(ln) + 1 > 3500:
+            msgs.append("\n".join(cur))
+            cur = ["⚠️ 자격검증 미수행 (계속)", DIVIDER, ""]
+            cur_len = sum(len(l) + 1 for l in cur)
+        cur.append(ln)
+        cur_len += len(ln) + 1
+    if cur:
+        msgs.append("\n".join(cur))
+    return msgs
+
+
 def save_results(scored_items, today_str):
     """결과 JSON 저장 (시트 미연동 시 폴백)"""
     out_dir = Path(__file__).parent / "data" / "govt_radar"
@@ -631,9 +877,22 @@ def main():
     # Layer 2
     if args.skip_layer2:
         items_l2 = []
+        layer2_ok = True  # 의도적 skip은 outage 아님
         log.info("Layer 2 스킵")
     else:
-        items_l2 = collect_layer2(log, days_back=args.days_back)
+        items_l2, layer2_ok = collect_layer2(log, days_back=args.days_back)
+
+    # Codex 2026-05-10: source health 집계 + outage 감지
+    source_health = _build_source_health(stats_l1, len(items_l2), layer2_ok)
+    outage_detected, failed_sources = _check_outage(source_health, log)
+    if outage_detected and not args.dry_run:
+        _send_ops_alert(
+            f"🚨 정부지원 레이더 — 소스 outage 감지\n"
+            f"실패 소스 ({len(failed_sources)}건): {', '.join(failed_sources[:8])}\n"
+            f"성공: {sum(1 for h in source_health.values() if h['ok'])}/{len(source_health)}\n"
+            f"수집 합계: {sum(h['count'] for h in source_health.values())}건",
+            log,
+        )
 
     # 통합 + 중복 제거
     log.info("통합·중복제거 시작")
@@ -689,6 +948,13 @@ def main():
         else:
             log.info("자격검증 스킵 (ANTHROPIC_API_KEY 없음)")
 
+    # Codex 2026-05-10: Layer 4 fail-closed
+    # batch_check이 API 실패를 "unsure"로 inline 변환하기 때문에 결과에서 재해석한다.
+    # (eligibility_checker 모듈은 그대로 두고 govt_radar.py에서 후처리)
+    downgraded_count, layer4_alert = _apply_layer4_fail_closed(scored, log)
+    if layer4_alert and not args.dry_run:
+        _send_ops_alert(layer4_alert, log)
+
     # notify_id 부여 (텔레그램 명령 처리기에서 #S1·#A2 매핑용)
     # JSON 저장 전에 미리 박제해야 텔레그램 응답 시 동일 ID로 찾을 수 있음
     _assign_notify_ids(scored)
@@ -697,8 +963,52 @@ def main():
     out_file = save_results(scored, datetime.now(KST).strftime("%Y%m%d"))
     log.info(f"결과 저장: {out_file}")
 
-    # 텔레그램 알림 (분할 발송)
-    messages = build_telegram_messages(scored, stats_l1, len(items_l2), today_str)
+    # Codex 2026-05-10: seen-key dedup
+    # 알림 후보(점수≥3 + 진짜 적합 tier)만 분류해서, 같은 공고 매일 중복 발송 방지.
+    # 갱신(content_hash 변경)은 "🔄 갱신:" prefix 별도 그룹으로 발송.
+    EXCLUDE_TIER_PREFIX = (
+        "타지역", "제외", "비공고", "메뉴", "자격미달", "검증불가",
+    )
+    notify_candidates = [
+        s for s in scored
+        if (s.get("score") or 0) >= 3
+        and not (s.get("tier") or "").startswith(EXCLUDE_TIER_PREFIX)
+        and (s.get("tier") or "") != "eligibility_unverified"  # 별도 그룹으로 빼냄
+    ]
+    seen_keys = _load_seen_keys()
+    today_iso = datetime.now(KST).strftime("%Y-%m-%d")
+    new_items, updated_items = _classify_seen(notify_candidates, seen_keys, today_iso)
+    known_count = sum(1 for it in notify_candidates if it.get("seen_status") == "known")
+    log.info(
+        f"seen-key dedup: 신규 {len(new_items)} · 갱신 {len(updated_items)} · 기존 {known_count}건 (알림 제외)"
+    )
+    # build_telegram_messages 입력은 "신규만". 기존 시그니처 보존.
+    # (eligibility_unverified 항목도 빠지므로 messages는 "검증된 신규 공고"만 포함)
+    new_keys_set = {it["_seen_key"] for it in new_items}
+    new_scored_subset = [s for s in scored if s.get("_seen_key") in new_keys_set]
+    messages = build_telegram_messages(new_scored_subset, stats_l1, len(items_l2), today_str)
+
+    # 갱신 항목 별도 메시지 (간단 포맷)
+    if updated_items:
+        DIVIDER = "━━━━━━━━━━━━━━━━━━━"
+        upd_lines = [
+            f"🔄 갱신 공고 {len(updated_items)}건 — 마감일·본문 변경 감지",
+            DIVIDER,
+            "",
+        ]
+        for idx, it in enumerate(updated_items, 1):
+            title = _clean_title(it.get("title", ""), max_len=58)
+            d_label, signal = _fmt_deadline(it.get("deadline"), it.get("deadline_days"))
+            upd_lines.append(f"🔄 #{idx} {signal} [{it.get('score', 0)}] {title}")
+            upd_lines.append(f"   📅 {d_label}")
+            if it.get("url"):
+                upd_lines.append(f"   🔗 {_short_url(it['url'])}")
+            upd_lines.append("")
+        messages.append("\n".join(upd_lines))
+
+    # 자격검증 미수행 항목 별도 그룹
+    unverified_msgs = _build_unverified_messages(scored, today_str)
+    messages.extend(unverified_msgs)
 
     # Codex review 2026-05-10: delivery contract 명시
     # 메시지가 있으면 텔레그램 또는 이메일 중 최소 1개 채널로 발송 성공해야 한다.
@@ -755,6 +1065,17 @@ def main():
     except Exception as e:
         log.error(f"캘린더 등록 에러: {e}")
 
+    # Codex 2026-05-10: seen-key 갱신은 발송 성공 시에만 commit
+    # (실패 시 다음 실행에서 재시도되어야 누락 방지)
+    if not args.dry_run and (telegram_ok or email_ok):
+        try:
+            _commit_seen_keys(new_items + updated_items, seen_keys, today_iso)
+            log.info(
+                f"seen_keys.json 갱신: 신규 {len(new_items)}·갱신 {len(updated_items)} → 누적 {len(seen_keys)}키"
+            )
+        except OSError as e:
+            log.error(f"seen_keys.json 저장 실패 (다음 실행에서 중복 알림 가능): {e}")
+
     log.info("정부지원 레이더 종료")
 
     # Delivery contract 검증
@@ -766,6 +1087,11 @@ def main():
         return 2  # nonzero → GitHub Actions 빨간불
     if delivery_required and not telegram_ok:
         log.warning("텔레그램 일부 실패 — 이메일만 성공 (운영자 확인 필요)")
+    # Codex 2026-05-10: source outage가 발생하면 delivery는 성공해도 nonzero 반환
+    # (GitHub Actions 빨간불로 운영자 인지 강제)
+    if outage_detected:
+        log.error("Layer 1/2 outage 감지됨 — exit 3 반환 (delivery 성공 여부와 별개)")
+        return 3
     return 0
 
 

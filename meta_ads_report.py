@@ -375,13 +375,26 @@ def _flag_reason_action(flag_str: str) -> tuple[str, str]:
     return ("광고 지표에 주의 신호가 감지됨", "메일에서 상세 내용 확인")
 
 
-def format_telegram_summary(target_date, metrics, flags, ok, action_text=None):
-    """텔레그램 간결 요약 — 핵심 한 줄 + 주의사항·이유·액션만."""
+def format_telegram_summary(target_date, metrics, flags, ok, action_text=None,
+                             partial_data=False, partial_reasons=None):
+    """텔레그램 간결 요약 — 핵심 한 줄 + 주의사항·이유·액션만.
+
+    partial_data=True면 헤더에 [PARTIAL] prefix + 누락 데이터 라인 추가.
+    """
     if not ok:
         return (
             f"📈 [Meta광고]  {target_date}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"⚠️ 데이터 없음 (API 실패 또는 노출 없음)"
+        )
+
+    partial_prefix = "[PARTIAL] " if partial_data else ""
+    partial_note = ""
+    if partial_data:
+        reasons_text = ", ".join(partial_reasons) if partial_reasons else "일부 fetch 실패"
+        partial_note = (
+            f"⚠️ 부분 데이터 (누락: {reasons_text})\n"
+            f"   history 시계열 append 건너뜀\n"
         )
 
     def _roas_emoji(roas):
@@ -404,8 +417,11 @@ def format_telegram_summary(target_date, metrics, flags, ok, action_text=None):
     lines = []
 
     # ═══ 헤더 + 핵심 한 줄
-    lines.append(f"📈 [Meta광고]  {target_date}")
+    lines.append(f"📈 {partial_prefix}[Meta광고]  {target_date}")
     lines.append("━━━━━━━━━━━━━━━━━━")
+    if partial_note:
+        lines.append(partial_note.rstrip())
+        lines.append("")
     roas_em = _roas_emoji(roas)
     lines.append(
         f"ROAS {_fmt_num(roas, 2)} {roas_em}  "
@@ -664,6 +680,11 @@ def run():
     print(f"통화 환산: USD spend={metrics_usd.get('spend')} → KRW spend={metrics.get('spend')}")
     flags = build_flags(metrics)
 
+    # Codex review 2026-05-10: 캠페인·adset fetch 실패 추적용 partial_data 플래그.
+    # True면 history append 차단 + 텔레그램·이메일에 [PARTIAL] 표시.
+    partial_data = False
+    partial_reasons = []
+
     # 캠페인별 fetch (해당 일자만, 시계열 누적용) — KRW 환산 포함
     campaign_summaries = []
     try:
@@ -678,21 +699,30 @@ def run():
                 campaign_summaries.append(c)
             print(f"캠페인별 데이터 수집: {len(campaign_summaries)}건 (KRW 환산)")
         else:
-            print(f"캠페인별 fetch 실패: {camp_raw.get('error')}")
+            err = camp_raw.get('error')
+            print(f"⚠️ 캠페인별 fetch 실패: {err}")
+            partial_data = True
+            partial_reasons.append("campaign")
     except Exception as e:
-        print(f"캠페인별 fetch 예외 (계속 진행): {e}")
+        print(f"⚠️ 캠페인별 fetch 예외 (계속 진행): {e}")
+        partial_data = True
+        partial_reasons.append("campaign")
 
     # 시계열 누적 (CSV + Google Sheets) — 자사 벤치 계산 전에 먼저 누적
-    try:
-        hist = meta_ads_history.append_daily(
-            target_date, raw, metrics, campaign_summaries
-        )
-        print(f"history append: daily={hist['daily_rows']}, campaign={hist['campaign_rows']}")
-        print(f"  sheet daily: {hist['sheet'].get('daily', '')}")
-        if hist['sheet'].get('campaign'):
-            print(f"  sheet campaign: {hist['sheet']['campaign']}")
-    except Exception as e:
-        print(f"history 누적 실패 (리포트는 계속): {e}")
+    # partial_data=True면 시계열 오염 방지 위해 skip.
+    if partial_data:
+        print("⚠️ history append 건너뜀 (partial_data: 캠페인 fetch 실패)")
+    else:
+        try:
+            hist = meta_ads_history.append_daily(
+                target_date, raw, metrics, campaign_summaries
+            )
+            print(f"history append: daily={hist['daily_rows']}, campaign={hist['campaign_rows']}")
+            print(f"  sheet daily: {hist['sheet'].get('daily', '')}")
+            if hist['sheet'].get('campaign'):
+                print(f"  sheet campaign: {hist['sheet']['campaign']}")
+        except Exception as e:
+            print(f"history 누적 실패 (리포트는 계속): {e}")
 
     # 광고세트(adset) 단위 시계열 누적 — 트랙 A
     # CAC 낮지만 재구매 안 좋은 vs CAC 높지만 재구매 좋은 광고세트 식별용 데이터 축적
@@ -724,10 +754,17 @@ def run():
                     "cpa_krw": m.get("cpa_krw"),
                     "roas": m.get("roas"),
                 })
-            adset_hist = meta_ads_history.append_adset_range(adset_summaries)
-            print(f"adset 시계열: {len(adset_summaries)}건 수집 → CSV {adset_hist['adset_rows']}행, {adset_hist['sheet']}")
+            # partial_data 시 adset history도 차단 (시계열 오염 방지)
+            if partial_data:
+                print(f"⚠️ adset history append 건너뜀 (partial_data 이전 단계 실패)")
+            else:
+                adset_hist = meta_ads_history.append_adset_range(adset_summaries)
+                print(f"adset 시계열: {len(adset_summaries)}건 수집 → CSV {adset_hist['adset_rows']}행, {adset_hist['sheet']}")
         else:
-            print(f"adset fetch 실패 (계속 진행): {adset_raw.get('error', '')[:200]}")
+            print(f"⚠️ adset fetch 실패 (계속 진행): {adset_raw.get('error', '')[:200]}")
+            partial_data = True
+            if "adset" not in partial_reasons:
+                partial_reasons.append("adset")
     except Exception as e:
         # 401/토큰 만료 감지 시 텔레그램 ops 채널 알림 (§외부API다루기 규칙 7)
         err_str = str(e)
@@ -742,7 +779,10 @@ def run():
                 )
             except Exception:
                 pass
-        print(f"adset 누적 예외 (리포트 계속): {e}")
+        print(f"⚠️ adset 누적 예외 (리포트 계속): {e}")
+        partial_data = True
+        if "adset" not in partial_reasons:
+            partial_reasons.append("adset")
 
     # 자사 동적 벤치 (14일 미만이면 ok=False, 정적 벤치만 사용)
     try:
@@ -804,10 +844,11 @@ def run():
 
     # 텔레그램 (요약 + 짧은 코멘트)
     summary = format_telegram_summary(
-        target_date, metrics, flags, ok=True, action_text=short_text
+        target_date, metrics, flags, ok=True, action_text=short_text,
+        partial_data=partial_data, partial_reasons=partial_reasons,
     )
     sent = telegram_client.send_message(summary, channel="ads")
-    print(f"텔레그램 전송: {sent}")
+    print(f"텔레그램 전송: {sent}{' [PARTIAL]' if partial_data else ''}")
 
     # 이메일 — 4역할 페르소나 심층 + 차트 인라인 (재구매 일일 리포트와 동일 수준)
     try:
@@ -826,6 +867,8 @@ def run():
             winner_patterns=winner_patterns,
             sheet_url=sheet_url,
             raw_account_rows=raw.get("data") or [],
+            partial_data=partial_data,
+            partial_reasons=partial_reasons,
         )
         if ok:
             print("이메일 4역할 심층 발송 완료")

@@ -13,7 +13,9 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import requests
@@ -25,45 +27,166 @@ API_BASE = "https://api.telegram.org"
 VALID_CHANNELS = ("ops", "report", "ads", "govt")
 
 
+@dataclass
+class TelegramResponse:
+    """텔레그램 API 호출 결과.
+
+    backward compat: `__bool__`이 ok를 반환하므로 기존 `if send_message(...)` 형태 호출자 그대로 작동.
+
+    Fields:
+        ok: 전송 성공 여부
+        status_code: HTTP status (-1 = 토큰/chat_id 누락, 0 = 네트워크 예외, 200+ = 실제 응답)
+        body: 응답 본문 또는 에러 사유
+    """
+    ok: bool
+    status_code: int
+    body: str
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+
 def _get_env(channel: str = "ops") -> dict:
     load_dotenv(ENV_PATH, override=True)
     ch = (channel or "ops").lower()
     if ch not in VALID_CHANNELS:
-        ch = "ops"
+        raise ValueError(
+            f"Invalid telegram channel '{channel}'. "
+            f"Allowed: {VALID_CHANNELS}"
+        )
     suffix = ch.upper()
     token = os.getenv(f"TELEGRAM_BOT_TOKEN_{suffix}") or os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv(f"TELEGRAM_CHAT_ID_{suffix}") or os.getenv("TELEGRAM_CHAT_ID")
     return {"channel": ch, "token": token, "chat_id": chat_id}
 
 
-def send_message(text: str, channel: str = "ops") -> bool:
-    """텔레그램으로 메시지 전송. channel 미지정 시 ops(기본 = 기존 단일 봇)."""
-    env = _get_env(channel)
-    if not env["token"] or not env["chat_id"]:
-        print(f"⚠️ telegram[{env['channel']}] 토큰/chat_id 없음 — 발송 생략")
-        return False
-    r = requests.post(
-        f"{API_BASE}/bot{env['token']}/sendMessage",
-        json={"chat_id": env["chat_id"], "text": text},
-        timeout=30,
-    )
-    return r.ok
+def _parse_retry_after(body_text: str, default: int = 1) -> int:
+    """429 응답 body에서 parameters.retry_after 파싱. 실패 시 default."""
+    try:
+        import json
+        data = json.loads(body_text)
+        ra = data.get("parameters", {}).get("retry_after")
+        if isinstance(ra, (int, float)) and ra > 0:
+            return int(ra)
+    except Exception:
+        pass
+    return default
 
 
-def send_document(file_path, caption: str = "", channel: str = "ops") -> bool:
-    """텔레그램으로 파일 전송 (엑셀 등)"""
-    env = _get_env(channel)
-    if not env["token"] or not env["chat_id"]:
-        print(f"⚠️ telegram[{env['channel']}] 토큰/chat_id 없음 — 발송 생략")
-        return False
-    with open(file_path, "rb") as f:
-        r = requests.post(
-            f"{API_BASE}/bot{env['token']}/sendDocument",
-            data={"chat_id": env["chat_id"], "caption": caption},
-            files={"document": f},
-            timeout=120,
+def _post_with_retry(url: str, *, json_payload=None, data=None, files=None, timeout: int) -> TelegramResponse:
+    """429 1회 재시도 + 영구 실패 stderr 로그 + 네트워크 예외 캡처."""
+    try:
+        r = requests.post(url, json=json_payload, data=data, files=files, timeout=timeout)
+    except Exception as exc:
+        return TelegramResponse(ok=False, status_code=0, body=str(exc))
+
+    if r.ok:
+        return TelegramResponse(ok=True, status_code=r.status_code, body=r.text)
+
+    # 429: rate limit → retry_after 만큼 대기 후 1회 재시도
+    if r.status_code == 429:
+        retry_after = _parse_retry_after(r.text, default=1)
+        sleep_s = min(retry_after, 30)
+        print(
+            f"⚠️ telegram 429 rate-limited, sleep {sleep_s}s then retry once",
+            file=sys.stderr,
         )
-    return r.ok
+        time.sleep(sleep_s)
+        # files는 재사용 불가(스트림 소진) — 호출자가 files=None일 때만 안전
+        # send_document는 files 사용하므로 별도 처리 필요. 여기서는 단순 재시도만 시도.
+        try:
+            r2 = requests.post(url, json=json_payload, data=data, files=files, timeout=timeout)
+        except Exception as exc:
+            return TelegramResponse(ok=False, status_code=0, body=str(exc))
+        if r2.ok:
+            return TelegramResponse(ok=True, status_code=r2.status_code, body=r2.text)
+        print(
+            f"⚠️ telegram retry failed status={r2.status_code} body={r2.text[:200]}",
+            file=sys.stderr,
+        )
+        return TelegramResponse(ok=False, status_code=r2.status_code, body=r2.text)
+
+    # 401/403/404 등 영구적 실패 → 즉시 반환 + stderr 로그
+    print(
+        f"⚠️ telegram permanent failure status={r.status_code} body={r.text[:200]}",
+        file=sys.stderr,
+    )
+    return TelegramResponse(ok=False, status_code=r.status_code, body=r.text)
+
+
+def send_message(text: str, channel: str = "ops") -> TelegramResponse:
+    """텔레그램으로 메시지 전송. channel 미지정 시 ops(기본 = 기존 단일 봇).
+
+    Returns: TelegramResponse (truthy/falsy로 평가 가능 — backward compat)
+    """
+    env = _get_env(channel)
+    if not env["token"] or not env["chat_id"]:
+        print(f"⚠️ telegram[{env['channel']}] 토큰/chat_id 없음 — 발송 생략")
+        return TelegramResponse(ok=False, status_code=-1, body="missing_token_or_chat_id")
+
+    url = f"{API_BASE}/bot{env['token']}/sendMessage"
+    payload = {"chat_id": env["chat_id"], "text": text}
+    return _post_with_retry(url, json_payload=payload, timeout=30)
+
+
+def send_document(file_path, caption: str = "", channel: str = "ops") -> TelegramResponse:
+    """텔레그램으로 파일 전송 (엑셀 등).
+
+    Returns: TelegramResponse (truthy/falsy로 평가 가능 — backward compat)
+    """
+    env = _get_env(channel)
+    if not env["token"] or not env["chat_id"]:
+        print(f"⚠️ telegram[{env['channel']}] 토큰/chat_id 없음 — 발송 생략")
+        return TelegramResponse(ok=False, status_code=-1, body="missing_token_or_chat_id")
+
+    url = f"{API_BASE}/bot{env['token']}/sendDocument"
+
+    # 파일 스트림은 1회 소진되므로 429 재시도 위해 두 번 열어 처리
+    try:
+        with open(file_path, "rb") as f:
+            r = requests.post(
+                url,
+                data={"chat_id": env["chat_id"], "caption": caption},
+                files={"document": f},
+                timeout=120,
+            )
+    except Exception as exc:
+        return TelegramResponse(ok=False, status_code=0, body=str(exc))
+
+    if r.ok:
+        return TelegramResponse(ok=True, status_code=r.status_code, body=r.text)
+
+    if r.status_code == 429:
+        retry_after = _parse_retry_after(r.text, default=1)
+        sleep_s = min(retry_after, 30)
+        print(
+            f"⚠️ telegram 429 rate-limited (document), sleep {sleep_s}s then retry once",
+            file=sys.stderr,
+        )
+        time.sleep(sleep_s)
+        try:
+            with open(file_path, "rb") as f:
+                r2 = requests.post(
+                    url,
+                    data={"chat_id": env["chat_id"], "caption": caption},
+                    files={"document": f},
+                    timeout=120,
+                )
+        except Exception as exc:
+            return TelegramResponse(ok=False, status_code=0, body=str(exc))
+        if r2.ok:
+            return TelegramResponse(ok=True, status_code=r2.status_code, body=r2.text)
+        print(
+            f"⚠️ telegram document retry failed status={r2.status_code} body={r2.text[:200]}",
+            file=sys.stderr,
+        )
+        return TelegramResponse(ok=False, status_code=r2.status_code, body=r2.text)
+
+    print(
+        f"⚠️ telegram document permanent failure status={r.status_code} body={r.text[:200]}",
+        file=sys.stderr,
+    )
+    return TelegramResponse(ok=False, status_code=r.status_code, body=r.text)
 
 
 def _get_latest_update_id(channel: str = "ops") -> int:
@@ -133,7 +256,7 @@ if __name__ == "__main__":
     for ch in VALID_CHANNELS:
         env = _get_env(ch)
         if env["token"] and env["chat_id"]:
-            ok = send_message(f"[{ch}] 테스트 메시지 — 모듈 정상 작동", channel=ch)
-            print(f"  {ch}: 전송 {'OK' if ok else 'FAIL'}")
+            resp = send_message(f"[{ch}] 테스트 메시지 — 모듈 정상 작동", channel=ch)
+            print(f"  {ch}: 전송 {'OK' if resp else 'FAIL'} (status={resp.status_code})")
         else:
             print(f"  {ch}: 토큰/chat_id 없음 (스킵)")

@@ -71,6 +71,114 @@ def _open_sheet():
     return client.open_by_key(sheet_id)
 
 
+def _atomic_replace_worksheet(
+    spreadsheet,
+    prod_tab_name: str,
+    header: list,
+    rows: list[list],
+    log_fn=None,
+) -> None:
+    """프로덕션 워크시트를 staging→rename 패턴으로 원자적 교체.
+
+    동작 순서:
+      1) `{prod}__staging` 탭 확보 (기존 있으면 clear, 없으면 add).
+      2) staging 에 [header] + rows 한 번에 write.
+      3) staging 검증: 첫 행 == header AND 데이터 행 수 == len(rows).
+         불일치 시 RuntimeError → 프로덕션 탭은 손대지 않음.
+      4) rename swap:
+            prod        → `{prod}__prev`
+            staging     → prod
+            `{prod}__prev` 삭제
+         어느 단계 실패 시 raise (cron 빨간불).
+
+    실패 시 보장:
+      - 2~3 실패: 프로덕션 탭 그대로. staging 만 일관성 깨진 상태.
+      - 4 중 prod→prev 실패: 프로덕션 그대로.
+      - 4 중 staging→prod 실패: 프로덕션은 `__prev` 로 살아있음(수동 복구 가능).
+      - 4 중 prev 삭제 실패: 데이터는 정상, `__prev` 잔재 다음 실행 시 흡수.
+    """
+    log = log_fn if callable(log_fn) else _log
+    staging_name = f"{prod_tab_name}__staging"
+    prev_name = f"{prod_tab_name}__prev"
+
+    # 0) 스프레드시트 워크시트 핸들 일괄 조회 (리스트 1회 fetch)
+    worksheets = {ws.title: ws for ws in spreadsheet.worksheets()}
+
+    if prod_tab_name not in worksheets:
+        raise RuntimeError(f"프로덕션 탭 '{prod_tab_name}' 없음 — atomic swap 불가")
+    prod_ws = worksheets[prod_tab_name]
+
+    # 잔존 __prev 가 있으면 정리 (이전 실행 중간 실패 흔적)
+    if prev_name in worksheets:
+        try:
+            spreadsheet.del_worksheet(worksheets[prev_name])
+            log(f"  ↳ 잔존 '{prev_name}' 정리")
+        except Exception as e:
+            log(f"  ⚠️ 잔존 '{prev_name}' 삭제 실패: {e} (계속 진행)")
+
+    # 1) staging 확보
+    payload = ([header] + rows) if rows else [header]
+    needed_rows = max(len(payload), 100)
+    needed_cols = max(len(header), 26)
+
+    if staging_name in worksheets:
+        staging_ws = worksheets[staging_name]
+        try:
+            staging_ws.clear()
+        except Exception as e:
+            raise RuntimeError(f"staging '{staging_name}' clear 실패: {e}") from e
+        # row/col 수 확장이 필요하면 resize
+        try:
+            if staging_ws.row_count < needed_rows or staging_ws.col_count < needed_cols:
+                staging_ws.resize(rows=needed_rows, cols=needed_cols)
+        except Exception:
+            pass
+    else:
+        staging_ws = spreadsheet.add_worksheet(
+            title=staging_name, rows=needed_rows, cols=needed_cols
+        )
+
+    # 2) staging write
+    staging_ws.update(values=payload, range_name="A1", value_input_option="USER_ENTERED")
+
+    # 3) 검증: 헤더 일치 + 데이터 행 수 일치
+    written = staging_ws.get_all_values()
+    if not written:
+        raise RuntimeError(f"staging '{staging_name}' write 직후 빈 값 — abort")
+    written_header = written[0]
+    # gspread 가 trailing 빈 셀을 잘라내는 경우가 있으니 prefix 비교
+    if written_header[: len(header)] != list(header):
+        raise RuntimeError(
+            f"staging 헤더 불일치: 기대={header[:3]}... / 실제={written_header[:3]}..."
+        )
+    written_data_count = len(written) - 1
+    if written_data_count != len(rows):
+        raise RuntimeError(
+            f"staging 행 수 불일치: 기대={len(rows)} / 실제={written_data_count}"
+        )
+
+    # 4) rename swap
+    try:
+        prod_ws.update_title(prev_name)
+    except Exception as e:
+        raise RuntimeError(f"prod→prev rename 실패: {e}") from e
+
+    try:
+        staging_ws.update_title(prod_tab_name)
+    except Exception as e:
+        # 프로덕션이 __prev 에 그대로 살아있음. 수동 복구 가능.
+        raise RuntimeError(
+            f"staging→prod rename 실패 (데이터는 '{prev_name}' 에 안전): {e}"
+        ) from e
+
+    try:
+        spreadsheet.del_worksheet(prod_ws)  # 이제 이름이 prev_name 인 탭
+    except Exception as e:
+        log(f"  ⚠️ '{prev_name}' 삭제 실패: {e} (다음 실행 시 자동 정리)")
+
+    log(f"  ✅ atomic swap 완료 ('{prod_tab_name}' ← '{staging_name}')")
+
+
 def _find_tab(spreadsheet, expected_first: str, expected_second: str | None = None):
     """첫 컬럼명(과 선택적으로 두 번째)으로 탭을 찾는다."""
     for ws in spreadsheet.worksheets():
@@ -214,11 +322,16 @@ def sync_cafe24(spreadsheet, days: int = BACKFILL_DAYS) -> int:
     if removed_dup > 0:
         _log(f"  완전중복 제거: {removed_dup}행")
 
-    # 6) 시트 전체 덮어쓰기
-    ws.clear()
+    # 6) 시트 전체 덮어쓰기 (atomic swap: clear→update 사이 process kill 시 빈 시트 방지)
     if deduped:
-        ws.update(values=deduped, range_name="A1", value_input_option="USER_ENTERED")
-    _log(f"  최종 카페24 시트 행 수: {len(deduped)-1}")
+        header = deduped[0]
+        data_rows = deduped[1:]
+    else:
+        # 안전장치: dedupe 결과가 비면 최소 헤더라도 보존
+        header = ws.row_values(1) or [CAFE24_HEADER_FIRST, CAFE24_HEADER_SECOND]
+        data_rows = []
+    _atomic_replace_worksheet(spreadsheet, ws.title, header, data_rows, log_fn=_log)
+    _log(f"  최종 카페24 시트 행 수: {len(data_rows)}")
     return len(new_rows)
 
 
@@ -381,10 +494,15 @@ def sync_smartstore(spreadsheet, days: int = BACKFILL_DAYS) -> int:
                         continue
                 else:
                     continue
+            skipped = 0
             for c in changes:
                 pid = c.get("productOrderId")
                 if pid:
                     seen[pid] = c
+                else:
+                    skipped += 1
+            if skipped:
+                _log(f"  ⚠️ productOrderId 빈 주문 {skipped}건 제외 (status={status})")
             _time.sleep(1.2)
         _log(f"  status={status} 누적 unique: {len(seen)}건")
 
@@ -436,10 +554,15 @@ def sync_smartstore(spreadsheet, days: int = BACKFILL_DAYS) -> int:
     if removed_dup > 0:
         _log(f"  productOrderId 중복 제거: {removed_dup}행")
 
-    ws.clear()
+    # atomic swap: clear→update 사이 process kill 시 빈 시트 방지
     if deduped:
-        ws.update(values=deduped, range_name="A1", value_input_option="USER_ENTERED")
-    _log(f"  최종 SS 시트 행 수: {len(deduped)-1}")
+        header = deduped[0]
+        data_rows = deduped[1:]
+    else:
+        header = ws.row_values(1) or list(SS_COLUMNS)
+        data_rows = []
+    _atomic_replace_worksheet(spreadsheet, ws.title, header, data_rows, log_fn=_log)
+    _log(f"  최종 SS 시트 행 수: {len(data_rows)}")
     return len(new_rows)
 
 
