@@ -62,7 +62,16 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_GOVT_BOT_TOKEN || secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          # Codex review 2026-05-10: || true 제거 — secret 누락 시 silent 차단
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN/CHAT_ID secret 누락 — 실패 알림 발송 불가"
+            exit 1
+          fi
+          response=$(curl -s -w "\n%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="[govt-radar 명령 처리 실패] run=${{ github.run_id }}" \
-            > /dev/null || true
+            -d text="[govt-radar 명령 처리 실패] run=${{ github.run_id }}")
+          http_code=$(echo "$response" | tail -n1)
+          if [ "$http_code" != "200" ]; then
+            echo "::error::Telegram API 응답 비정상 (HTTP $http_code): $response"
+            exit 1
+          fi

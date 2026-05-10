@@ -60,7 +60,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/meta-ads/reports/ data/meta_ads/daily.csv data/meta_ads/daily_campaign.csv 2>/dev/null || true
+          git add docs/meta-ads/reports/ data/meta_ads/daily.csv data/meta_ads/daily_campaign.csv data/meta_ads/daily_adset.csv 2>/dev/null || true
           if git diff --staged --quiet; then
             echo "변경 사항 없음 — 커밋 스킵"
           else

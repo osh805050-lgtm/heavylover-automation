@@ -68,6 +68,17 @@ KILL_CRITERIA = {
 CURRENCY_KRW_PER_USD = 1450
 CURRENCY_FIELDS_USD = {"spend", "cpc_krw", "cpm_krw", "cpa_krw", "purchase_value_krw"}
 
+# Codex review 2026-05-10: failures.md ⑯(통화 단위 가정) 재현 차단.
+# 광고 계정 통화가 USD 아니면 1450 곱셈으로 모든 금액이 ×1450배 부풀려짐.
+# 환경변수 META_AD_ACCOUNT_CURRENCY로 명시 (없으면 USD 가정), USD 아니면 META_ALLOW_NON_USD=1 필요.
+_ACCOUNT_CURRENCY = os.getenv("META_AD_ACCOUNT_CURRENCY", "USD").upper()
+if _ACCOUNT_CURRENCY != "USD" and os.getenv("META_ALLOW_NON_USD") != "1":
+    raise RuntimeError(
+        f"⚠️ Meta 광고 계정 통화가 {_ACCOUNT_CURRENCY} (USD 아님). "
+        f"이 상태로 _to_krw 호출하면 모든 금액 ×{CURRENCY_KRW_PER_USD} 사고 발생. "
+        "META_ALLOW_NON_USD=1 환경변수 설정 시만 진행 (단, _to_krw 로직 검토 필수)."
+    )
+
 
 def _to_krw(value, currency_unit="USD"):
     """USD → KRW 환산. None은 None. 이미 KRW면 그대로."""

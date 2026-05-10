@@ -48,8 +48,11 @@ def _card(label: str, main: str, sub: str, bg: str, border: str, text: str, badg
 </td>"""
 
 
-def build_kpi_cards_html(enriched: dict) -> str:
+def build_kpi_cards_html(enriched) -> str:
     """enriched ground truth → 4지표 KPI 카드 HTML 테이블."""
+    # 비전공자 운영자가 None/DataFrame/list 등 비-mapping을 넘기더라도 메일 전체가 깨지지 않도록 정규화
+    if not isinstance(enriched, dict):
+        enriched = {}
     inm = enriched.get("월별_재구매_매출", {}).get("통합", {}) or {}
     cur = inm.get("당월", {}) or {}
     mom = _safe_num(inm.get("MoM_변화_pct"))
@@ -104,7 +107,7 @@ def build_kpi_cards_html(enriched: dict) -> str:
         bg, bd, tx, badge,
     )
 
-    # P50 — 14~16일이 정상 (lower_is_better)
+    # P50 — 10일 부근이 정상 (lower_is_better, CLAUDE.md §4 실측)
     if p50_num is None:
         bg, bd, tx, badge = "#ecf0f1", "#95a5a6", "#7f8c8d", "—"
     elif p50_num <= 18:
@@ -116,7 +119,7 @@ def build_kpi_cards_html(enriched: dict) -> str:
     p50_card = _card(
         "재구매 간격",
         str(p50_raw) if p50_raw else "—",
-        "절반 기준 10~16일",
+        "절반 기준 8~12일",
         bg, bd, tx, badge,
     )
 

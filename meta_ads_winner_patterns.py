@@ -16,6 +16,12 @@ MIN_IMPRESSIONS = 1000
 MIN_CAMPAIGNS_FOR_RANKING = 5
 TOP_RATIO = 0.25
 
+# Codex review 2026-05-10: 통계적으로 신뢰 가능한 위너 패턴만 claude_hypothesis 생성
+# (기존: 1000 노출 + ROAS not None만 — 1건 우연 구매 캠페인이 전략 패턴화 가능)
+MIN_SPEND_KRW = 100_000          # 최소 지출 10만원
+MIN_PURCHASES = 5                # 최소 구매 5건
+MIN_CLICKS = 50                  # 최소 클릭 50회
+
 TARGET_KEYWORDS = {
     "20대": "20s_male", "30대": "30s_male", "40대": "40s_male",
     "남": "male", "여": "female",
@@ -136,14 +142,19 @@ def identify_winners(window_days=30):
                 "n_total": 0, "reason": "캠페인 데이터 없음"}
 
     aggregated = _aggregate_by_campaign(rows)
+    # Codex review 2026-05-10: 통계 약한 캠페인은 claude_hypothesis 생성 차단
     eligible = [a for a in aggregated
                 if a.get("impressions", 0) >= MIN_IMPRESSIONS
-                and a.get("roas") is not None]
+                and a.get("roas") is not None
+                and (a.get("spend") or 0) >= MIN_SPEND_KRW
+                and (a.get("purchases") or 0) >= MIN_PURCHASES
+                and (a.get("clicks") or 0) >= MIN_CLICKS]
 
     if len(eligible) < MIN_CAMPAIGNS_FOR_RANKING:
         return {"ok": False, "winners": [], "week_start": week_start,
                 "n_total": len(eligible),
-                "reason": f"비교 가능한 캠페인 부족 ({len(eligible)}/{MIN_CAMPAIGNS_FOR_RANKING})"}
+                "reason": f"통계 충분 캠페인 부족 ({len(eligible)}/{MIN_CAMPAIGNS_FOR_RANKING}) — "
+                          f"기준: 노출≥{MIN_IMPRESSIONS}, 지출≥{MIN_SPEND_KRW:,}원, 구매≥{MIN_PURCHASES}, 클릭≥{MIN_CLICKS}"}
 
     eligible.sort(key=lambda a: a["roas"], reverse=True)
     top_n = max(1, int(len(eligible) * TOP_RATIO))
@@ -161,8 +172,11 @@ def identify_winners(window_days=30):
             "cpa_krw_30d": a["cpa_krw"] or 0,
             "impressions_30d": a["impressions"],
             "spend_30d": a["spend"],
+            "purchases_30d": a.get("purchases", 0),
+            "clicks_30d": a.get("clicks", 0),
             "target_inferred": kw["target"],
             "hooks_inferred": kw["hooks"],
+            "sample_quality": "sufficient",  # 위 가드 통과 명시
         }
         winner["claude_hypothesis"] = _hypothesize_with_claude(winner)
         winner["appended_at"] = datetime.now(KST).isoformat(timespec="seconds")

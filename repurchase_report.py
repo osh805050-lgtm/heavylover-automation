@@ -605,9 +605,9 @@ def write_marts(spreadsheet, gt: dict, tabs: dict):
         ["전월 재구매 매출", inm.get("전월", {}).get("매출"), "—", "—", now_str],
         ["MoM 변화율(%)", inm.get("MoM_변화_pct"), "0% 이상", _summary_status(inm.get("MoM_변화_pct"), 0, -10, True), now_str],
         ["1→2 전환율(%)", s1_2.get("전환율"), "30%+ ✅ / 23~30% ⚠️", _summary_status(s1_2.get("전환율"), 30, 23, True), now_str],
-        ["2→3 전환율(%)", s2_3.get("전환율"), "40%+ ✅", _summary_status(s2_3.get("전환율"), 40, 30, True), now_str],
+        ["2→3 전환율(%)", "미측정" if s2_3.get("전환율") is None else s2_3.get("전환율"), "측정 예정", _summary_status(s2_3.get("전환율"), 40, 30, True), now_str],
         ["M+1 리텐션 최신 코호트(%)", m1_recent, "20~30% ✅", _summary_status(m1_recent, 20, 14, True), now_str],
-        ["재구매 간격 P50(일)", interval.get("P50") or interval.get("중앙값") or interval.get("50%"), "15일 부근", "—", now_str],
+        ["재구매 간격 P50(일)", interval.get("P50") or interval.get("중앙값") or interval.get("50%"), "10일 부근", "—", now_str],
         ["재구매 간격 P90(일)", interval.get("P90") or interval.get("90%"), "31~62일", "—", now_str],
     ]
 
@@ -864,8 +864,8 @@ def write_dashboard(spreadsheet, gt: dict):
         "재구매 평균 주기",
         f"{p50_raw}" if p50_raw != "—" else "—",
         "—",
-        "15일 이내이면 양호",
-        _dash_status(p50_num, 15, 25, False) if p50_num is not None else "—",
+        "10일 부근이면 양호",
+        _dash_status(p50_num, 10, 18, False) if p50_num is not None else "—",
     ])
     rows.append([""])
 
@@ -1080,7 +1080,7 @@ def _apply_dashboard_formats(ws, spreadsheet, rows: list, conv_rate, m1_recent, 
         # M+1 리텐션
         _rgb_for_status(m1_recent, 20, 14, True),
         # P50 간격
-        _rgb_for_status(p50_num, 15, 25, False),
+        _rgb_for_status(p50_num, 10, 18, False),
     ]
     for i, color in enumerate(kpi_colors):
         row_idx = 3 + i

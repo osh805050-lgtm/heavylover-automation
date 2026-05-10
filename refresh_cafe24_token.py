@@ -35,8 +35,13 @@ def main():
         print(msg)
         try:
             send_message(msg, channel="ops")
-        except Exception:
-            pass
+        except Exception as notify_err:
+            # Codex review 2026-05-10: 알림 실패도 silent 안 됨. stderr에 명시 + 비zero exit는 유지
+            print(
+                f"⚠️ 텔레그램 알림 실패: {notify_err}\n"
+                f"→ 카페24 OAuth 갱신도 실패한 상태이므로 ops 채널 점검 필요",
+                file=sys.stderr,
+            )
         return 1
 
 

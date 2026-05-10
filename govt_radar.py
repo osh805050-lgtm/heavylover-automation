@@ -700,6 +700,13 @@ def main():
     # 텔레그램 알림 (분할 발송)
     messages = build_telegram_messages(scored, stats_l1, len(items_l2), today_str)
 
+    # Codex review 2026-05-10: delivery contract 명시
+    # 메시지가 있으면 텔레그램 또는 이메일 중 최소 1개 채널로 발송 성공해야 한다.
+    # 둘 다 실패하면 main()이 nonzero 반환하여 GitHub Actions가 빨간불 표시.
+    telegram_ok = True   # 메시지 없으면 vacuously true
+    email_ok = True
+    delivery_required = bool(messages)
+
     if args.dry_run:
         log.info(f"DRY-RUN - 텔레그램 {len(messages)}개 메시지 생략")
         print("\n" + "=" * 60)
@@ -719,6 +726,7 @@ def main():
             except Exception as e:
                 log.error(f"텔레그램 메시지 {i}/{len(messages)} 에러: {e}")
         log.info(f"텔레그램 발송: {success_count}/{len(messages)}개 성공")
+        telegram_ok = (success_count == len(messages)) if delivery_required else True
 
         # 이메일 일일 요약 발송
         try:
@@ -730,8 +738,10 @@ def main():
             html_body = _build_govt_email_html(scored, today_str)
             email_sender.send_email(subject=subject, text_body=text_body, html_body=html_body)
             log.info("이메일 일일 발송 성공")
+            email_ok = True
         except Exception as e:
-            log.warning(f"이메일 발송 실패 (텔레그램은 성공): {e}")
+            log.error(f"이메일 발송 실패: {e}")
+            email_ok = False
 
     # 캘린더 자동 등록 (적합도 ≥ 7 + 마감일 있는 공고)
     try:
@@ -746,6 +756,16 @@ def main():
         log.error(f"캘린더 등록 에러: {e}")
 
     log.info("정부지원 레이더 종료")
+
+    # Delivery contract 검증
+    if delivery_required and not (telegram_ok or email_ok):
+        log.error(
+            "🚨 delivery contract 위반 — 메시지 %d개 있으나 텔레그램·이메일 모두 발송 실패",
+            len(messages),
+        )
+        return 2  # nonzero → GitHub Actions 빨간불
+    if delivery_required and not telegram_ok:
+        log.warning("텔레그램 일부 실패 — 이메일만 성공 (운영자 확인 필요)")
     return 0
 
 

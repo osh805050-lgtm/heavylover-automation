@@ -25,6 +25,9 @@ argument-hint: <사업명>
 - 출력: `proposals/outputs/{사업명}-{YYYY-MM-DD}-interview.yaml`
 - 완료 후 사용자에게 인터뷰 통계 보고 (자세히 답변 N개, 간단 답변 N개, 미응답 N개)
 
+**★ ABORT_FLOW 감지 (필수)**: interview.yaml 첫 줄을 Read로 확인. `ABORT_FLOW: rubric_missing` 또는 `ABORT_FLOW: save_failed` 토큰 발견 시 **즉시 전체 흐름 중단**. 사용자에게 1줄 알림 후 종료. Round 0 진입 금지.
+`ABORT_FLOW: all_skipped` 발견 시 사용자에게 "인터뷰 답변이 모두 비어있어 산출물 품질이 70% 수준으로 떨어집니다. 그래도 진행하시겠습니까?" AskUserQuestion 1회. 거부 시 종료.
+
 **중요**: 이 단계가 PDF v4 수준 산출의 핵심. 사용자가 모든 질문에 "답변 안 함" 선택해도 진행은 가능하나, 그 경우 산출물 품질이 70% 수준으로 떨어짐.
 
 ## Round 0 — Draft (단독)
@@ -80,7 +83,7 @@ v1 산출 후, 순서대로:
 - 출력: `proposals/outputs/{사업명}-{YYYY-MM-DD}-v2.md`
 
 ### Step 2-5: `proposal-devil` 호출 (R2 — 1회차)
-- 입력: v2
+- 입력: `proposals/outputs/{사업명}-{YYYY-MM-DD}-v2.md` (★ Step 2-4에서 drafter가 생성한 fact-check 정정본 — `v2-draft.md` 아님 절대 주의)
 - 출력: `...-devil-attack.md`
 - 이 단계에서는 종합 판정과 무관하게 **반드시 Round 3으로 진입** (v2 → final-revisor가 v3 강제 재작성)
 
@@ -92,6 +95,7 @@ v1 산출 후, 순서대로:
 - 출력: `proposals/outputs/{사업명}-{YYYY-MM-DD}-v3.md` + `appendix-A-evaluator.md` + `appendix-B-pending.md` + `submit-checklist.md`
 
 ### Step 3-2: `brand-voice-reviewer` 가드레일 호출 (1회만)
+- ★ 에이전트 위치: `.claude/agents/brand-voice-reviewer.md` (proposal/ 하위 아닌 .claude/agents/ 직속)
 - 입력: v3.md
 - 처리: 18개 언어 규칙 위반 검출 (Tier 1 강제, Tier 2 권고, Tier 3 카운트, Tier 4 권고)
 - 출력: `proposals/outputs/{사업명}-{YYYY-MM-DD}-voice-guardrail.md`
@@ -102,7 +106,7 @@ v1 산출 후, 순서대로:
 ### Step 3-3: 공격 루프 (devil ↔ final-revisor 최대 2회)
 
 **1회차 공격**:
-- `proposal-devil` 호출 (공격 루프 모드)
+- `proposal-devil` 호출 (공격 루프 모드) — **devil 호출 카운터 = 1**
 - 입력: v3.md + 이전 devil-attack.md (같은 문장 중복 공격 금지용)
 - 출력: `proposals/outputs/{사업명}-{YYYY-MM-DD}-devil-attack-r1.md`
 - L1 자랑 검출 + L2 가짜 디테일 + L3 섹션 단절 + L4 공감 부재 + 기존 7대 패턴 모두 적용
@@ -113,14 +117,23 @@ v1 산출 후, 순서대로:
 - 🔴 다수 위반 → `proposal-final-revisor` 재호출 (v3.1 생성) → 2회차 공격 진입
 
 **2회차 공격** (1회차 미통과 시):
-- `proposal-devil` 호출 (입력: v3.1 + 이전 회차 devil-attack-r1.md)
+- `proposal-devil` 호출 (입력: v3.1 + 이전 회차 devil-attack-r1.md) — **devil 호출 카운터 = 2 (절대 상한)**
 - 출력: `devil-attack-r2.md`
 
 **2회차 판정**:
 - 🟢 통과 → v3.1 final 승격, **공격 루프 종료**
-- 🟡/🔴 미통과 → `proposal-final-revisor` 재호출 (v3.2 생성) → **루프 종료, v3.2를 final로 승격하되 사용자에게 "공격 루프 2회 후 잔여 약점 N건 수동 검토 권장" 보고**
+- 🟡/🔴 미통과 → `proposal-final-revisor` 재호출 (v3.2 생성) → **루프 종료. v3.2는 `proposals/outputs/{사업명}-{YYYY-MM-DD}-v3.2.md`로만 저장하고 final.md 자동 승격 차단** (Codex review 2026-05-10: 알려진 결함 박힌 채 제출되는 것 방지)
 
-**무한 루프 방지**: 공격 루프는 최대 2회 (즉 v3.2까지). 그 이후 미통과 시 자동 종료 + 수동 검토 보고.
+**🔴/🟡 미통과 시 사용자 보고 (final.md 자동 생성 안 함)**:
+> ⚠️ 공격 루프 2회 후에도 잔여 약점 🔴 {N}건 / 🟡 {M}건 남음. v3.2 저장됨: `{사업명}-{YYYY-MM-DD}-v3.2.md`
+>
+> **자동 final.md 승격이 차단됨**. 다음 중 하나로 진행하세요:
+> 1. **항목별 검토 후 수동 승격**: v3.2 + devil-attack-r2.md 직접 검토, 잔여 약점 각각에 대해 (a) v3.2를 직접 수정하거나 (b) waiver 사유를 `appendix-B-pending.md`에 박제 → `cp v3.2.md final.md`
+> 2. **명시적 강제 승격**: `/proposal {사업명} --force-promote` 재실행 (waiver 검토를 사용자가 책임진다는 명시 동의)
+>
+> Final 단계의 폴더 셋업·Word 변환·체크리스트 생성은 final.md 존재 시에만 실행됩니다.
+
+**무한 루프 방지 (★ 절대 상한)**: 공격 루프는 최대 2회 (즉 v3.2까지). 오케스트레이터가 devil 호출 횟수를 카운터로 추적. 2회 도달 시 devil 자체 판정(🔴/🟡)과 무관하게 **강제 종료**. **v3.3 이상 절대 생성 금지**.
 
 ## Final 단계
 

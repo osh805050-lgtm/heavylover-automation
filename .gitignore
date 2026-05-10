@@ -30,6 +30,10 @@ data/meta_ads/raw/
 proposals/knowledge/precedents/official/_raw/
 proposals/knowledge/legacy/
 
+# 사업계획서 제출 폴더 (개인 신분 서류 — 주민등록·통장사본·신용보고서 등 자동 복사 대상)
+# Codex adversarial review 2026-05-10 — git push 시 GitHub 노출 위험 차단
+사업/
+
 # 산출물은 git 추적 — 2026-05-01 MCP 파일 손실 사고 후 정책 변경
 # proposals/outputs/        → 추적 (gitignore 미차단)
 # docs/analysis_10b/        → 추적 (gitignore 미차단)
