@@ -70,14 +70,20 @@ CURRENCY_FIELDS_USD = {"spend", "cpc_krw", "cpm_krw", "cpa_krw", "purchase_value
 
 # Codex review 2026-05-10: failures.md ⑯(통화 단위 가정) 재현 차단.
 # 광고 계정 통화가 USD 아니면 1450 곱셈으로 모든 금액이 ×1450배 부풀려짐.
-# 환경변수 META_AD_ACCOUNT_CURRENCY로 명시 (없으면 USD 가정), USD 아니면 META_ALLOW_NON_USD=1 필요.
+# H-5 fix: 모듈 import 시점에 raise하면 bootstrap_meta_yearly, meta_ads_adset_backfill 등
+# 다른 스크립트의 import도 함께 crash → guard를 _check_account_currency()로 분리해
+# run() 진입 시점에만 호출한다.
 _ACCOUNT_CURRENCY = os.getenv("META_AD_ACCOUNT_CURRENCY", "USD").upper()
-if _ACCOUNT_CURRENCY != "USD" and os.getenv("META_ALLOW_NON_USD") != "1":
-    raise RuntimeError(
-        f"⚠️ Meta 광고 계정 통화가 {_ACCOUNT_CURRENCY} (USD 아님). "
-        f"이 상태로 _to_krw 호출하면 모든 금액 ×{CURRENCY_KRW_PER_USD} 사고 발생. "
-        "META_ALLOW_NON_USD=1 환경변수 설정 시만 진행 (단, _to_krw 로직 검토 필수)."
-    )
+
+
+def _check_account_currency():
+    """통화 guard — run() 진입 시점에만 호출. import 시 raise 금지."""
+    if _ACCOUNT_CURRENCY != "USD" and os.getenv("META_ALLOW_NON_USD") != "1":
+        raise RuntimeError(
+            f"⚠️ Meta 광고 계정 통화가 {_ACCOUNT_CURRENCY} (USD 아님). "
+            f"이 상태로 _to_krw 호출하면 모든 금액 ×{CURRENCY_KRW_PER_USD} 사고 발생. "
+            "META_ALLOW_NON_USD=1 환경변수 설정 시만 진행 (단, _to_krw 로직 검토 필수)."
+        )
 
 
 def _to_krw(value, currency_unit="USD"):
@@ -614,6 +620,8 @@ def save_report(target_date, content):
 
 
 def run():
+    _check_account_currency()  # H-5: import 시점이 아닌 run() 진입 시 통화 guard
+
     import argparse
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--model", default=None, help="Claude 모델 오버라이드 (품질 비교 테스트용)")

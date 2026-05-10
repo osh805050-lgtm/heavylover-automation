@@ -133,6 +133,23 @@ v1 산출 후, 순서대로:
 >
 > Final 단계의 폴더 셋업·Word 변환·체크리스트 생성은 final.md 존재 시에만 실행됩니다.
 
+**`--force-promote` 처리 (H-7 구현)**:
+
+`$ARGUMENTS`에 `--force-promote` 토큰이 포함된 경우 오케스트레이터가 아래를 실행:
+
+1. `proposals/outputs/{사업명}-*-v3.2.md` 최신 파일 확인. 없으면 "강제 승격할 v3.2 파일이 없습니다" 안내 후 종료.
+2. `proposals/outputs/{사업명}-*-devil-attack-r2.md` 읽어 잔여 🔴/🟡 항목 목록 추출.
+3. `appendix-B-pending.md` 에 waiver 섹션 자동 append:
+   ```
+   ## --force-promote waiver ({날짜})
+   사용자가 잔여 약점을 인지하고 강제 승격을 명시 동의함.
+   잔여 🔴 {N}건 / 🟡 {M}건:
+   {항목 목록}
+   ```
+4. v3.2 → final.md 복사 (`proposals/outputs/{사업명}-{날짜}-final.md`).
+5. 사용자에게 1줄 보고: "강제 승격 완료. waiver 기록됨: appendix-B-pending.md. Final 단계로 진입합니다."
+6. Final 단계(F-1~F-3) 계속 실행.
+
 **무한 루프 방지 (★ 절대 상한)**: 공격 루프는 최대 2회 (즉 v3.2까지). 오케스트레이터가 devil 호출 횟수를 카운터로 추적. 2회 도달 시 devil 자체 판정(🔴/🟡)과 무관하게 **강제 종료**. **v3.3 이상 절대 생성 금지**.
 
 ## Final 단계
@@ -183,10 +200,11 @@ stub 생성 후 사용자에게 1줄 안내: "submissions-log stub 생성 완료
    python tools/generate_submission_sections.py $ARGUMENTS {YYYY-MM-DD}
    ```
    첫 번째 스크립트가 자동으로:
-   - `사업/지원사업/{날짜} {사업명}/` 폴더 생성 (제출서류·심사자료·산출물_md 하위 폴더 포함)
+   - `~/OneDrive/헤비로버_제출/{날짜} {사업명}/` 폴더 생성 (제출서류·심사자료·산출물_md 하위 폴더 포함)
+     (`TARGET_BASE` = `~/OneDrive/헤비로버_제출` — `tools/setup_proposal_folder.py` 내 상수)
    - final.md → Word 파일 변환 후 폴더에 저장
    - 모든 md 산출물 → 산출물_md 폴더에 복사
-   - 컴퓨터에서 필요 서류 자동 탐색 후 제출서류 폴더에 복사
+   - `proposals/knowledge/submission-manifest.json` 기반으로 필요 서류 자동 탐색 후 제출서류 폴더에 복사
    - 제출_체크리스트.md 생성 (구비된 서류 ✅ / 직접 준비 필요 ⚠️ 구분)
 
    두 번째 스크립트가 자동으로:

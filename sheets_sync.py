@@ -165,11 +165,18 @@ def _atomic_replace_worksheet(
 
     try:
         staging_ws.update_title(prod_tab_name)
-    except Exception as e:
-        # 프로덕션이 __prev 에 그대로 살아있음. 수동 복구 가능.
+    except Exception as rename_err:
+        # H-6 fix: staging→prod rename 실패 시 prod(__prev)를 원복해 데이터 손실 방지.
+        # prod 탭이 __prev 이름으로 살아있으므로 원래 이름으로 되돌린다.
+        log(f"  ⚠️ staging→prod rename 실패: {rename_err} — 원복 시도")
+        try:
+            prod_ws.update_title(prod_tab_name)
+            log(f"  ✅ '{prev_name}' → '{prod_tab_name}' 원복 성공 (데이터 보존)")
+        except Exception as restore_err:
+            log(f"  🚨 원복도 실패: {restore_err} — '{prev_name}' 탭을 수동으로 '{prod_tab_name}'으로 이름 변경 필요")
         raise RuntimeError(
-            f"staging→prod rename 실패 (데이터는 '{prev_name}' 에 안전): {e}"
-        ) from e
+            f"staging→prod rename 실패 ('{prev_name}' → '{prod_tab_name}' 원복 시도됨): {rename_err}"
+        ) from rename_err
 
     try:
         spreadsheet.del_worksheet(prod_ws)  # 이제 이름이 prev_name 인 탭

@@ -142,12 +142,15 @@ def read_tracking_excel(path: Path):
             for col_idx, val in enumerate(ws.row_values(i)):
                 ctype = ws.cell_type(i, col_idx)
                 # xlrd cell types: 0=empty, 1=text, 2=number, 3=date, 4=bool, 5=error
-                # 숫자형 셀(ctype=2)도 string으로 정확하게 보존 (정수일 경우 소수점 제거만)
+                # H-2 fix: 숫자형 셀(ctype=2)을 string으로 변환할 때 16자리 ID 정밀도 손실 방지.
+                # float >= 1e15 이면 이미 float53 정밀도 손실 가능 → repr로 보존해
+                # 이후 _normalize_id 에서 TrackingParseError로 reject하게 한다.
+                # (str(int(1.2345678901234e+15)) 는 마지막 자리가 틀린 값을 무음으로 통과시킴)
                 if ctype == 2 and isinstance(val, float):
-                    if val.is_integer():
+                    if val.is_integer() and abs(val) < 1e15:
                         row_vals.append(str(int(val)))
                     else:
-                        # 비정수 float은 송장번호로 부적합 — 원형 보존
+                        # float >= 1e15 또는 비정수 → repr 보존, _normalize_id에서 reject
                         row_vals.append(repr(val))
                 else:
                     row_vals.append(val)
@@ -299,7 +302,9 @@ def _dedup_by_order(
             continue
 
         # item-level 키: (channel, order_id, item_code)
-        # item_code 비어있으면 단일 패키지 — order 단위로만 dedup
+        # item_code 비어있는 경우 order 단위 단일 패키지 — order_id만으로 키 구성.
+        # H-1 fix: item_code 있을 때는 각 item마다 별도 키 → multi-item(2박스) 주문의
+        # 모든 아이템이 kept에 남아 cafe24_orders_to_register 그룹핑에서 item_codes set에 모두 add됨.
         key = (channel, order_id, item_code)
         if key not in kept:
             kept[key] = (order_id, item_code, tracking)
@@ -402,6 +407,9 @@ def run_from_excel():
         cafe24_fail.append(f"{c.order_id}: 송장번호 충돌 (수동 확인 필요)")
 
     # 카페24는 같은 order의 모든 item을 한 번에 등록 → order_id 단위로 묶음
+    # H-1 fix: 2박스(multi-item) 주문은 전체 item을 먼저 수집한 뒤 등록.
+    # 일부 item만 등록하는 문제를 방지하기 위해 order_id 단위로 그룹핑 후
+    # API에서 order_item_codes 전체를 조회해 한 번에 등록.
     cafe24_orders_to_register: dict = {}
     for (_, order_id, item_code), (_, _, tracking) in seen_cafe24.items():
         cafe24_orders_to_register.setdefault(order_id, {"tracking": tracking, "item_codes": set()})

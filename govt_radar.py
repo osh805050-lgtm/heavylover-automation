@@ -704,10 +704,41 @@ def _save_seen_keys(seen: dict) -> None:
     os.replace(tmp, SEEN_KEYS_PATH)
 
 
+DEADLINE_RENOTIFY_WINDOWS = (2, 7)  # D-2, D-7 이하 진입 시 재알림 (content_hash 무관)
+
+
+def _should_renotify_deadline(item: dict, prev: dict, today_iso: str) -> bool:
+    """마감 임박 재알림 정책 (H-3 fix).
+
+    같은 content_hash여도 마감일이 D-7 이하 또는 D-2 이하 윈도우에
+    처음 진입한 날에는 재알림한다.
+
+    last_seen == today면 이미 오늘 알림 → False.
+    prev에 'deadline_notified' 필드로 이미 보낸 윈도우를 기록해 중복 차단.
+    """
+    if not item.get("deadline"):
+        return False
+    try:
+        from datetime import date as _date
+        deadline = _date.fromisoformat(item["deadline"])
+        today = _date.fromisoformat(today_iso)
+        days_left = (deadline - today).days
+    except (ValueError, TypeError):
+        return False
+
+    notified_windows = set(prev.get("deadline_notified") or [])
+    for threshold in DEADLINE_RENOTIFY_WINDOWS:
+        if days_left <= threshold and threshold not in notified_windows:
+            return True
+    return False
+
+
 def _classify_seen(items: list, seen: dict, today_iso: str) -> tuple[list, list]:
     """공고를 (신규, 갱신) 두 리스트로 분류. 기존(변경 없음)은 알림 제외.
 
-    Side effect: 각 item에 'seen_status' 필드 추가 ("new"|"updated"|"known").
+    H-3 fix: content_hash 불변이라도 D-7/D-2 마감 임박 윈도우 첫 진입 시 재알림.
+
+    Side effect: 각 item에 'seen_status' 필드 추가 ("new"|"updated"|"known"|"deadline_renotify").
     """
     new_items = []
     updated_items = []
@@ -721,6 +752,9 @@ def _classify_seen(items: list, seen: dict, today_iso: str) -> tuple[list, list]
         elif prev.get("hash") != h:
             it["seen_status"] = "updated"
             updated_items.append(it)
+        elif _should_renotify_deadline(it, prev, today_iso):
+            it["seen_status"] = "deadline_renotify"
+            updated_items.append(it)
         else:
             it["seen_status"] = "known"
         # in-memory 업데이트 (저장은 발송 성공 후)
@@ -730,7 +764,12 @@ def _classify_seen(items: list, seen: dict, today_iso: str) -> tuple[list, list]
 
 
 def _commit_seen_keys(items: list, seen: dict, today_iso: str) -> None:
-    """발송 성공 후 seen 누적 갱신 + 디스크 atomic write."""
+    """발송 성공 후 seen 누적 갱신 + 디스크 atomic write.
+
+    H-3 fix: deadline_renotify 발송 시 notified_windows에 해당 threshold 기록
+    → 같은 윈도우에서 다음날 중복 재알림 차단.
+    """
+    from datetime import date as _date
     for it in items:
         key = it.get("_seen_key")
         h = it.get("_content_hash")
@@ -741,6 +780,19 @@ def _commit_seen_keys(items: list, seen: dict, today_iso: str) -> None:
             seen[key]["hash"] = h
         else:
             seen[key] = {"hash": h, "first_seen": today_iso, "last_seen": today_iso}
+        # deadline_renotify 발송 시 어느 윈도우에서 보냈는지 기록
+        if it.get("seen_status") == "deadline_renotify" and it.get("deadline"):
+            try:
+                deadline = _date.fromisoformat(it["deadline"])
+                today = _date.fromisoformat(today_iso)
+                days_left = (deadline - today).days
+                notified = set(seen[key].get("deadline_notified") or [])
+                for threshold in DEADLINE_RENOTIFY_WINDOWS:
+                    if days_left <= threshold:
+                        notified.add(threshold)
+                seen[key]["deadline_notified"] = sorted(notified)
+            except (ValueError, TypeError):
+                pass
     _save_seen_keys(seen)
 
 
@@ -750,7 +802,9 @@ def _apply_layer4_fail_closed(scored: list, log) -> tuple[int, str | None]:
     eligibility_checker.batch_check는 API 실패 시 예외 던지지 않고
     {"eligible": "unsure", "reason": "API 실패: ..."}로 inline 표시한다.
     여기서 그 결과를 재해석:
-      - score≥5 + eligibility 미수행 또는 'API 실패' reason → fail-closed 다운그레이드
+      - score≥5 + eligibility 미수행 또는 'API 실패'/'파싱 실패' reason → fail-closed 다운그레이드
+      - eligibility 필드 자체가 없는 score≥5 항목도 fail-closed (H-4 fix: exception으로
+        batch_check가 아예 실행 안 됐을 때 fail-open 방지)
       - 50% 이상이 'API 실패'면 시스템 전체 outage 간주 → ops 알림 메시지 반환
 
     Returns:
@@ -765,7 +819,12 @@ def _apply_layer4_fail_closed(scored: list, log) -> tuple[int, str | None]:
         if (s.get("tier") or "").startswith(("타지역", "제외")):
             continue
         high_score_total += 1
-        elig = s.get("eligibility") or {}
+        elig = s.get("eligibility")
+        # H-4 fix: eligibility 필드 자체가 None이면 batch_check가 예외로 실행 안 된 것
+        # → fail-open 허용 불가, api_failed에 포함시켜 다운그레이드
+        if elig is None:
+            api_failed.append(s)
+            continue
         reason = elig.get("reason") or ""
         if "API 실패" in reason or "파싱 실패" in reason:
             api_failed.append(s)
