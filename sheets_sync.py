@@ -173,10 +173,12 @@ def _atomic_replace_worksheet(
             prod_ws.update_title(prod_tab_name)
             log(f"  ✅ '{prev_name}' → '{prod_tab_name}' 원복 성공 (데이터 보존)")
         except Exception as restore_err:
-            log(f"  🚨 원복도 실패: {restore_err} — '{prev_name}' 탭을 수동으로 '{prod_tab_name}'으로 이름 변경 필요")
-        raise RuntimeError(
-            f"staging→prod rename 실패 ('{prev_name}' → '{prod_tab_name}' 원복 시도됨): {rename_err}"
-        ) from rename_err
+            log(f"  🚨 원복도 실패: {restore_err}")
+            raise RuntimeError(
+                f"staging→prod rename 실패 + 원복도 실패. "
+                f"rename: {rename_err} / restore: {restore_err} — "
+                f"'{prev_name}' 탭을 수동으로 '{prod_tab_name}'으로 이름 변경 필요"
+            ) from rename_err
 
     try:
         spreadsheet.del_worksheet(prod_ws)  # 이제 이름이 prev_name 인 탭
@@ -198,6 +200,10 @@ def _find_tab(spreadsheet, expected_first: str, expected_second: str | None = No
         if hdr[0].strip() != expected_first:
             continue
         if expected_second and (len(hdr) < 2 or hdr[1].strip() != expected_second):
+            continue
+        # Reject recovery/staging tabs — only return canonical production tab
+        title = ws.title
+        if title.endswith("__prev") or title.endswith("__staging"):
             continue
         return ws
     return None

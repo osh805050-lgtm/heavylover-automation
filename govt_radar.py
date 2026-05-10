@@ -716,6 +716,8 @@ def _should_renotify_deadline(item: dict, prev: dict, today_iso: str) -> bool:
     last_seen == today면 이미 오늘 알림 → False.
     prev에 'deadline_notified' 필드로 이미 보낸 윈도우를 기록해 중복 차단.
     """
+    if prev.get("last_seen") == today_iso:
+        return False
     if not item.get("deadline"):
         return False
     try:
@@ -728,7 +730,7 @@ def _should_renotify_deadline(item: dict, prev: dict, today_iso: str) -> bool:
 
     notified_windows = set(prev.get("deadline_notified") or [])
     for threshold in DEADLINE_RENOTIFY_WINDOWS:
-        if days_left <= threshold and threshold not in notified_windows:
+        if 0 <= days_left <= threshold and threshold not in notified_windows:
             return True
     return False
 
@@ -796,7 +798,7 @@ def _commit_seen_keys(items: list, seen: dict, today_iso: str) -> None:
     _save_seen_keys(seen)
 
 
-def _apply_layer4_fail_closed(scored: list, log) -> tuple[int, str | None]:
+def _apply_layer4_fail_closed(scored: list, log, eligibility_attempted: bool = True) -> tuple[int, str | None]:
     """Layer 4 실패 감지 → 해당 항목을 'eligibility_unverified' 티어로 다운그레이드.
 
     eligibility_checker.batch_check는 API 실패 시 예외 던지지 않고
@@ -810,6 +812,8 @@ def _apply_layer4_fail_closed(scored: list, log) -> tuple[int, str | None]:
     Returns:
         (downgraded_count, ops_alert_message_or_None)
     """
+    if not eligibility_attempted:
+        return (0, None)
     api_failed = []
     high_score_total = 0
     for s in scored:
@@ -1010,7 +1014,8 @@ def main():
     # Codex 2026-05-10: Layer 4 fail-closed
     # batch_check이 API 실패를 "unsure"로 inline 변환하기 때문에 결과에서 재해석한다.
     # (eligibility_checker 모듈은 그대로 두고 govt_radar.py에서 후처리)
-    downgraded_count, layer4_alert = _apply_layer4_fail_closed(scored, log)
+    eligibility_attempted = (not args.skip_eligibility and bool(os.getenv("ANTHROPIC_API_KEY")))
+    downgraded_count, layer4_alert = _apply_layer4_fail_closed(scored, log, eligibility_attempted)
     if layer4_alert and not args.dry_run:
         _send_ops_alert(layer4_alert, log)
 

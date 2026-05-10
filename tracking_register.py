@@ -147,10 +147,13 @@ def read_tracking_excel(path: Path):
                 # 이후 _normalize_id 에서 TrackingParseError로 reject하게 한다.
                 # (str(int(1.2345678901234e+15)) 는 마지막 자리가 틀린 값을 무음으로 통과시킴)
                 if ctype == 2 and isinstance(val, float):
-                    if val.is_integer() and abs(val) < 1e15:
+                    if abs(val) >= 1e15:
+                        raise TrackingParseError(
+                            f'행 {i+1} 숫자 셀({val!r})이 16자리 이상 — 엑셀 셀 서식을 텍스트로 변경 후 다시 업로드해주세요.'
+                        )
+                    if val.is_integer():
                         row_vals.append(str(int(val)))
                     else:
-                        # float >= 1e15 또는 비정수 → repr 보존, _normalize_id에서 reject
                         row_vals.append(repr(val))
                 else:
                     row_vals.append(val)
@@ -280,6 +283,7 @@ def _dedup_by_order(
     conflicts: List[TrackingResult] = []
     # 주문 단위 트래킹 번호 추적 (같은 주문 다중 행에 다른 송장이면 충돌)
     order_trackings: dict = {}
+    conflict_order_ids: set = set()
 
     for row in items:
         order_id = row[order_idx]
@@ -290,6 +294,7 @@ def _dedup_by_order(
         prev_trackings = order_trackings.setdefault(order_id, set())
         prev_trackings.add(tracking)
         if len(prev_trackings) > 1:
+            conflict_order_ids.add(order_id)
             conflicts.append(TrackingResult(
                 channel=channel,
                 order_id=order_id,
@@ -309,6 +314,23 @@ def _dedup_by_order(
         if key not in kept:
             kept[key] = (order_id, item_code, tracking)
         # 같은 (order, item) 중복 라인은 동일 송장이면 무시 (조용히)
+
+    # H-1 fix: conflict_order_ids에 속한 첫 번째 행(kept에 이미 들어간 항목)도 제거
+    for key in list(kept.keys()):
+        ord_id = kept[key][0]
+        if ord_id in conflict_order_ids:
+            _, ic, tn = kept[key]
+            conflicts.append(TrackingResult(
+                channel=channel,
+                order_id=ord_id,
+                item_code=ic,
+                tracking_no=tn,
+                status="skipped",
+                api_response_code="conflict_multi_tracking",
+                api_response_body=f"order has multiple trackings: {sorted(order_trackings[ord_id])}",
+            ))
+            del kept[key]
+
     return kept, conflicts
 
 
@@ -493,17 +515,30 @@ def run_from_excel():
     seen_naver: dict = {}
     naver_conflicts: List[TrackingResult] = []
     naver_order_trackings: dict = {}
+    naver_conflict_order_ids: set = set()
     for product_order_id, tracking in naver_items:
         fixed_id = _fix_naver_id(product_order_id)
         prev = naver_order_trackings.setdefault(fixed_id, set())
         prev.add(tracking)
         if len(prev) > 1:
+            naver_conflict_order_ids.add(fixed_id)
+            # H-1 fix: 첫 번째 행이 이미 seen_naver에 들어간 경우 제거 + skipped 기록
+            if fixed_id in seen_naver:
+                naver_conflicts.append(TrackingResult(
+                    channel="naver", order_id=fixed_id, item_code="",
+                    tracking_no=seen_naver[fixed_id], status="skipped",
+                    api_response_code="conflict_multi_tracking",
+                    api_response_body=f"order has multiple trackings: {sorted(prev)}",
+                ))
+                del seen_naver[fixed_id]
             naver_conflicts.append(TrackingResult(
                 channel="naver", order_id=fixed_id, item_code="",
                 tracking_no=tracking, status="skipped",
                 api_response_code="conflict_multi_tracking",
                 api_response_body=f"order has multiple trackings: {sorted(prev)}",
             ))
+            continue
+        if fixed_id in naver_conflict_order_ids:
             continue
         if fixed_id not in seen_naver:
             seen_naver[fixed_id] = tracking

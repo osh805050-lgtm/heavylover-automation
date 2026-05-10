@@ -78,9 +78,10 @@ _ACCOUNT_CURRENCY = os.getenv("META_AD_ACCOUNT_CURRENCY", "USD").upper()
 
 def _check_account_currency():
     """통화 guard — run() 진입 시점에만 호출. import 시 raise 금지."""
-    if _ACCOUNT_CURRENCY != "USD" and os.getenv("META_ALLOW_NON_USD") != "1":
+    account_currency = os.getenv("META_AD_ACCOUNT_CURRENCY", "USD").upper()
+    if account_currency != "USD" and os.getenv("META_ALLOW_NON_USD") != "1":
         raise RuntimeError(
-            f"⚠️ Meta 광고 계정 통화가 {_ACCOUNT_CURRENCY} (USD 아님). "
+            f"⚠️ Meta 광고 계정 통화가 {account_currency} (USD 아님). "
             f"이 상태로 _to_krw 호출하면 모든 금액 ×{CURRENCY_KRW_PER_USD} 사고 발생. "
             "META_ALLOW_NON_USD=1 환경변수 설정 시만 진행 (단, _to_krw 로직 검토 필수)."
         )
@@ -100,6 +101,7 @@ def _to_krw(value, currency_unit="USD"):
 
 def convert_metrics_to_krw(m):
     """compute_metrics 결과 dict를 KRW 단위로 환산. 비율 지표(CTR·ROAS·Frequency)는 그대로."""
+    _check_account_currency()  # guard: import 경로로 직접 호출해도 non-USD 차단
     out = dict(m)
     for k in ("spend", "cpc_krw", "cpm_krw", "cpa_krw", "purchase_value_krw"):
         if out.get(k) is not None:
