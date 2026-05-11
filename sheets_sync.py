@@ -615,6 +615,38 @@ def run() -> dict:
         result["errors"].append(f"smartstore: {e}")
 
     _log(f"=== 완료: 카페24 {result['cafe24']}행, SS {result['smartstore']}행 ===")
+
+    # pipeline_meta 기록 (1단계 완료 증거)
+    try:
+        from lib.sheet_staleness import write_pipeline_meta_row
+        now_kst = datetime.now(timezone(timedelta(hours=9)))
+        run_id = f"sync_{now_kst.strftime('%Y-%m-%d_%H%M%S')}"
+        status = "fail" if result["errors"] else "success"
+        write_pipeline_meta_row(
+            ss,
+            writer="sheets_sync",
+            run_id=run_id,
+            started_at=run_id,
+            finished_at=now_kst.isoformat(),
+            status=status,
+            cafe24_rows=result["cafe24"],
+            ss_rows=result["smartstore"],
+        )
+    except Exception as e:
+        _log(f"⚠️ pipeline_meta 기록 실패: {e}")
+
+    # 실패 시 ops 채널 알림 (silent failure 제거)
+    if result["errors"]:
+        try:
+            from telegram_client import send_message
+            err_str = "\n".join(result["errors"])
+            send_message(
+                f"🚨 sheets_sync 오류 발생\n{err_str}",
+                channel="ops",
+            )
+        except Exception as e:
+            _log(f"⚠️ ops 알림 실패: {e}")
+
     return result
 
 

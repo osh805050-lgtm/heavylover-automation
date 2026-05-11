@@ -383,6 +383,12 @@ def main(gt: dict | None = None) -> int:
             )
         except Exception:
             pass
+        # ops 채널 텔레그램 알림 (이메일 경로 막혀도 ops는 알아야 함)
+        try:
+            from telegram_client import send_message
+            send_message(f"🚨 재구매 이메일 발송 실패: {e}", channel="ops")
+        except Exception:
+            pass
         return 2
 
 

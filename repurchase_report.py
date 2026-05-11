@@ -1401,7 +1401,19 @@ def run() -> dict:
     """
     _log("=== 재구매 리포트 시작 ===")
     ss = _open_sheet()
+
+    # 2단계(GAS) 신선도 체크 — stale/unknown 시 ops 알림 (fail-closed 아님, 계속 실행)
+    try:
+        from lib.sheet_staleness import check_pipeline_freshness, alert_if_not_fresh
+        pipeline_state = check_pipeline_freshness(ss)
+        _log(f"pipeline freshness: {pipeline_state}")
+        alert_if_not_fresh(pipeline_state)
+    except Exception as e:
+        _log(f"⚠️ freshness 체크 실패: {e}")
+        pipeline_state = "unknown"
+
     gt = build_ground_truth(ss)
+    gt["pipeline_state"] = pipeline_state
 
     # 마트 4종 갱신 (Looker Studio 데이터 소스)
     try:
@@ -1450,12 +1462,40 @@ def run() -> dict:
     try:
         _log("이메일 심층 분석 발송 중...")
         from report_email_daily import main as email_main
-        email_main(gt=gt)
-        _log("✅ 이메일 발송 완료")
+        email_rc = email_main(gt=gt)
+        if email_rc != 0:
+            _log(f"⚠️ 이메일 발송 비정상 종료 (rc={email_rc})")
+            try:
+                send_message(f"🚨 재구매 이메일 발송 실패 (rc={email_rc})", channel="ops")
+            except Exception:
+                pass
+        else:
+            _log("✅ 이메일 발송 완료")
     except Exception as e:
         _log(f"⚠️ 이메일 발송 실패: {e}")
+        try:
+            send_message(f"🚨 재구매 이메일 발송 예외: {e}", channel="ops")
+        except Exception:
+            pass
 
-    return {"status": "success", "issues": []}
+    # pipeline_meta 기록 (3단계 reporter 완료 증거)
+    try:
+        from lib.sheet_staleness import write_pipeline_meta_row
+        now_kst = datetime.now(KST)
+        run_id = f"report_{now_kst.strftime('%Y-%m-%d_%H%M%S')}"
+        write_pipeline_meta_row(
+            ss,
+            writer="reporter",
+            run_id=run_id,
+            started_at=run_id,
+            finished_at=now_kst.isoformat(),
+            status="success",
+            pipeline_state=pipeline_state,
+        )
+    except Exception as e:
+        _log(f"⚠️ pipeline_meta reporter 기록 실패: {e}")
+
+    return {"status": "success", "issues": [], "pipeline_state": pipeline_state}
 
 
 if __name__ == "__main__":
