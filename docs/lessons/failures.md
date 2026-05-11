@@ -3,6 +3,12 @@
 > 이 파일은 [작업 종류 매칭 시 grep 검색] / [월말 회고] / [에이전트 시작 전 위험 점검] 시 로드됩니다. CLAUDE.md §13의 정본입니다.
 > 마지막 갱신: 2026-05-01 · 갱신 주기: 즉시 누적 (실수 발생 시)
 
+- **2026-05-12** ㉝ | **주간 Meta 광고 리포트 USD→KRW 환산 누락으로 "지출 638원" 오표시** → `meta_ads_weekly_report.py`가 `meta_ads_report.py`의 환산 함수를 쓰지 않고 USD 원본 그대로 출력. 일일 리포트(693줄 `convert_metrics_to_krw`)와 달리 주간은 환산 단계 없음 | **하지 말 것**: 신규 리포트 작성 시 `lib.meta_currency`에서 환산 함수 import. 자체 계산 금지. §외부API다루기 9번.
+
+- **2026-05-12** ㉞ | **weekly workflow에 System User Token 전환 후에도 60일 갱신 step 잔존** → `refresh_meta_token.py` step이 `META_APP_ID` 없다며 매주 월요일 텔레그램 경고 발송. 인증 메커니즘 변경 시 관련 step 미제거 | **하지 말 것**: 인증 방식 변경 시 workflow step도 동시 제거. §자동화점검 5번.
+
+- **2026-05-12** ㉟ | **재구매 리포트 Vultr cron 중복 등록으로 하루 2회 이메일+텔레그램 발송** → crontab에 `repurchase_report.py` 동일 줄 2개 등록. 배포 후 `crontab -l` 실측 검증 없이 운영 | **하지 말 것**: cron 등록 후 반드시 `crontab -l` 실측 확인. §자동화점검 4번.
+
 - **2026-05-04** ㉜ | **QARP 병렬 백테스트 중 parquet 캐시 경합으로 결손율 37~74% 발생** → 4프로세스가 동시에 `prices.parquet`를 읽기/쓰기하면서 파일이 절반만 써진 상태에서 다른 프로세스가 읽음. 결과 CAGR 차이 19%p → INCONSISTENT 판정. Monitor "OK" 집계도 "INCONSISTENT" 문자열을 grep해 오판 | **하지 말 것**: parquet 캐시 공유 프로세스는 병렬 실행 금지. 데이터 레이어를 1회 로드 후 백테스트만 N회 반복하는 구조로 설계. Monitor 완료 판정 grep 패턴은 성공+실패 모두 포함 확인.
 
 - **2026-05-04** ㉛ | **QARP screener engine.py의 _stage3_value가 `max_peg` 키를 하드코딩으로 참조** → config yaml에 해당 키가 없는 변형 실행 시 `KeyError: 'max_peg'`로 즉시 실패. verify_run.py에서도 `--config` 인자를 `run_once()`에 전달 안 해 변형 config가 baseline과 동일하게 작동하는 silent bug 동시 발생 | **하지 말 것**: config dict에서 조건별 키를 `c["key"]`로 직접 참조 금지. 옵션 조건은 반드시 `c.get("key")` 또는 `if "key" in c:` 패턴 사용. 함수 인자 추가 시 호출 스택 전체(caller, caller의 caller)까지 전달 여부 확인.

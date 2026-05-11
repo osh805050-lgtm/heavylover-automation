@@ -30,6 +30,7 @@ from meta_ads_client import (
     last_n_days_kst,
 )
 from lib.glossary import glossary_details_html
+from lib.meta_currency import _to_krw, _check_account_currency, CURRENCY_KRW_PER_USD, _compare
 
 # Windows cp949 콘솔 대비
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
@@ -64,23 +65,23 @@ def _to_float(v):
 
 
 def summarize_row(row):
-    """캠페인 row → 지출/CPA/ROAS/CTR + 원시 지표"""
-    spend = _to_float(row.get("spend"))
+    """캠페인 row → 지출/CPA/ROAS/CTR + 원시 지표 (USD → KRW 환산 적용)"""
+    spend = _to_krw(_to_float(row.get("spend")))  # USD → KRW
     impressions = _to_float(row.get("impressions"))
     clicks = _to_float(row.get("clicks"))
     ctr = _to_float(row.get("ctr"))  # Meta 반환 = %
 
     purchases = _first_non_none(extract_action, row, PURCHASE_ACTION_TYPES)
-    purchase_value = _first_non_none(extract_action_value, row, PURCHASE_ACTION_TYPES)
-    cpa_api = _first_non_none(extract_cost_per_action, row, PURCHASE_ACTION_TYPES)
-    roas_api = extract_purchase_roas(row)
+    purchase_value = _to_krw(_to_float(_first_non_none(extract_action_value, row, PURCHASE_ACTION_TYPES)))  # USD → KRW
+    cpa_api = _to_krw(_to_float(_first_non_none(extract_cost_per_action, row, PURCHASE_ACTION_TYPES)))  # USD → KRW
+    roas_api = extract_purchase_roas(row)  # 비율 지표 — 환산 불필요
 
-    # CPA 폴백: spend / purchases
+    # CPA 폴백: spend(KRW) / purchases
     cpa = cpa_api
     if cpa is None and purchases and purchases > 0 and spend is not None:
         cpa = spend / purchases
 
-    # ROAS 폴백: purchase_value / spend
+    # ROAS 폴백: purchase_value(KRW) / spend(KRW) — 비율이므로 환산 불필요
     roas = roas_api
     if roas is None and purchase_value is not None and spend and spend > 0:
         roas = purchase_value / spend
@@ -174,6 +175,33 @@ def _cell_change(cell):
     if label == "비교 불가":
         return label
     return label
+
+
+# 주간 플래그 임계값 (CLAUDE.md §14 Kill Criteria + 내부 벤치마크)
+_WEEKLY_BENCHMARKS = {
+    "roas_kill": 2.8,    # K1 경보 기준
+    "cpa_warn": 30_000,  # CPA 경고 기준 (원)
+    "roas_good": 4.0,    # 우수 기준
+    "cpa_good": 20_000,  # 우수 기준 (원)
+}
+
+
+def _build_weekly_flags(totals):
+    """7일 집계 기준 자동 플래그. 빈 리스트 반환 시 이상 없음."""
+    flags = []
+    cur = totals.get("current") or {}
+    roas = cur.get("roas")
+    cpa = cur.get("cpa_krw")
+    if roas is not None and roas < _WEEKLY_BENCHMARKS["roas_kill"]:
+        flags.append(
+            f"🚨 K1 경보: ROAS {roas:.2f} < 기준 {_WEEKLY_BENCHMARKS['roas_kill']} "
+            "— 광고비 -30% 검토 필요"
+        )
+    if cpa is not None and cpa > _WEEKLY_BENCHMARKS["cpa_warn"]:
+        flags.append(
+            f"⚠️ CPA {cpa:,.0f}원 > 기준 {_WEEKLY_BENCHMARKS['cpa_warn']:,}원"
+        )
+    return flags
 
 
 def render_html(cur_range, prev_range, rows, totals, errors):
@@ -334,7 +362,17 @@ def render_html(cur_range, prev_range, rows, totals, errors):
         err_items = "".join(f"<li>{e}</li>" for e in errors)
         err_html = f'<div class="err"><b>경고</b><ul>{err_items}</ul></div>'
 
-    return f"<html><head>{css}</head><body>{head}{err_html}{totals_table}{highlight}{campaigns_table}{{claude_section}}{{glossary_section}}</body></html>"
+    weekly_flags = _build_weekly_flags(totals)
+    flags_html = ""
+    if weekly_flags:
+        flag_items = "".join(f"<li>{f}</li>" for f in weekly_flags)
+        flags_html = (
+            "<div style='background:#fff3cd;border:1px solid #ffc107;padding:12px;"
+            "margin-bottom:16px;border-radius:4px;'>"
+            f"<b>자동 플래그</b><ul style='margin:4px 0;'>{flag_items}</ul></div>"
+        )
+
+    return f"<html><head>{css}</head><body>{head}{err_html}{flags_html}{totals_table}{highlight}{campaigns_table}{{claude_section}}{{glossary_section}}</body></html>"
 
 
 def render_text(cur_range, prev_range, rows, totals, errors):
@@ -584,6 +622,10 @@ def save_artifact(cur_range, html, text, meta):
 
 
 def run():
+    DRY_RUN = os.getenv("META_WEEKLY_DRY_RUN") == "1"
+    if DRY_RUN:
+        print("[DRY RUN] META_WEEKLY_DRY_RUN=1 — 이메일 발송 없이 HTML만 저장합니다.")
+    _check_account_currency()
     print("Meta 광고 주간 리포트 생성 시작")
 
     cur_since, cur_until = last_n_days_kst(n=7, offset_days=0)
@@ -614,6 +656,14 @@ def run():
 
     html_raw = render_html((cur_since, cur_until), (prev_since, prev_until), comparison, totals, errors)
     text = render_text((cur_since, cur_until), (prev_since, prev_until), comparison, totals, errors)
+
+    # DRY RUN 조기 종료 — Claude API 호출 및 이메일 발송 전에 차단
+    if DRY_RUN:
+        dry_html = html_raw.replace("{claude_section}", "").replace("{glossary_section}", "")
+        dry_path = ROOT / "dry_run_weekly.html"
+        dry_path.write_text(dry_html, encoding="utf-8")
+        print(f"[DRY RUN] HTML 저장: {dry_path}")
+        return 0
 
     # Claude 주간 분석 (3블록) + 용어 풀이
     print("Claude 주간 분석 호출 중...")

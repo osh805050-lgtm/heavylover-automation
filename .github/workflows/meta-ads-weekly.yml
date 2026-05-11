@@ -59,15 +59,6 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: python meta_ads_winner_patterns.py
 
-      - name: Refresh Meta access token (60일 만료 회피)
-        env:
-          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
-          META_APP_ID: ${{ secrets.META_APP_ID }}
-          META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python refresh_meta_token.py || true
 
       - name: Commit report artifacts
         run: |

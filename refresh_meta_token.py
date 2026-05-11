@@ -1,7 +1,9 @@
 """
+⚠️ 2026-05-12 비활성: System User Token(무기한) 사용 중. 정책 변경으로 만료 토큰 복귀 시만 재활성.
+
 Meta User Access Token 자동 연장 (60일 만료 회피)
 
-매주 월요일 자동 호출 (.github/workflows/meta-ads-weekly.yml에 통합).
+매주 월요일 자동 호출 (.github/workflows/meta-ads-weekly.yml에 통합) — 현재 workflow에서 제거됨.
 
 원리:
 - Graph API `oauth/access_token?grant_type=fb_exchange_token` 호출

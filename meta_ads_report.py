@@ -63,50 +63,15 @@ KILL_CRITERIA = {
     "K6_aov_min": 58_000,    # AOV < 58,000원 2개월 연속 → 타겟 리셋
 }
 
-# 광고 계정 통화: USD. 자사 KRW 벤치마크와 비교 위해 환산.
-# 환율 고정 1,450원/USD (2026-04-28 승인). 변동 환율 미사용 — 추세 일관성 우선.
-CURRENCY_KRW_PER_USD = 1450
-CURRENCY_FIELDS_USD = {"spend", "cpc_krw", "cpm_krw", "cpa_krw", "purchase_value_krw"}
-
-# Codex review 2026-05-10: failures.md ⑯(통화 단위 가정) 재현 차단.
-# 광고 계정 통화가 USD 아니면 1450 곱셈으로 모든 금액이 ×1450배 부풀려짐.
-# H-5 fix: 모듈 import 시점에 raise하면 bootstrap_meta_yearly, meta_ads_adset_backfill 등
-# 다른 스크립트의 import도 함께 crash → guard를 _check_account_currency()로 분리해
-# run() 진입 시점에만 호출한다.
-_ACCOUNT_CURRENCY = os.getenv("META_AD_ACCOUNT_CURRENCY", "USD").upper()
-
-
-def _check_account_currency():
-    """통화 guard — run() 진입 시점에만 호출. import 시 raise 금지."""
-    account_currency = os.getenv("META_AD_ACCOUNT_CURRENCY", "USD").upper()
-    if account_currency != "USD" and os.getenv("META_ALLOW_NON_USD") != "1":
-        raise RuntimeError(
-            f"⚠️ Meta 광고 계정 통화가 {account_currency} (USD 아님). "
-            f"이 상태로 _to_krw 호출하면 모든 금액 ×{CURRENCY_KRW_PER_USD} 사고 발생. "
-            "META_ALLOW_NON_USD=1 환경변수 설정 시만 진행 (단, _to_krw 로직 검토 필수)."
-        )
-
-
-def _to_krw(value, currency_unit="USD"):
-    """USD → KRW 환산. None은 None. 이미 KRW면 그대로."""
-    if value is None:
-        return None
-    if currency_unit == "KRW":
-        return value
-    try:
-        return float(value) * CURRENCY_KRW_PER_USD
-    except (TypeError, ValueError):
-        return None
-
-
-def convert_metrics_to_krw(m):
-    """compute_metrics 결과 dict를 KRW 단위로 환산. 비율 지표(CTR·ROAS·Frequency)는 그대로."""
-    _check_account_currency()  # guard: import 경로로 직접 호출해도 non-USD 차단
-    out = dict(m)
-    for k in ("spend", "cpc_krw", "cpm_krw", "cpa_krw", "purchase_value_krw"):
-        if out.get(k) is not None:
-            out[k] = _to_krw(out[k])
-    return out
+# 통화 환산 유틸 — lib/meta_currency.py로 이전 (2026-05-12 순환 import 차단)
+from lib.meta_currency import (
+    CURRENCY_KRW_PER_USD,
+    CURRENCY_FIELDS_USD,
+    _check_account_currency,
+    _to_krw,
+    convert_metrics_to_krw,
+)
+_ACCOUNT_CURRENCY = os.getenv("META_AD_ACCOUNT_CURRENCY", "USD").upper()  # 하위 호환
 
 # 구매 액션 타입 후보 (Meta는 픽셀/오프사이트/온사이트 여러 형태로 반환)
 PURCHASE_ACTION_TYPES = [
@@ -142,30 +107,7 @@ def _fmt_num(v, decimals=0, suffix=""):
         return "데이터 없음"
 
 
-def _compare(actual, benchmark, higher_better=True):
-    """벤치마크 대비 비율 문자열 (우수/평균/미달)"""
-    if actual is None or benchmark is None or benchmark == 0:
-        return "비교 불가"
-    ratio = actual / benchmark
-    if higher_better:
-        if ratio >= 1.5:
-            verdict = "우수"
-        elif ratio >= 1.0:
-            verdict = "평균 이상"
-        elif ratio >= 0.7:
-            verdict = "평균 미달"
-        else:
-            verdict = "크게 미달"
-    else:
-        if ratio <= 0.7:
-            verdict = "우수"
-        elif ratio <= 1.0:
-            verdict = "평균 이내"
-        elif ratio <= 1.5:
-            verdict = "평균 초과"
-        else:
-            verdict = "크게 초과"
-    return f"{ratio*100:.0f}% ({verdict})"
+from lib.meta_currency import _compare
 
 
 def compute_metrics(row):
@@ -706,11 +648,8 @@ def run():
         if camp_raw["ok"]:
             for r in camp_raw.get("data", []):
                 c = summarize_campaign_row(r)
-                # H-5 fix (3차): _to_krw() 경유로 _check_account_currency guard 적용
-                # (직접 곱셈은 non-USD 계정 시 ×1450 사고 재현 가능)
-                for k in ("spend", "purchase_value", "cpa_krw"):
-                    if c.get(k) is not None:
-                        c[k] = _to_krw(c[k])
+                # summarize_campaign_row (= meta_ads_weekly_report.summarize_row) 가
+                # 2026-05-12부터 내부에서 _to_krw 적용해 KRW 반환 — 재환산 금지
                 campaign_summaries.append(c)
             print(f"캠페인별 데이터 수집: {len(campaign_summaries)}건 (KRW 환산)")
         else:
@@ -748,10 +687,7 @@ def run():
             adset_summaries = []
             for r in adset_raw.get("data", []):
                 m = summarize_campaign_row(r)  # 동일 액션 추출 로직 재사용
-                # H-5 fix (3차): _to_krw() 경유로 guard 적용 (직접 곱셈 우회 차단)
-                for k in ("spend", "purchase_value", "cpa_krw"):
-                    if m.get(k) is not None:
-                        m[k] = _to_krw(m[k])
+                # summarize_campaign_row 가 KRW 반환 (2026-05-12) — 재환산 금지
                 adset_summaries.append({
                     "date": target_date,
                     "adset_id": r.get("adset_id"),

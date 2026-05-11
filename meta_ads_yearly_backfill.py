@@ -29,7 +29,8 @@ from meta_ads_client import (
     extract_purchase_roas,
 )
 import meta_ads_history
-from meta_ads_report import compute_metrics, CURRENCY_KRW_PER_USD
+from meta_ads_report import compute_metrics
+from lib.meta_currency import CURRENCY_KRW_PER_USD
 
 KST = timezone(timedelta(hours=9))
 
