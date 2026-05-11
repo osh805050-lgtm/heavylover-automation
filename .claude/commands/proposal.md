@@ -197,7 +197,14 @@ stub 생성 후 사용자에게 1줄 안내: "submissions-log stub 생성 완료
 ### Step F-3: 자동 폴더·서류 셋업 + 양식 섹션 분리 실행
    ```
    python tools/setup_proposal_folder.py $ARGUMENTS {YYYY-MM-DD}
+   if ($LASTEXITCODE -ne 0) {
+       Write-Error "❌ F-3 폴더 셋업 실패 — 정제본 생성 건너뜀"
+       exit 1
+   }
    python tools/generate_submission_sections.py $ARGUMENTS {YYYY-MM-DD}
+   if ($LASTEXITCODE -ne 0) {
+       Write-Warning "⚠️ Word 파일은 생성됐지만 정제본 3종 생성 실패 — 수동 실행 명령: python tools/generate_submission_sections.py $ARGUMENTS {YYYY-MM-DD}"
+   }
    ```
    첫 번째 스크립트가 자동으로:
    - `~/OneDrive/헤비로버_제출/{날짜} {사업명}/` 폴더 생성 (제출서류·심사자료·산출물_md 하위 폴더 포함)
@@ -207,11 +214,15 @@ stub 생성 후 사용자에게 1줄 안내: "submissions-log stub 생성 완료
    - `proposals/knowledge/submission-manifest.json` 기반으로 필요 서류 자동 탐색 후 제출서류 폴더에 복사
    - 제출_체크리스트.md 생성 (구비된 서류 ✅ / 직접 준비 필요 ⚠️ 구분)
 
-   두 번째 스크립트가 자동으로:
-   - psst-rubric.json의 section_mapping 참조
-   - final.md를 P/S_solution/S_scale/T 섹션으로 분리
-   - 사업별 양식 섹션명에 맞게 매핑하여 `복붙용_섹션분리.txt` 생성
-   - HWP/Word 양식 열고 섹션별로 붙여넣기만 하면 됨
+   두 번째 스크립트가 자동으로 (2026-05-11 강화):
+   - **양식 옮기기용 정제**: frontmatter / 자가점검 / 메타 라벨(devil·rubric·R숫자·축N·인터뷰 박제) / markdown 강조(`**`, `*`, `\``) / footnote / 이모지 모두 제거
+   - **헤더 자체 코드 제거**: `### P-1. 1인칭 서사` → `### 1인칭 서사` (P-/S-/Scale- 코드 분리)
+   - **양식 헤더 매핑**: psst-rubric.json의 `form_headers` 우선 사용 (없으면 PSST `section_mapping` fallback)
+   - **부록 자동 분리**: "미확정 사항" + "출처 목록" + footnote 정의를 별도 파일로
+   - 산출물 3종 동시 생성:
+     - `복붙용_섹션분리.txt` — 양식 칸별로 붙여넣을 본문 (한글/Word 양식에 그대로 ctrl+v)
+     - `부록_미확정_및_출처.txt` — 별첨용 보충자료
+     - `정제본_본문전체.md` — 단일 파일 검수용
 
 3. 사용자에게 최종 보고:
 
@@ -230,17 +241,21 @@ stub 생성 후 사용자에게 1줄 안내: "submissions-log stub 생성 완료
 - competitor.md / fact-check.md / devil-attack.md (R2 검증)
 
 ### 지원사업 폴더 구성
-- 📄 {사업명}_사업계획서_{날짜}.docx — Word 수정 가능 최종본
-- 📄 복붙용_섹션분리.txt — HWP/Word 양식 섹션별 붙여넣기용
+- 📄 {사업명}_사업계획서_{날짜}.docx — Word 수정 가능 최종본 (final.md 변환본, 메타 포함)
+- 📄 복붙용_섹션분리.txt — **양식 옮기기용 정제본** (메타·markdown·footnote 제거 + 양식 칸별 분리)
+- 📄 부록_미확정_및_출처.txt — 별첨용 (미확정 사항 + 출처 + footnote)
+- 📄 정제본_본문전체.md — 정제본 단일 파일 (검수용)
 - 📁 제출서류/ — 자동 구비된 서류 + 직접 준비 필요 목록
 - 📁 산출물_md/ — 전체 md 파일 (감사 추적)
 - ✅ 제출_체크리스트.md — 구비 현황 + 직접 준비 필요 항목
 
 ### 양식 제출 방법 (복붙용_섹션분리.txt 사용)
-1. 복붙용_섹션분리.txt 열기
-2. 【양식 섹션】 헤더 아래 내용을 복사
+1. `복붙용_섹션분리.txt` 열기 — frontmatter·메타 라벨·markdown 강조 다 빠진 깨끗본
+2. `[양식 칸 N] {칸 이름}` 헤더 아래 본문 복사
 3. HWP/Word 양식의 해당 칸에 붙여넣기
-4. 글자 수 제한·양식 지침에 맞게 최종 편집
+4. **표는 한글 표 도구로 다시 그리기** (markdown 표 그대로 옮기면 안 됨)
+5. 글자 수 제한·양식 지침에 맞게 최종 편집 (보통 30분 내외)
+6. 별첨 필요 시 `부록_미확정_및_출처.txt` 활용
 
 ### 사용자 직접 액션 필수
 1. 제출_체크리스트.md 열어서 ⚠️ 항목 직접 준비
