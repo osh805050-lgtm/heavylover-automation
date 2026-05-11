@@ -172,6 +172,15 @@ def _atomic_replace_worksheet(
         try:
             prod_ws.update_title(prod_tab_name)
             log(f"  ✅ '{prev_name}' → '{prod_tab_name}' 원복 성공 (데이터 보존)")
+            # Try to clean up the orphaned staging tab (best effort)
+            try:
+                spreadsheet.del_worksheet(staging_ws)
+                log(f"  ↳ staging '{staging_name}' 정리 완료")
+            except Exception as cleanup_err:
+                log(f"  ⚠️ staging '{staging_name}' 정리 실패: {cleanup_err} (수동 정리 필요)")
+            raise RuntimeError(
+                f"staging→prod rename 실패 (원복 성공으로 데이터는 보존됨): {rename_err}"
+            ) from rename_err
         except Exception as restore_err:
             log(f"  🚨 원복도 실패: {restore_err}")
             raise RuntimeError(
@@ -190,6 +199,7 @@ def _atomic_replace_worksheet(
 
 def _find_tab(spreadsheet, expected_first: str, expected_second: str | None = None):
     """첫 컬럼명(과 선택적으로 두 번째)으로 탭을 찾는다."""
+    all_titles = {ws.title for ws in spreadsheet.worksheets()}
     for ws in spreadsheet.worksheets():
         try:
             hdr = ws.row_values(1)
@@ -201,9 +211,11 @@ def _find_tab(spreadsheet, expected_first: str, expected_second: str | None = No
             continue
         if expected_second and (len(hdr) < 2 or hdr[1].strip() != expected_second):
             continue
-        # Reject recovery/staging tabs — only return canonical production tab
+        # Skip only if this tab looks like a recovery/staging artifact of ANOTHER prod tab
         title = ws.title
-        if title.endswith("__prev") or title.endswith("__staging"):
+        if title.endswith("__prev") and title[:-len("__prev")] in all_titles:
+            continue
+        if title.endswith("__staging") and title[:-len("__staging")] in all_titles:
             continue
         return ws
     return None

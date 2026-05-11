@@ -798,7 +798,7 @@ def _commit_seen_keys(items: list, seen: dict, today_iso: str) -> None:
     _save_seen_keys(seen)
 
 
-def _apply_layer4_fail_closed(scored: list, log, eligibility_attempted: bool = True) -> tuple[int, str | None]:
+def _apply_layer4_fail_closed(scored: list, log, eligibility_attempted: bool = True, eligibility_failed: bool = False) -> tuple[int, str | None]:
     """Layer 4 실패 감지 → 해당 항목을 'eligibility_unverified' 티어로 다운그레이드.
 
     eligibility_checker.batch_check는 API 실패 시 예외 던지지 않고
@@ -814,6 +814,15 @@ def _apply_layer4_fail_closed(scored: list, log, eligibility_attempted: bool = T
     """
     if not eligibility_attempted:
         return (0, None)
+    # Defensive re-tier: if batch_check raised mid-execution, partial results
+    # may have eligible="no" set but the tiering loop was skipped.
+    if eligibility_failed:
+        for s in scored:
+            elig = s.get("eligibility") or {}
+            tier = s.get("tier") or ""
+            if elig.get("eligible") == "no" and not tier.startswith("자격미달"):
+                s["tier"] = "자격미달 (LLM 판정, 재검증 누락)"
+                s["tags"] = (s.get("tags") or []) + ["LLM_INELIGIBLE_DEFENSIVE"]
     api_failed = []
     high_score_total = 0
     for s in scored:
@@ -977,6 +986,7 @@ def main():
     # 키워드로는 못 잡는 자격 미달(여성기업 한정·농민 한정·10년 이상 등) 필터
     from dotenv import load_dotenv as _ld
     _ld(override=True)
+    eligibility_failed = False
     if not args.skip_eligibility and os.getenv("ANTHROPIC_API_KEY"):
         try:
             from lib import eligibility_checker
@@ -1005,6 +1015,7 @@ def main():
                 log.info(f"검증 불가 강등 (본문 없음): {unverifiable_count}건")
         except Exception as e:
             log.warning(f"자격검증 모듈 실패 (스킵): {type(e).__name__}: {e}")
+            eligibility_failed = True
     else:
         if args.skip_eligibility:
             log.info("자격검증 스킵 (--skip-eligibility)")
@@ -1015,7 +1026,7 @@ def main():
     # batch_check이 API 실패를 "unsure"로 inline 변환하기 때문에 결과에서 재해석한다.
     # (eligibility_checker 모듈은 그대로 두고 govt_radar.py에서 후처리)
     eligibility_attempted = (not args.skip_eligibility and bool(os.getenv("ANTHROPIC_API_KEY")))
-    downgraded_count, layer4_alert = _apply_layer4_fail_closed(scored, log, eligibility_attempted)
+    downgraded_count, layer4_alert = _apply_layer4_fail_closed(scored, log, eligibility_attempted, eligibility_failed=eligibility_failed)
     if layer4_alert and not args.dry_run:
         _send_ops_alert(layer4_alert, log)
 

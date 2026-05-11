@@ -622,6 +622,10 @@ def save_report(target_date, content):
 
 
 def run():
+    # H-5 fix (3차): .env 로드를 guard 호출 이전에 명시. 모듈 import 시 .env가
+    # 미리 로드되지 않으면 META_AD_ACCOUNT_CURRENCY가 빈 값으로 통과될 수 있음.
+    from dotenv import load_dotenv
+    load_dotenv(ROOT / ".env", override=True)
     _check_account_currency()  # H-5: import 시점이 아닌 run() 진입 시 통화 guard
 
     import argparse
@@ -702,10 +706,11 @@ def run():
         if camp_raw["ok"]:
             for r in camp_raw.get("data", []):
                 c = summarize_campaign_row(r)
-                # USD → KRW (단가성 필드만)
+                # H-5 fix (3차): _to_krw() 경유로 _check_account_currency guard 적용
+                # (직접 곱셈은 non-USD 계정 시 ×1450 사고 재현 가능)
                 for k in ("spend", "purchase_value", "cpa_krw"):
                     if c.get(k) is not None:
-                        c[k] = float(c[k]) * CURRENCY_KRW_PER_USD
+                        c[k] = _to_krw(c[k])
                 campaign_summaries.append(c)
             print(f"캠페인별 데이터 수집: {len(campaign_summaries)}건 (KRW 환산)")
         else:
@@ -743,10 +748,10 @@ def run():
             adset_summaries = []
             for r in adset_raw.get("data", []):
                 m = summarize_campaign_row(r)  # 동일 액션 추출 로직 재사용
-                # USD → KRW 환산 (단가성 필드만)
+                # H-5 fix (3차): _to_krw() 경유로 guard 적용 (직접 곱셈 우회 차단)
                 for k in ("spend", "purchase_value", "cpa_krw"):
                     if m.get(k) is not None:
-                        m[k] = float(m[k]) * CURRENCY_KRW_PER_USD
+                        m[k] = _to_krw(m[k])
                 adset_summaries.append({
                     "date": target_date,
                     "adset_id": r.get("adset_id"),

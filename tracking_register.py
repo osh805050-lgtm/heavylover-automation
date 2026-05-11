@@ -594,16 +594,29 @@ def run_from_excel():
     seen_coupang: dict = {}
     coupang_conflicts: List[TrackingResult] = []
     coupang_order_trackings: dict = {}
+    coupang_conflict_order_ids: set = set()
     for order_id, tracking in coupang_items:
         prev = coupang_order_trackings.setdefault(order_id, set())
         prev.add(tracking)
         if len(prev) > 1:
+            coupang_conflict_order_ids.add(order_id)
+            # H-1 fix: 첫 번째 행이 이미 seen_coupang에 들어간 경우 evict + skipped 기록
+            if order_id in seen_coupang:
+                coupang_conflicts.append(TrackingResult(
+                    channel="coupang", order_id=order_id, item_code="",
+                    tracking_no=seen_coupang[order_id], status="skipped",
+                    api_response_code="conflict_multi_tracking",
+                    api_response_body=f"order has multiple trackings: {sorted(prev)}",
+                ))
+                del seen_coupang[order_id]
             coupang_conflicts.append(TrackingResult(
                 channel="coupang", order_id=order_id, item_code="",
                 tracking_no=tracking, status="skipped",
                 api_response_code="conflict_multi_tracking",
                 api_response_body=f"order has multiple trackings: {sorted(prev)}",
             ))
+            continue
+        if order_id in coupang_conflict_order_ids:
             continue
         if order_id not in seen_coupang:
             seen_coupang[order_id] = tracking
