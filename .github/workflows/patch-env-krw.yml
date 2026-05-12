@@ -1,0 +1,52 @@
+name: Vultr .env KRW 패치 (1회성 — 실행 후 삭제)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Vultr .env에 META_AD_ACCOUNT_CURRENCY=KRW + META_ALLOW_NON_USD=1 패치
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VULTR_HOST }}
+          username: ${{ secrets.VULTR_USER }}
+          key: ${{ secrets.VULTR_SSH_KEY }}
+          port: ${{ secrets.VULTR_PORT }}
+          script: |
+            set -e
+            cd /root/heavylover-automation
+
+            # META_AD_ACCOUNT_CURRENCY: USD → KRW (없으면 추가)
+            if grep -q "^META_AD_ACCOUNT_CURRENCY=" .env 2>/dev/null; then
+              sed -i 's/^META_AD_ACCOUNT_CURRENCY=.*/META_AD_ACCOUNT_CURRENCY=KRW/' .env
+              echo "META_AD_ACCOUNT_CURRENCY 업데이트: KRW"
+            else
+              echo "META_AD_ACCOUNT_CURRENCY=KRW" >> .env
+              echo "META_AD_ACCOUNT_CURRENCY 추가: KRW"
+            fi
+
+            # META_ALLOW_NON_USD: 없으면 추가, 있으면 1로 설정
+            if grep -q "^META_ALLOW_NON_USD=" .env 2>/dev/null; then
+              sed -i 's/^META_ALLOW_NON_USD=.*/META_ALLOW_NON_USD=1/' .env
+              echo "META_ALLOW_NON_USD 업데이트: 1"
+            else
+              echo "META_ALLOW_NON_USD=1" >> .env
+              echo "META_ALLOW_NON_USD 추가: 1"
+            fi
+
+            echo "=== 패치 완료 ==="
+            grep -E "META_AD_ACCOUNT_CURRENCY|META_ALLOW_NON_USD" .env
+
+      - name: 텔레그램 알림
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            MSG="✅ [Vultr .env] META_AD_ACCOUNT_CURRENCY=KRW + META_ALLOW_NON_USD=1 패치 완료"
+          else
+            MSG="❌ [Vultr .env] KRW 패치 실패 — Actions 로그 확인"
+          fi
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN_OPS || secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID_OPS || secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "text=${MSG}"
