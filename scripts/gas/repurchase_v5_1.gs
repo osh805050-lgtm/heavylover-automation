@@ -82,6 +82,8 @@ const HL = {
   },
 
   SHEET_ORDER: [
+    // [v5.1] 대시보드 시트는 항상 맨 앞 — repurchase_report.py:758-763이 매일 index=0 적용하므로 GAS reorderSheets()도 이를 존중
+    '📊 대시보드',
     '카페24 재구매매출',
     '스마트스토어 재구매매출',
     '재구매_카페24_일별',
