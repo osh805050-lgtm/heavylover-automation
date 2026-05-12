@@ -46,12 +46,15 @@ def _to_krw(value, currency_unit="USD"):
 
 
 def convert_metrics_to_krw(m):
-    """compute_metrics 결과 dict를 KRW 단위로 환산. 비율 지표(CTR·ROAS·Frequency)는 그대로."""
+    """compute_metrics 결과 dict를 KRW 단위로 환산. 비율 지표(CTR·ROAS·Frequency)는 그대로.
+    META_AD_ACCOUNT_CURRENCY=KRW 설정 시 ×1450 생략 (API가 이미 KRW 반환).
+    """
     _check_account_currency()
+    account_currency = os.getenv("META_AD_ACCOUNT_CURRENCY", "USD").upper()
     out = dict(m)
     for k in ("spend", "cpc_krw", "cpm_krw", "cpa_krw", "purchase_value_krw"):
         if out.get(k) is not None:
-            out[k] = _to_krw(out[k])
+            out[k] = _to_krw(out[k], currency_unit=account_currency)
     return out
 
 

@@ -66,15 +66,18 @@ def _to_float(v):
 
 
 def summarize_row(row):
-    """캠페인 row → 지출/CPA/ROAS/CTR + 원시 지표 (USD → KRW 환산 적용)"""
-    spend = _to_krw(_to_float(row.get("spend")))  # USD → KRW
+    """캠페인 row → 지출/CPA/ROAS/CTR + 원시 지표 (API 통화 → KRW 환산).
+    META_AD_ACCOUNT_CURRENCY=KRW 시 ×1450 생략 (API 이미 KRW 반환).
+    """
+    _ac = os.getenv("META_AD_ACCOUNT_CURRENCY", "USD").upper()
+    spend = _to_krw(_to_float(row.get("spend")), currency_unit=_ac)
     impressions = _to_float(row.get("impressions"))
     clicks = _to_float(row.get("clicks"))
     ctr = _to_float(row.get("ctr"))  # Meta 반환 = %
 
     purchases = _first_non_none(extract_action, row, PURCHASE_ACTION_TYPES)
-    purchase_value = _to_krw(_to_float(_first_non_none(extract_action_value, row, PURCHASE_ACTION_TYPES)))  # USD → KRW
-    cpa_api = _to_krw(_to_float(_first_non_none(extract_cost_per_action, row, PURCHASE_ACTION_TYPES)))  # USD → KRW
+    purchase_value = _to_krw(_to_float(_first_non_none(extract_action_value, row, PURCHASE_ACTION_TYPES)), currency_unit=_ac)
+    cpa_api = _to_krw(_to_float(_first_non_none(extract_cost_per_action, row, PURCHASE_ACTION_TYPES)), currency_unit=_ac)
     roas_api, _ = extract_purchase_roas(row)  # 비율 지표 — 환산 불필요
 
     # CPA 폴백: spend(KRW) / purchases
