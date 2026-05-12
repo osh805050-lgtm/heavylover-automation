@@ -46,20 +46,13 @@ const HL = {
     ORDER_NO: 2,   // 주문번호
   },
 
-  // [v5.1 #3] isCanceled exact match — 정상 상태 화이트리스트
-  // 카페24: sheets_sync.py에서 "거래종료" 고정 (line 244)
-  // SS:    SS_STATUS_LABEL = {결제완료, 발송처리, 배송중, 배송완료, 구매확정, 교환}
-  //        sheets_sync.py:419에서 CANCELED/RETURNED/CANCELED_BY_NOPAYMENT 이미 제외 후 시트에 들어옴
-  // 따라서 GAS에서는 화이트리스트 정상 상태만 통과시키고, 그 외는 모두 제외 (오탐 차단)
-  VALID_STATUSES: new Set([
-    '거래종료',       // 카페24 (sheets_sync.py에서 정상 주문에 고정 부여)
-    '결제완료',       // SS
-    '발송처리',       // SS
-    '배송중',         // SS
-    '배송완료',       // SS
-    '구매확정',       // SS
-    '교환',           // SS
-  ]),
+  // [v5.1.1] status 비교 — 블랙리스트 방식 (취소/환불/반품 키워드 포함 시 제외)
+  // v5.1 화이트리스트 폐기 이유: 카페24 시트의 raw 상태값이 "배송 완료"(공백 포함)·"배송중"·"취소 완료"·
+  //   "입금전 취소 - 관리자" 등 다양했고 화이트리스트가 좁아서 정상 주문 99%가 제외됨 (2026-05-13 발견).
+  // 새 규칙: 정규화(trim+공백제거) 후 '취소'·'환불'·'반품' 부분일치 시에만 제외.
+  // 부분일치 오탐 (예: "취소가능"이라는 상태가 만약 있다면 정상인데 제외됨)은 현재 카페24/SS 시트
+  //   상태값 목록에 존재하지 않으므로 안전. (만약 미래에 그런 상태 추가되면 별도 예외 처리.)
+  CANCEL_KEYWORDS: ['취소', '환불', '반품'],
 
   OUT: {
     CAFE24_D:      '재구매_카페24_일별',
@@ -259,8 +252,8 @@ function loadCafe24Orders() {
     const orderNo  = String(row[c.ORDER_NO - 1] || '').trim();
 
     if (!customer || !rawDate || !orderNo) continue;
-    // [v5.1 #3] exact match — VALID_STATUSES 안 들면 제외
-    if (!HL.VALID_STATUSES.has(status)) continue;
+    // [v5.1.1] 블랙리스트 방식 — 정규화(공백 제거) 후 취소/환불/반품 포함 시 제외
+    if (isCanceledStatus_(status)) continue;
     const orderDate = parseDate(rawDate);
     if (!orderDate) continue;
 
@@ -296,8 +289,8 @@ function loadSSOrders() {
     const orderNo  = String(row[c.ORDER_NO - 1] || '').trim();
 
     if (!customer || !rawDate || !orderNo) continue;
-    // [v5.1 #3] exact match — VALID_STATUSES 안 들면 제외
-    if (!HL.VALID_STATUSES.has(status)) continue;
+    // [v5.1.1] 블랙리스트 방식 — 정규화(공백 제거) 후 취소/환불/반품 포함 시 제외
+    if (isCanceledStatus_(status)) continue;
     const orderDate = parseDate(rawDate);
     if (!orderDate) continue;
 
@@ -1075,6 +1068,17 @@ function reorderSheets() {
 // ============================================================
 // ── 유틸리티
 // ============================================================
+
+/**
+ * [v5.1.1] 정규화된 status 문자열에 취소/환불/반품 키워드 포함 시 true.
+ * 시트 raw 값이 공백 포함("배송 완료", "취소 완료", "입금전 취소 - 관리자")이라
+ * 공백 제거 후 부분일치로 비교.
+ */
+function isCanceledStatus_(status) {
+  const s = String(status || '').replace(/\s+/g, '');
+  if (!s) return true; // 빈 상태는 안전하게 제외
+  return HL.CANCEL_KEYWORDS.some(kw => s.indexOf(kw) >= 0);
+}
 
 function buildHistory(orders) {
   const h = {};

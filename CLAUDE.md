@@ -78,6 +78,7 @@
 - **§hookify규칙**: `.claude/hookify.block-{cheerleading,exaggeration}.local.md` 활성. "최고의/혁신적/엄청난/완벽/적극 추천/분명히 성공" 등 패턴 매치 시 stop event에서 응답 차단. 대체: 숫자·비교·사실로 변환 후 재작성.
 - **§plan점검**: plan adversarial codex review는 최대 2회. 5개+ 변경 plan은 분할(2~3개씩). 결함이 줄지 않고 늘면 즉시 중단 + 코드 진입. → `patterns.md §plan점검`
 - **§비율지표분모**: 비율(재구매율·전환율·리텐션) 지표 분모 점검 3가지 필수 — (a) 같은 버킷 중복 dedup, (b) 미관찰(observing) 제외 = `eligible = total - observing`, (c) maturity window 적용. observing=0 케이스는 표시 허용. → `patterns.md §비율지표분모`
+- **§시트status분류**: 시트 raw STATUS 분류 시 다른 코드 코멘트만 보고 화이트리스트 정의 금지. raw 값 직접 sampling 후 블랙리스트(취소/환불/반품 부분일치 제외) > 화이트리스트(정상 상태 열거). 정규화(공백 제거) 필수. → `patterns.md §시트status분류`
 
 ### 실수 자동 기록 (필수)
 - 승현님이 실수·오류·잘못된 판단·금지사항 위반을 지적하면 → **즉시 `docs/lessons/failures.md` 상단(시간 역순)에 한 줄 누적 기록**

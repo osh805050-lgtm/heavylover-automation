@@ -1,7 +1,9 @@
 # 실패 노트 (시간순 원시 로그)
 
 > 이 파일은 [작업 종류 매칭 시 grep 검색] / [월말 회고] / [에이전트 시작 전 위험 점검] 시 로드됩니다. CLAUDE.md §13의 정본입니다.
-> 마지막 갱신: 2026-05-12 · 갱신 주기: 즉시 누적 (실수 발생 시)
+> 마지막 갱신: 2026-05-13 · 갱신 주기: 즉시 누적 (실수 발생 시)
+
+- **2026-05-13** ㊷ | **GAS v5.1 VALID_STATUSES 화이트리스트가 카페24 시트 raw 값과 불일치 → 카페24 첫구매자 99% 제외** | sheets_sync.py:244 코멘트가 "카페24는 거래종료 고정"이라 명시했지만 시트 raw 값은 "배송 완료"(공백 포함)·"배송중"·"취소 완료"·"입금전 취소 - 관리자". v5.1에서 화이트리스트로 바꿀 때 시트 raw 값 직접 검증 안 함. 사용자가 2026-03 카페24 첫구매자 1명(raw 200건+)을 보고 발견. 수정: v5.1.1 — 블랙리스트 회귀(`isCanceledStatus_` 정규화+취소/환불/반품 부분일치 제외) | **하지 말 것**: 다른 코드 코멘트("거래종료 고정")만 보고 시트 raw 값 가정 금지. 시트 화이트리스트/블랙리스트 변경 시 raw STATUS 컬럼 unique 값 분포 직접 확인 후 적용. 가능하면 블랙리스트(취소 키워드 제외) > 화이트리스트(정상 상태 열거) 선호 — 시트 raw 값이 다양·변경 가능하면 화이트리스트는 silent drop 위험.
 
 - **2026-05-13** ㊶ | **META_AD_ACCOUNT_CURRENCY=USD 고정 + System User Token 전환 후 API KRW 응답 → convert_metrics_to_krw ×1450 이중환산** → spend 2억 텔레그램 리포트. 원인: personal token 시절 API가 USD 반환, System User Token 후 계정 네이티브 KRW 반환. currency_unit="USD" 하드코딩으로 모든 금액 ×1450. 수정: convert_metrics_to_krw/summarize_row에서 os.getenv("META_AD_ACCOUNT_CURRENCY") 읽어 _to_krw에 전달, env=KRW+META_ALLOW_NON_USD=1 | **하지 말 것**: Meta API 통화 응답은 계정 토큰 유형(personal/system user)에 따라 달라질 수 있음. 토큰 변경 시 raw JSON spend/cpc 단위를 즉시 확인. META_AD_ACCOUNT_CURRENCY는 하드코딩 금지 — env var로 런타임 조회.
 

@@ -349,3 +349,38 @@
 **연관 실패**: failures.md ㊳(GAS v5_0 수치 결함 10개), ㊵(GAS run_id contract), ㊴(sheets_sync row 복제 패턴)
 
 **hookify 보강**: 없음 (코드 작성 시 자가 점검 + codex review로 잡음)
+
+---
+
+## §시트status분류 (Sheet Status Whitelist vs Blacklist)
+
+**목적**: 시트 raw 데이터에서 정상/취소 주문 분류 시 silent drop(정상 주문 다수가 누락) 사고 차단.
+
+**핵심 원칙**: 시트 raw STATUS 컬럼 unique 값 분포를 직접 확인하지 않고 다른 코드 코멘트만 보고 화이트리스트/블랙리스트 정의 금지.
+
+**사례 (2026-05-13 ㊷)**: GAS v5.1에서 `VALID_STATUSES = {'거래종료', '결제완료', ...}` 화이트리스트 도입.
+- 근거: sheets_sync.py:244 코멘트가 "카페24는 거래종료 고정"이라 명시
+- 실제 시트 raw 값: "배송 완료"(공백 포함)·"배송중"·"취소 완료"·"입금전 취소 - 관리자"
+- 결과: 카페24 2026-03 첫구매자 200건+ 중 1명만 통과. 99% silent drop
+- 사용자 발견 (코드 자가 점검·codex로 못 잡음)
+
+**규칙**:
+1. **시트 raw 값 직접 확인 우선** — `sheet.getRange('C2:C100').getValues()` 등으로 STATUS 컬럼 unique 값 sampling
+2. **블랙리스트 > 화이트리스트** 선호
+   - 블랙리스트: '취소'·'환불'·'반품' 키워드 부분일치 시 제외
+   - 화이트리스트: 정상 상태 모두 열거 → 누락 시 silent drop
+   - 시트 raw 값이 다양·변경 가능하면 화이트리스트는 위험
+3. **정규화 필수** — `String(status).trim().replace(/\s+/g, '')` 후 비교
+   - "배송 완료" vs "배송완료" 같은 공백 차이로 silent drop
+4. **부분일치 오탐 검증** — '취소' 키워드가 정상 상태에도 들어가는지 확인
+   - 가상 예: "취소가능" 상태가 있으면 정상인데 제외됨. 시트 raw 값 sampling 후 안전 확인
+
+**자가 검증 체크**:
+- [ ] 시트 raw STATUS 컬럼 unique 값을 직접 확인했는가
+- [ ] 정규화(공백 제거)했는가
+- [ ] 블랙리스트 키워드가 정상 상태에 우연히 포함되는지 확인했는가
+- [ ] 신규 도입 후 1주 sampling으로 silent drop 비율 점검했는가
+
+**연관 실패**: failures.md ㊷(GAS v5.1 화이트리스트 silent drop)
+
+**hookify 보강**: 없음 (시트 raw 값 직접 확인은 코드 작성 시 자가 점검 필요. hook은 자동 트리거 어려움)
