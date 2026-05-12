@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta
 
 import meta_ads_history
 from meta_ads_client import fetch_adset_daily_range
-from lib.meta_currency import CURRENCY_KRW_PER_USD
+from lib.meta_currency import CURRENCY_KRW_PER_USD, _check_account_currency
 from meta_ads_weekly_report import summarize_row as summarize_campaign_row, _to_float
 
 
@@ -75,6 +75,7 @@ def _notify_token_expired(err_str):
 
 def main():
     args = parse_args()
+    _check_account_currency()
     since = datetime.fromisoformat(args.since).date()
     until = (
         datetime.fromisoformat(args.until).date()

@@ -9,7 +9,7 @@
 - 차트 6~8개 인라인 (트렌드/계절성/요일/퍼널/캠페인 분포 등)
 
 원칙:
-- daily.csv 데이터 < 60일이면 "데이터 누적 중 (N/60일)" 안내 + 가능한 분석만
+- daily.csv 데이터 < 7일이면 "데이터 누적 부족" 안내 + 실행 중단 (코드 가드: 7일)
 - 모든 수치는 ground truth 기반, 추정 금지
 """
 from __future__ import annotations
@@ -335,7 +335,13 @@ def call_claude_4roles(ctx):
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user}],
         )
-        return resp.content[0].text.strip(), None
+        if not resp.content:
+            return None, "content 블록 비어있음"
+        text = resp.content[0].text.strip()
+        if resp.stop_reason == "max_tokens":
+            print("⚠️ yearly_report Claude truncated (stop_reason=max_tokens)")
+            text += "\n\n⚠️ [응답 잘림 — max_tokens 초과. 전체 분석을 보려면 max_tokens를 늘리세요.]"
+        return text, None
     except Exception as e:
         return None, f"Claude 호출 실패: {e}"
 

@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 ENV_PATH = Path(__file__).parent / ".env"
 KST = timezone(timedelta(hours=9))
 
-CLAUDE_MODEL = "claude-haiku-4-5"
+CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 MAX_TOKENS_SHORT = 600
 MAX_TOKENS_DEEP = 2500
 
@@ -103,8 +103,13 @@ def generate_short(metrics, self_bench, flags, recent_trend, winner_patterns=Non
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user}],
         )
-        text = resp.content[0].text if resp.content else ""
-        return text.strip(), None
+        if not resp.content:
+            return None, "content 블록 비어있음"
+        text = resp.content[0].text.strip()
+        if resp.stop_reason == "max_tokens":
+            print("⚠️ Claude 짧은 코멘트 truncated (stop_reason=max_tokens)")
+            text += "\n\n⚠️ [응답 잘림 — max_tokens 초과. 전체 분석을 보려면 max_tokens를 늘리세요.]"
+        return text, None
     except Exception as e:
         return None, f"Claude 호출 실패: {e}"
 
@@ -153,8 +158,13 @@ auto_flags 각 항목에 즉시 액션 vs 모니터 vs 무시 판정 + 근거.
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user}],
         )
-        text = resp.content[0].text if resp.content else ""
-        return text.strip(), None
+        if not resp.content:
+            return None, "content 블록 비어있음"
+        text = resp.content[0].text.strip()
+        if resp.stop_reason == "max_tokens":
+            print("⚠️ Claude 심층 분석 truncated (stop_reason=max_tokens)")
+            text += "\n\n⚠️ [응답 잘림 — max_tokens 초과. 전체 분석을 보려면 max_tokens를 늘리세요.]"
+        return text, None
     except Exception as e:
         return None, f"Claude 호출 실패: {e}"
 

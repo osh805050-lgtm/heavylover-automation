@@ -34,7 +34,9 @@ def _quantile(values, q):
 
 def compute(metric, window=30):
     rows = meta_ads_history.load_recent_account(days=window)
-    values = [v for v in (_parse_float(r.get(metric)) for r in rows) if v is not None]
+    zero_excl = metric in ("roas", "cpa_krw")
+    values = [v for v in (_parse_float(r.get(metric)) for r in rows)
+              if v is not None and (not zero_excl or v > 0)]
     n = len(values)
 
     if n < MIN_DAYS_FOR_BENCHMARK:

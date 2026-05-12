@@ -19,6 +19,9 @@ from matplotlib import font_manager  # noqa: E402
 
 _FONT_INITIALIZED = False
 
+BENCHMARK_ROAS = 2.5       # 업계 평균 기준선
+HEAVYLOVER_BASELINE = 3.5  # 헤비로버 내부 목표선
+
 
 def _init_font() -> None:
     global _FONT_INITIALIZED
@@ -76,7 +79,7 @@ def chart_7d_trend(recent_trend: list[dict]) -> Optional[bytes]:
     valid_y = [r for r in roas if r is not None]
     if valid_y:
         ax2.plot(valid_x, valid_y, color="#e67e22", marker="o", linewidth=2.2, label="ROAS")
-        ax2.axhline(y=2.5, color="#e74c3c", linestyle="--", linewidth=1, alpha=0.6, label="벤치 2.5")
+        ax2.axhline(y=BENCHMARK_ROAS, color="#e74c3c", linestyle="--", linewidth=1, alpha=0.6, label=f"벤치 {BENCHMARK_ROAS}")
         ax2.set_ylabel("ROAS", color="#e67e22")
         for x, y in zip(valid_x, valid_y):
             ax2.text(x, y + 0.05, f"{y:.2f}", ha="center", fontsize=8, color="#e67e22", fontweight="bold")
@@ -122,7 +125,7 @@ def chart_metric_vs_benchmark(metrics: dict, bench: dict) -> Optional[bytes]:
         actual_ratio = val / b if b else 0
         ax.text(bar.get_width() + 0.02, bar.get_y() + bar.get_height() / 2,
                 f"{actual_ratio:.0%}", va="center", fontsize=9, fontweight="bold")
-    ax.set_xlim(0, max(2.5, max(ratios) + 0.3))
+    ax.set_xlim(0, max(BENCHMARK_ROAS, max(ratios) + 0.3))
     ax.set_xlabel("벤치 대비 (높을수록 좋음, 1.0 = 동일)")
     ax.set_title("오늘 핵심 지표 vs 업계 벤치", fontsize=12, fontweight="bold")
     ax.grid(True, alpha=0.2, axis="x")
@@ -150,11 +153,11 @@ def chart_campaign_roas(campaigns: list[dict], top_n: int = 8) -> Optional[bytes
     roas_vals = [_safe_num(c.get("roas")) or 0 for c in sorted_c]
     spend_vals = [_safe_num(c.get("spend")) or 0 for c in sorted_c]
 
-    colors = ["#27ae60" if r >= 2.5 else "#e67e22" if r >= 1.5 else "#e74c3c" for r in roas_vals]
+    colors = ["#27ae60" if r >= BENCHMARK_ROAS else "#e67e22" if r >= 1.5 else "#e74c3c" for r in roas_vals]
 
     fig, ax = plt.subplots(figsize=(8, max(3, len(sorted_c) * 0.45)))
     bars = ax.barh(names[::-1], roas_vals[::-1], color=colors[::-1], alpha=0.85)
-    ax.axvline(x=2.5, color="#7f8c8d", linestyle="--", linewidth=1.2, label="벤치 2.5")
+    ax.axvline(x=BENCHMARK_ROAS, color="#7f8c8d", linestyle="--", linewidth=1.2, label=f"벤치 {BENCHMARK_ROAS}")
 
     for bar, r, s in zip(bars, roas_vals[::-1], spend_vals[::-1]):
         ax.text(bar.get_width() + 0.05, bar.get_y() + bar.get_height() / 2,
@@ -209,7 +212,7 @@ def chart_monthly_trend(monthly: list[dict]) -> Optional[bytes]:
     valid_y = [r for r in roas if r is not None]
     if valid_y:
         ax2.plot(valid_x, valid_y, color="#e67e22", marker="o", linewidth=2.2, label="ROAS")
-        ax2.axhline(y=2.5, color="#e74c3c", linestyle="--", linewidth=1, alpha=0.6)
+        ax2.axhline(y=BENCHMARK_ROAS, color="#e74c3c", linestyle="--", linewidth=1, alpha=0.6)
         ax2.set_ylabel("ROAS", color="#e67e22")
 
     ax1.set_title("월별 지출 + ROAS 추세", fontsize=12, fontweight="bold")
@@ -230,7 +233,7 @@ def chart_weekday_pattern(weekday: list[dict]) -> Optional[bytes]:
 
     fig, ax1 = plt.subplots(figsize=(8, 4))
     bars = ax1.bar(days, roas, color="#16a085", alpha=0.8, label="ROAS")
-    ax1.axhline(y=2.5, color="#e74c3c", linestyle="--", linewidth=1, alpha=0.6, label="벤치 2.5")
+    ax1.axhline(y=BENCHMARK_ROAS, color="#e74c3c", linestyle="--", linewidth=1, alpha=0.6, label=f"벤치 {BENCHMARK_ROAS}")
     ax1.set_ylabel("ROAS", color="#16a085")
     for bar, r in zip(bars, roas):
         if r > 0:
@@ -309,7 +312,7 @@ def chart_top_bottom_campaigns(campaigns_data: dict) -> Optional[bytes]:
         ax1.barh(names_t[::-1], roas_t[::-1], color="#27ae60", alpha=0.85)
         ax1.set_title(f"위너 ROAS 상위 {len(top[:6])}", fontsize=11, fontweight="bold")
         ax1.set_xlabel("ROAS")
-        ax1.axvline(x=2.5, color="#7f8c8d", linestyle="--", linewidth=1)
+        ax1.axvline(x=BENCHMARK_ROAS, color="#7f8c8d", linestyle="--", linewidth=1)
         ax1.grid(True, alpha=0.2, axis="x")
         for i, r in enumerate(roas_t[::-1]):
             ax1.text(r + 0.05, i, f"{r:.2f}", va="center", fontsize=8)
@@ -320,7 +323,7 @@ def chart_top_bottom_campaigns(campaigns_data: dict) -> Optional[bytes]:
         ax2.barh(names_b[::-1], roas_b[::-1], color="#e74c3c", alpha=0.85)
         ax2.set_title(f"패배 ROAS 하위 {len(bottom[:6])}", fontsize=11, fontweight="bold")
         ax2.set_xlabel("ROAS")
-        ax2.axvline(x=2.5, color="#7f8c8d", linestyle="--", linewidth=1)
+        ax2.axvline(x=BENCHMARK_ROAS, color="#7f8c8d", linestyle="--", linewidth=1)
         ax2.grid(True, alpha=0.2, axis="x")
         for i, r in enumerate(roas_b[::-1]):
             ax2.text(r + 0.05, i, f"{r:.2f}", va="center", fontsize=8)

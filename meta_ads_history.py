@@ -18,13 +18,14 @@ RAW_DIR = DATA_DIR / "raw"
 DAILY_CSV = DATA_DIR / "daily.csv"
 DAILY_CAMPAIGN_CSV = DATA_DIR / "daily_campaign.csv"
 DAILY_ADSET_CSV = DATA_DIR / "daily_adset.csv"
+DAILY_AD_CSV = DATA_DIR / "daily_ad.csv"
 KST = timezone(timedelta(hours=9))
 
 COLUMNS = [
     "date", "level", "campaign_id", "campaign_name",
     "spend", "impressions", "clicks",
     "ctr_pct", "cpc_krw", "frequency",
-    "purchases", "purchase_value_krw", "cpa_krw", "roas",
+    "purchases", "purchase_value_krw", "cpa_krw", "roas", "roas_source",
     "raw_json_path", "appended_at",
 ]
 
@@ -32,8 +33,16 @@ ADSET_COLUMNS = [
     "date", "adset_id", "adset_name", "campaign_id", "campaign_name",
     "spend", "impressions", "clicks",
     "ctr_pct", "cpc_krw", "frequency",
-    "purchases", "purchase_value_krw", "cpa_krw", "roas",
+    "purchases", "purchase_value_krw", "cpa_krw", "roas", "roas_source",
     "raw_json_path", "appended_at",
+]
+
+AD_COLUMNS = [
+    "date", "ad_id", "ad_name", "adset_id", "adset_name", "campaign_id", "campaign_name",
+    "spend", "impressions", "clicks",
+    "ctr_pct", "cpc_krw", "frequency",
+    "purchases", "purchase_value_krw", "cpa_krw", "roas", "roas_source",
+    "thumbnail_url", "raw_json_path", "appended_at",
 ]
 
 
@@ -84,6 +93,7 @@ def _row_from_metrics(target_date, level, campaign_id, campaign_name, m, raw_pat
         "purchase_value_krw": _v(m.get("purchase_value_krw") or m.get("purchase_value")),
         "cpa_krw": _v(m.get("cpa_krw")),
         "roas": _v(m.get("roas")),
+        "roas_source": _v(m.get("roas_source", "")),
         "raw_json_path": raw_path,
         "appended_at": datetime.now(KST).isoformat(timespec="seconds"),
     }
@@ -176,6 +186,7 @@ def _row_from_adset(target_date, adset_id, adset_name, campaign_id, campaign_nam
         "purchase_value_krw": _v(m.get("purchase_value_krw") or m.get("purchase_value")),
         "cpa_krw": _v(m.get("cpa_krw")),
         "roas": _v(m.get("roas")),
+        "roas_source": _v(m.get("roas_source", "")),
         "raw_json_path": raw_path,
         "appended_at": datetime.now(KST).isoformat(timespec="seconds"),
     }
@@ -221,6 +232,80 @@ def append_adset_range(adset_summaries, raw_path=""):
         sheet_msg = "adset 시트 함수(push_adset_rows) 없음 — 시트 skip"
 
     return {"adset_rows": n, "sheet": sheet_msg}
+
+
+def _row_from_ad(target_date, ad_id, ad_name, adset_id, adset_name,
+                 campaign_id, campaign_name, m, raw_path, thumbnail_url=""):
+    """Ad 단위 row 생성. metric dict는 compute_metrics() 결과(KRW 환산 후)."""
+    def _v(x):
+        return "" if x is None else x
+    return {
+        "date": target_date,
+        "ad_id": ad_id or "",
+        "ad_name": ad_name or "",
+        "adset_id": adset_id or "",
+        "adset_name": adset_name or "",
+        "campaign_id": campaign_id or "",
+        "campaign_name": campaign_name or "",
+        "spend": _v(m.get("spend")),
+        "impressions": _v(m.get("impressions")),
+        "clicks": _v(m.get("clicks")),
+        "ctr_pct": _v(m.get("ctr_pct")),
+        "cpc_krw": _v(m.get("cpc_krw")),
+        "frequency": _v(m.get("frequency")),
+        "purchases": _v(m.get("purchases")),
+        "purchase_value_krw": _v(m.get("purchase_value_krw") or m.get("purchase_value")),
+        "cpa_krw": _v(m.get("cpa_krw")),
+        "roas": _v(m.get("roas")),
+        "roas_source": _v(m.get("roas_source", "")),
+        "thumbnail_url": thumbnail_url or "",
+        "raw_json_path": raw_path,
+        "appended_at": datetime.now(KST).isoformat(timespec="seconds"),
+    }
+
+
+def append_ad_range(ad_summaries, raw_path=""):
+    """Ad 단위 일별 시계열 upsert. (date, ad_id) 키 기준 덮어쓰기.
+
+    Args:
+        ad_summaries: list of dict — date, ad_id, ad_name, adset_id, adset_name,
+                      campaign_id, campaign_name, spend(KRW), impressions, clicks,
+                      ctr_pct, cpc_krw, purchases, purchase_value_krw, cpa_krw, roas,
+                      roas_source, thumbnail_url
+        raw_path: 감사용 raw JSON 경로 (선택)
+
+    Returns:
+        dict: {"ad_rows": int, "sheet": str}
+    """
+    rows = []
+    for s in ad_summaries:
+        rows.append(_row_from_ad(
+            s.get("date"), s.get("ad_id"), s.get("ad_name"),
+            s.get("adset_id"), s.get("adset_name"),
+            s.get("campaign_id"), s.get("campaign_name"),
+            s, raw_path, s.get("thumbnail_url", ""),
+        ))
+    n = _upsert(
+        DAILY_AD_CSV, rows,
+        key_fn=lambda r: (r["date"], r["ad_id"]),
+        columns=AD_COLUMNS,
+        sort_key=lambda r: (r.get("date", ""), r.get("ad_id", "")),
+    )
+
+    sheet_msg = ""
+    try:
+        import meta_ads_sheets_client as sheets
+        res = sheets.push_ad_rows(rows)
+        if res["ok"]:
+            sheet_msg = f"ad 시트 +{res['appended']} (replaced {res['replaced']})"
+        else:
+            sheet_msg = f"ad 시트 skip — {res['error']}"
+    except ImportError as e:
+        sheet_msg = f"sheets 모듈 import 실패: {e}"
+    except AttributeError:
+        sheet_msg = "ad 시트 함수(push_ad_rows) 없음 — 시트 skip"
+
+    return {"ad_rows": n, "sheet": sheet_msg}
 
 
 def load_recent_account(days=30):

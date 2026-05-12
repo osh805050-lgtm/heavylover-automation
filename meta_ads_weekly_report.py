@@ -74,7 +74,7 @@ def summarize_row(row):
     purchases = _first_non_none(extract_action, row, PURCHASE_ACTION_TYPES)
     purchase_value = _to_krw(_to_float(_first_non_none(extract_action_value, row, PURCHASE_ACTION_TYPES)))  # USD → KRW
     cpa_api = _to_krw(_to_float(_first_non_none(extract_cost_per_action, row, PURCHASE_ACTION_TYPES)))  # USD → KRW
-    roas_api = extract_purchase_roas(row)  # 비율 지표 — 환산 불필요
+    roas_api, _ = extract_purchase_roas(row)  # 비율 지표 — 환산 불필요
 
     # CPA 폴백: spend(KRW) / purchases
     cpa = cpa_api
@@ -86,6 +86,8 @@ def summarize_row(row):
     if roas is None and purchase_value is not None and spend and spend > 0:
         roas = purchase_value / spend
 
+    cpc_krw = (spend / clicks) if (spend is not None and clicks and clicks > 0) else None
+
     return {
         "campaign_id": row.get("campaign_id"),
         "campaign_name": row.get("campaign_name") or "(이름 없음)",
@@ -93,6 +95,7 @@ def summarize_row(row):
         "impressions": impressions,
         "clicks": clicks,
         "ctr_pct": ctr,
+        "cpc_krw": cpc_krw,
         "purchases": purchases,
         "purchase_value": purchase_value,
         "cpa_krw": cpa,
@@ -549,7 +552,13 @@ def _call_claude_weekly(totals, comparison, cur_range, prev_range):
                 ),
             }],
         )
-        return resp.content[0].text.strip()
+        if not resp.content:
+            return None
+        text = resp.content[0].text.strip()
+        if resp.stop_reason == "max_tokens":
+            print("⚠️ weekly Claude 응답 truncated (stop_reason=max_tokens)")
+            text += "\n\n⚠️ [응답 잘림 — max_tokens 초과]"
+        return text
     except Exception as e:
         print(f"주간 Claude 호출 실패: {e}")
         return None
@@ -636,10 +645,29 @@ def run():
     cur_raw = fetch_campaign_insights(cur_since, cur_until)
     prev_raw = fetch_campaign_insights(prev_since, prev_until)
 
+    _TOKEN_EXPIRY = ["OAuthException", "Session has expired", "401", "code:190", "code:463"]
     if not cur_raw["ok"]:
         errors.append(f"이번 주 API 실패: {cur_raw['error']}")
+        if any(k in (cur_raw.get("error") or "") for k in _TOKEN_EXPIRY):
+            try:
+                from telegram_client import send_message
+                send_message(
+                    f"⚠️ Meta 주간 리포트 — 토큰 만료 의심\n오류: {(cur_raw.get('error') or '')[:200]}",
+                    channel="ops",
+                )
+            except Exception:
+                pass
     if not prev_raw["ok"]:
         errors.append(f"이전 주 API 실패: {prev_raw['error']}")
+        if any(k in (prev_raw.get("error") or "") for k in _TOKEN_EXPIRY):
+            try:
+                from telegram_client import send_message
+                send_message(
+                    f"⚠️ Meta 주간 리포트(이전 주) — 토큰 만료 의심\n오류: {(prev_raw.get('error') or '')[:200]}",
+                    channel="ops",
+                )
+            except Exception:
+                pass
 
     cur_rows = [summarize_row(r) for r in cur_raw.get("data", [])]
     prev_rows = [summarize_row(r) for r in prev_raw.get("data", [])]

@@ -125,11 +125,15 @@ CPA: {int(winner['cpa_krw_30d']):,}원
 노출: {int(winner['impressions_30d']):,}
 """
         resp = client.messages.create(
-            model="claude-haiku-4-5",
+            model="claude-haiku-4-5-20251001",
             max_tokens=120,
             messages=[{"role": "user", "content": prompt}],
         )
-        return (resp.content[0].text if resp.content else "").strip()
+        text = (resp.content[0].text if resp.content else "").strip()
+        if resp.stop_reason == "max_tokens":
+            print("⚠️ winner_patterns Claude truncated (stop_reason=max_tokens)")
+            text = text + " [truncated]"
+        return text
     except Exception:
         return ""
 

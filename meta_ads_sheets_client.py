@@ -15,9 +15,12 @@ from dotenv import load_dotenv
 
 ENV_PATH = Path(__file__).parent / ".env"
 
+from meta_ads_history import AD_COLUMNS as AD_HEADERS  # 단일 출처 — meta_ads_history.AD_COLUMNS와 재정의 금지
+
 DAILY_WS = "Meta_Ads_Daily"
 DAILY_CAMPAIGN_WS = "Meta_Ads_Daily_Campaign"
 DAILY_ADSET_WS = "Meta_Ads_Daily_AdSet"
+DAILY_AD_WS = "Meta_Ads_Daily_Ad"
 WINNERS_WS = "Meta_Ads_Winners"
 
 HISTORY_HEADERS = [
@@ -123,6 +126,23 @@ def _row_to_list(row, headers):
     return [row.get(h, "") for h in headers]
 
 
+def _group_consecutive(rows):
+    """역순 정렬된 행 번호를 연속 구간으로 그룹핑 — batch_update 요청 수 최소화."""
+    if not rows:
+        return []
+    sorted_rows = sorted(rows, reverse=True)
+    groups = []
+    start = end = sorted_rows[0]
+    for r in sorted_rows[1:]:
+        if r == end - 1:
+            end = r
+        else:
+            groups.append((start, end))
+            start = end = r
+    groups.append((start, end))
+    return groups  # (high_row, low_row) 쌍
+
+
 def _delete_rows_by_keys(ws, headers, key_indices, keys_to_remove):
     if not keys_to_remove:
         return 0
@@ -136,8 +156,20 @@ def _delete_rows_by_keys(ws, headers, key_indices, keys_to_remove):
         key = tuple(row[idx] for idx in key_indices)
         if key in keys_to_remove:
             rows_to_delete.append(i)
-    for r in sorted(rows_to_delete, reverse=True):
-        ws.delete_rows(r)
+    if not rows_to_delete:
+        return 0
+    groups = _group_consecutive(rows_to_delete)
+    sheet_id = ws._properties.get("sheetId", 0)
+    requests = [
+        {"deleteDimension": {"range": {
+            "sheetId": sheet_id,
+            "dimension": "ROWS",
+            "startIndex": low - 1,
+            "endIndex": high,
+        }}}
+        for high, low in groups
+    ]
+    ws.spreadsheet.batch_update({"requests": requests})
     return len(rows_to_delete)
 
 
@@ -180,6 +212,29 @@ def push_adset_rows(rows):
     replaced = _delete_rows_by_keys(ws, ADSET_HEADERS, key_indices, keys)
 
     payload = [_row_to_list(r, ADSET_HEADERS) for r in rows]
+    ws.append_rows(payload, value_input_option="USER_ENTERED")
+
+    return {"ok": True, "appended": len(payload), "replaced": replaced, "error": None}
+
+
+def push_ad_rows(rows):
+    """Meta_Ads_Daily_Ad 시트에 광고 단위 행 upsert.
+
+    중복 제거 키: (date, ad_id). 헤더는 meta_ads_history.AD_COLUMNS와 동일 (단일 출처).
+    """
+    if not rows:
+        return {"ok": True, "appended": 0, "replaced": 0, "error": None}
+
+    gc, sh, err = _get_client()
+    if err:
+        return {"ok": False, "appended": 0, "replaced": 0, "error": err}
+
+    ws = _ensure_worksheet(sh, DAILY_AD_WS, AD_HEADERS)
+    key_indices = [AD_HEADERS.index("date"), AD_HEADERS.index("ad_id")]
+    keys = {(r["date"], r["ad_id"]) for r in rows}
+    replaced = _delete_rows_by_keys(ws, AD_HEADERS, key_indices, keys)
+
+    payload = [_row_to_list(r, AD_HEADERS) for r in rows]
     ws.append_rows(payload, value_input_option="USER_ENTERED")
 
     return {"ok": True, "appended": len(payload), "replaced": replaced, "error": None}

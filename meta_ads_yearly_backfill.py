@@ -20,66 +20,17 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-from meta_ads_client import (
-    fetch_account_daily_range,
-    fetch_campaign_daily_range,
-    extract_action,
-    extract_action_value,
-    extract_cost_per_action,
-    extract_purchase_roas,
-)
+from meta_ads_client import fetch_account_daily_range, fetch_campaign_daily_range
 import meta_ads_history
 from meta_ads_report import compute_metrics
-from lib.meta_currency import CURRENCY_KRW_PER_USD
+from meta_ads_weekly_report import summarize_row
+from lib.meta_currency import _check_account_currency, convert_metrics_to_krw
 
 KST = timezone(timedelta(hours=9))
 
 
-def _to_krw_metrics(m):
-    out = dict(m)
-    for k in ("spend", "cpc_krw", "cpm_krw", "cpa_krw", "purchase_value_krw"):
-        if out.get(k) is not None:
-            out[k] = float(out[k]) * CURRENCY_KRW_PER_USD
-    return out
-
-
-def _campaign_summary_to_krw(c):
-    """캠페인 row를 history append용 dict로 변환 + USD→KRW."""
-    PURCHASE_TYPES = ["omni_purchase", "purchase", "offsite_conversion.fb_pixel_purchase"]
-
-    def _f(key):
-        v = c.get(key)
-        try:
-            return float(v) if v is not None else None
-        except (TypeError, ValueError):
-            return None
-
-    purchases = next((extract_action(c, t) for t in PURCHASE_TYPES if extract_action(c, t) is not None), None)
-    purchase_value = next((extract_action_value(c, t) for t in PURCHASE_TYPES if extract_action_value(c, t) is not None), None)
-    cpa = next((extract_cost_per_action(c, t) for t in PURCHASE_TYPES if extract_cost_per_action(c, t) is not None), None)
-    roas = extract_purchase_roas(c)
-
-    spend = _f("spend")
-    if cpa is None and purchases and purchases > 0 and spend:
-        cpa = spend / purchases
-    if roas is None and purchase_value and spend:
-        roas = purchase_value / spend if spend > 0 else None
-
-    return {
-        "campaign_id": c.get("campaign_id"),
-        "campaign_name": c.get("campaign_name") or "",
-        "spend": (spend or 0) * CURRENCY_KRW_PER_USD if spend else None,
-        "impressions": _f("impressions"),
-        "clicks": _f("clicks"),
-        "ctr_pct": _f("ctr"),
-        "purchases": purchases,
-        "purchase_value": (purchase_value or 0) * CURRENCY_KRW_PER_USD if purchase_value else None,
-        "cpa_krw": (cpa or 0) * CURRENCY_KRW_PER_USD if cpa else None,
-        "roas": roas,
-    }
-
-
 def backfill(days=365):
+    _check_account_currency()
     today = datetime.now(KST).date()
     since = (today - timedelta(days=days)).isoformat()
     until = (today - timedelta(days=1)).isoformat()  # 어제까지
@@ -121,10 +72,10 @@ def backfill(days=365):
     for d in sorted(by_date_account.keys()):
         acc_row = by_date_account[d]
         metrics_usd = compute_metrics(acc_row)
-        metrics = _to_krw_metrics(metrics_usd)
+        metrics = convert_metrics_to_krw(metrics_usd)
 
         camp_rows = by_date_campaigns.get(d, [])
-        camp_summaries = [_campaign_summary_to_krw(c) for c in camp_rows]
+        camp_summaries = [summarize_row(c) for c in camp_rows]
 
         # raw 형태로 감싸기
         fake_raw = {"ok": True, "data": [acc_row], "target_date": d, "error": None}

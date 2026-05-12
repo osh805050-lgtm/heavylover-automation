@@ -86,7 +86,7 @@ def _post_with_retry(url: str, *, json_payload=None, data=None, files=None, time
     # 429: rate limit → retry_after 만큼 대기 후 1회 재시도
     if r.status_code == 429:
         retry_after = _parse_retry_after(r.text, default=1)
-        sleep_s = min(retry_after, 30)
+        sleep_s = min(retry_after, 120)
         print(
             f"⚠️ telegram 429 rate-limited, sleep {sleep_s}s then retry once",
             file=sys.stderr,
@@ -158,7 +158,7 @@ def send_document(file_path, caption: str = "", channel: str = "ops") -> Telegra
 
     if r.status_code == 429:
         retry_after = _parse_retry_after(r.text, default=1)
-        sleep_s = min(retry_after, 30)
+        sleep_s = min(retry_after, 120)
         print(
             f"⚠️ telegram 429 rate-limited (document), sleep {sleep_s}s then retry once",
             file=sys.stderr,

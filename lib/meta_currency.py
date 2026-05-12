@@ -18,7 +18,13 @@ _ACCOUNT_CURRENCY = os.getenv("META_AD_ACCOUNT_CURRENCY", "USD").upper()
 
 def _check_account_currency():
     """통화 guard — run() 진입 시점에만 호출. import 시 raise 금지."""
-    account_currency = os.getenv("META_AD_ACCOUNT_CURRENCY", "USD").upper()
+    raw = os.getenv("META_AD_ACCOUNT_CURRENCY")
+    if not raw:
+        raise RuntimeError(
+            "META_AD_ACCOUNT_CURRENCY 미설정: .env 또는 workflow env에 명시 필수. "
+            "예: META_AD_ACCOUNT_CURRENCY=USD"
+        )
+    account_currency = raw.upper()
     if account_currency != "USD" and os.getenv("META_ALLOW_NON_USD") != "1":
         raise RuntimeError(
             f"⚠️ Meta 광고 계정 통화가 {account_currency} (USD 아님). "

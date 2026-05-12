@@ -132,7 +132,7 @@ def compute_metrics(row):
     purchases, purch_key = _first_non_none(extract_action, row, PURCHASE_ACTION_TYPES)
     purchase_value, _ = _first_non_none(extract_action_value, row, PURCHASE_ACTION_TYPES)
     cpa, _ = _first_non_none(extract_cost_per_action, row, PURCHASE_ACTION_TYPES)
-    roas = extract_purchase_roas(row)
+    roas, roas_source = extract_purchase_roas(row)
 
     # 전환율 = purchases / clicks * 100
     conv_rate = None
@@ -158,6 +158,7 @@ def compute_metrics(row):
         "purchase_value_krw": purchase_value,
         "cpa_krw": cpa,
         "roas": roas,
+        "roas_source": roas_source,
         "conv_rate_pct": conv_rate,
         "purchase_action_used": purch_key,
         "roas_computed": roas_computed_flag,
@@ -616,13 +617,13 @@ def run():
             tg_msg = (
                 f"🚨 [Meta광고 토큰 만료] {target_date}\n"
                 "─────────────\n"
-                "Meta API 토큰이 만료됐습니다.\n\n"
-                "[해결]\n"
-                "1. https://developers.facebook.com/tools/explorer/\n"
-                "2. 앱 '광고 자동화' 선택 → User Token 발급\n"
-                "3. 권한: ads_read 체크\n"
-                "4. 토큰 복사 후 Claude에게 붙여넣기\n\n"
-                "(앱 시크릿 발급 후 자동 갱신 cron 활성화 시 이 알림 사라짐)"
+                "Meta API System User Token이 만료됐습니다.\n\n"
+                "[재발급 절차]\n"
+                "1. Meta Business Manager → 설정 → 시스템 사용자\n"
+                "2. 해당 시스템 사용자 선택 → 새 토큰 생성\n"
+                "3. 권한: ads_read, ads_management 체크 (무기한 토큰)\n"
+                "4. 토큰 복사 후 GitHub Secrets → META_ACCESS_TOKEN 업데이트\n"
+                "5. Vultr .env도 동일하게 업데이트"
             )
         else:
             tg_msg = f"📈 [Meta광고] {target_date}\n─────────────\n데이터 없음 (API 실패)\n사유: {err_msg}"
@@ -641,15 +642,13 @@ def run():
     partial_data = False
     partial_reasons = []
 
-    # 캠페인별 fetch (해당 일자만, 시계열 누적용) — KRW 환산 포함
+    # Fetch 1: Campaign (결과 수집, append 보류)
     campaign_summaries = []
     try:
         camp_raw = fetch_campaign_insights(target_date, target_date)
         if camp_raw["ok"]:
             for r in camp_raw.get("data", []):
                 c = summarize_campaign_row(r)
-                # summarize_campaign_row (= meta_ads_weekly_report.summarize_row) 가
-                # 2026-05-12부터 내부에서 _to_krw 적용해 KRW 반환 — 재환산 금지
                 campaign_summaries.append(c)
             print(f"캠페인별 데이터 수집: {len(campaign_summaries)}건 (KRW 환산)")
         else:
@@ -658,36 +657,18 @@ def run():
             partial_data = True
             partial_reasons.append("campaign")
     except Exception as e:
-        print(f"⚠️ 캠페인별 fetch 예외 (계속 진행): {e}")
+        print(f"⚠️ 캠페인별 fetch 예외: {e}")
         partial_data = True
         partial_reasons.append("campaign")
 
-    # 시계열 누적 (CSV + Google Sheets) — 자사 벤치 계산 전에 먼저 누적
-    # partial_data=True면 시계열 오염 방지 위해 skip.
-    if partial_data:
-        print("⚠️ history append 건너뜀 (partial_data: 캠페인 fetch 실패)")
-    else:
-        try:
-            hist = meta_ads_history.append_daily(
-                target_date, raw, metrics, campaign_summaries
-            )
-            print(f"history append: daily={hist['daily_rows']}, campaign={hist['campaign_rows']}")
-            print(f"  sheet daily: {hist['sheet'].get('daily', '')}")
-            if hist['sheet'].get('campaign'):
-                print(f"  sheet campaign: {hist['sheet']['campaign']}")
-        except Exception as e:
-            print(f"history 누적 실패 (리포트는 계속): {e}")
-
-    # 광고세트(adset) 단위 시계열 누적 — 트랙 A
-    # CAC 낮지만 재구매 안 좋은 vs CAC 높지만 재구매 좋은 광고세트 식별용 데이터 축적
+    # Fetch 2: Adset (campaign과 함께 수집, append 보류)
+    adset_summaries = []
     try:
         from meta_ads_client import fetch_adset_daily_range
         adset_raw = fetch_adset_daily_range(target_date, target_date)
         if adset_raw["ok"]:
-            adset_summaries = []
             for r in adset_raw.get("data", []):
-                m = summarize_campaign_row(r)  # 동일 액션 추출 로직 재사용
-                # summarize_campaign_row 가 KRW 반환 (2026-05-12) — 재환산 금지
+                m = summarize_campaign_row(r)
                 adset_summaries.append({
                     "date": target_date,
                     "adset_id": r.get("adset_id"),
@@ -705,19 +686,13 @@ def run():
                     "cpa_krw": m.get("cpa_krw"),
                     "roas": m.get("roas"),
                 })
-            # partial_data 시 adset history도 차단 (시계열 오염 방지)
-            if partial_data:
-                print(f"⚠️ adset history append 건너뜀 (partial_data 이전 단계 실패)")
-            else:
-                adset_hist = meta_ads_history.append_adset_range(adset_summaries)
-                print(f"adset 시계열: {len(adset_summaries)}건 수집 → CSV {adset_hist['adset_rows']}행, {adset_hist['sheet']}")
+            print(f"adset 데이터 수집: {len(adset_summaries)}건")
         else:
-            print(f"⚠️ adset fetch 실패 (계속 진행): {adset_raw.get('error', '')[:200]}")
+            print(f"⚠️ adset fetch 실패: {adset_raw.get('error', '')[:200]}")
             partial_data = True
             if "adset" not in partial_reasons:
                 partial_reasons.append("adset")
     except Exception as e:
-        # 401/토큰 만료 감지 시 텔레그램 ops 채널 알림 (§외부API다루기 규칙 7)
         err_str = str(e)
         if any(k in err_str for k in ["OAuthException", "Session has expired", "401", "code:190", "code:463"]):
             try:
@@ -725,15 +700,89 @@ def run():
                 send_message(
                     f"⚠️ Meta adset 수집 실패 — 토큰 만료 의심\n"
                     f"오류: {err_str[:200]}\n"
-                    f"확인: refresh_meta_token.py 또는 Graph API Explorer 재발급",
+                    f"확인: Graph API Explorer 재발급",
                     channel="ops",
                 )
             except Exception:
                 pass
-        print(f"⚠️ adset 누적 예외 (리포트 계속): {e}")
+        print(f"⚠️ adset fetch 예외 (리포트 계속): {e}")
         partial_data = True
         if "adset" not in partial_reasons:
             partial_reasons.append("adset")
+
+    # Fetch 3: Ad (campaign + adset과 함께 수집, append 보류)
+    ad_summaries = []
+    try:
+        from meta_ads_client import fetch_ad_daily_range, fetch_ad_creatives
+        ad_raw = fetch_ad_daily_range(target_date, target_date)
+        if ad_raw["ok"]:
+            ad_ids = [r.get("ad_id") for r in ad_raw.get("data", []) if r.get("ad_id")]
+            creatives = {}
+            try:
+                creatives = fetch_ad_creatives(ad_ids) if ad_ids else {}
+            except Exception as ce:
+                print(f"⚠️ creative thumbnail fetch 일부 실패 — thumbnail 빈 칸으로 진행: {ce}")
+            for r in ad_raw.get("data", []):
+                m = summarize_campaign_row(r)
+                ad_id = r.get("ad_id", "")
+                creative_info = creatives.get(ad_id, {})
+                ad_summaries.append({
+                    "date": target_date,
+                    "ad_id": ad_id,
+                    "ad_name": r.get("ad_name") or "(이름 없음)",
+                    "adset_id": r.get("adset_id") or "",
+                    "adset_name": r.get("adset_name") or "",
+                    "campaign_id": r.get("campaign_id") or "",
+                    "campaign_name": r.get("campaign_name") or "",
+                    "spend": m.get("spend"),
+                    "impressions": m.get("impressions"),
+                    "clicks": m.get("clicks"),
+                    "ctr_pct": m.get("ctr_pct"),
+                    "cpc_krw": (m["spend"] / m["clicks"]) if m.get("spend") and m.get("clicks") else None,
+                    "frequency": _to_float(r.get("frequency")) if r.get("frequency") else None,
+                    "purchases": m.get("purchases"),
+                    "purchase_value_krw": m.get("purchase_value"),
+                    "cpa_krw": m.get("cpa_krw"),
+                    "roas": m.get("roas"),
+                    "roas_source": m.get("roas_source", ""),
+                    "thumbnail_url": creative_info.get("thumbnail_url", ""),
+                })
+            print(f"ad 데이터 수집: {len(ad_summaries)}건")
+        else:
+            print(f"⚠️ ad fetch 실패: {ad_raw.get('error', '')[:200]}")
+            partial_data = True
+            if "ad" not in partial_reasons:
+                partial_reasons.append("ad")
+    except Exception as e:
+        print(f"⚠️ ad fetch 예외 (리포트 계속): {e}")
+        partial_data = True
+        if "ad" not in partial_reasons:
+            partial_reasons.append("ad")
+
+    # 4-way atomic append: campaign + adset + ad 모두 OK 시에만 CSV + Sheets 저장
+    if partial_data:
+        print(f"⚠️ history append 전체 건너뜀 (partial: {partial_reasons})")
+    else:
+        try:
+            hist = meta_ads_history.append_daily(
+                target_date, raw, metrics, campaign_summaries
+            )
+            print(f"history append: daily={hist['daily_rows']}, campaign={hist['campaign_rows']}")
+            print(f"  sheet daily: {hist['sheet'].get('daily', '')}")
+            if hist['sheet'].get('campaign'):
+                print(f"  sheet campaign: {hist['sheet']['campaign']}")
+        except Exception as e:
+            print(f"history 누적 실패 (리포트는 계속): {e}")
+        try:
+            adset_hist = meta_ads_history.append_adset_range(adset_summaries)
+            print(f"adset 시계열: {len(adset_summaries)}건 → CSV {adset_hist['adset_rows']}행, {adset_hist['sheet']}")
+        except Exception as e:
+            print(f"adset history 누적 실패 (리포트는 계속): {e}")
+        try:
+            ad_hist = meta_ads_history.append_ad_range(ad_summaries)
+            print(f"ad 시계열: {len(ad_summaries)}건 → CSV {ad_hist['ad_rows']}행, {ad_hist['sheet']}")
+        except Exception as e:
+            print(f"ad history 누적 실패 (리포트는 계속): {e}")
 
     # 자사 동적 벤치 (14일 미만이면 ok=False, 정적 벤치만 사용)
     try:
@@ -766,16 +815,8 @@ def run():
     except Exception as e:
         print(f"winner_patterns 로드 실패: {e}")
 
-    short_text, short_err = meta_ads_claude_comment.generate_short(
-        metrics_with_date, self_bench, flags, recent_trend, winner_patterns
-    )
-    if short_err:
-        print(f"Claude 짧은 코멘트 skip: {short_err}")
-    deep_text, deep_err = meta_ads_claude_comment.generate_deep(
-        metrics_with_date, self_bench, flags, recent_trend, winner_patterns
-    )
-    if deep_err:
-        print(f"Claude 심층 분석 skip: {deep_err}")
+    # generate_short/generate_deep 제거 (P3-B): 결과를 어디에도 사용 안 함.
+    # email_daily.call_claude_4roles(Sonnet)이 이미 동일 역할 수행 — Haiku 2회 중복 비용 차단.
 
     # 퍼널 한 줄 — 가장 큰 drop-off 텔레그램에 노출
     try:
@@ -795,7 +836,7 @@ def run():
 
     # 텔레그램 (요약 + 짧은 코멘트)
     summary = format_telegram_summary(
-        target_date, metrics, flags, ok=True, action_text=short_text,
+        target_date, metrics, flags, ok=True, action_text=None,
         partial_data=partial_data, partial_reasons=partial_reasons,
     )
     sent = telegram_client.send_message(summary, channel="ads")
@@ -820,6 +861,7 @@ def run():
             raw_account_rows=raw.get("data") or [],
             partial_data=partial_data,
             partial_reasons=partial_reasons,
+            ads=ad_summaries,
         )
         if ok:
             print("이메일 4역할 심층 발송 완료")

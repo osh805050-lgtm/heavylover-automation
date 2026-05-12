@@ -164,7 +164,13 @@ def call_claude_4roles(ctx):
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user}],
         )
-        return resp.content[0].text.strip(), None
+        if not resp.content:
+            return None, "content 블록 비어있음"
+        text = resp.content[0].text.strip()
+        if resp.stop_reason == "max_tokens":
+            print("⚠️ email_daily Claude truncated (stop_reason=max_tokens)")
+            text += "\n\n⚠️ [응답 잘림 — max_tokens 초과. 전체 분석을 보려면 max_tokens를 늘리세요.]"
+        return text, None
     except Exception as e:
         return None, f"Claude 호출 실패: {e}"
 
@@ -401,7 +407,61 @@ def _build_alerts_box(ctx):
     )
 
 
-def _wrap_html(body_html, target_date, chart_cids=None, sheet_url="", ctx=None):
+def _build_ad_top5_card(ads):
+    """광고 소재별 ROAS TOP 5 HTML 카드. 빈 결과 fallback 포함."""
+    import html as html_mod
+    if not ads:
+        return ""
+
+    eligible = [a for a in ads if (a.get("spend") or 0) >= 5000 and a.get("roas") is not None]
+    if not eligible:
+        eligible = [a for a in ads if a.get("roas") is not None]
+
+    sorted_ads = sorted(eligible, key=lambda a: a["roas"], reverse=True)[:5]
+
+    if not sorted_ads:
+        return (
+            "<div style='background:white;border-radius:12px;border:1px solid #e1e4e8;"
+            "padding:20px 24px;margin-top:8px;'>"
+            "<h2 style='margin:0 0 8px 0;font-size:16px;'>광고 소재별 TOP 5</h2>"
+            "<p style='color:#888;font-size:13px;margin:0;'>오늘 광고 데이터 없음 또는 ROAS 측정 불가</p>"
+            "</div>"
+        )
+
+    filter_note = "" if (eligible and eligible[0].get("spend", 0) >= 5000) else " (지출 5,000원 미만 fallback)"
+
+    rows_html = "".join(
+        f"<tr>"
+        f"<td style='padding:6px 8px;border-bottom:1px solid #f0f0f0;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'>{html_mod.escape((a.get('ad_name') or '')[:30])}</td>"
+        f"<td style='padding:6px 8px;border-bottom:1px solid #f0f0f0;font-size:12px;color:#666;'>{html_mod.escape((a.get('adset_name') or '')[:20])}</td>"
+        f"<td style='padding:6px 8px;border-bottom:1px solid #f0f0f0;font-weight:600;color:#667eea;'>{a['roas']:.2f}</td>"
+        f"<td style='padding:6px 8px;border-bottom:1px solid #f0f0f0;'>{int(a.get('cpa_krw') or 0):,}원</td>"
+        f"<td style='padding:6px 8px;border-bottom:1px solid #f0f0f0;font-size:12px;'>{int(a.get('spend') or 0):,}원</td>"
+        f"<td style='padding:6px 8px;border-bottom:1px solid #f0f0f0;font-size:12px;'>{int(a.get('impressions') or 0):,}</td>"
+        f"</tr>"
+        for a in sorted_ads
+    )
+
+    return f"""
+<div style='background:white;border-radius:12px;border:1px solid #e1e4e8;padding:20px 24px;margin-top:8px;box-shadow:0 1px 4px rgba(0,0,0,0.06);'>
+  <h2 style='margin:0 0 12px 0;font-size:16px;'>광고 소재별 TOP 5{html_mod.escape(filter_note)}</h2>
+  <div style='overflow-x:auto;'>
+  <table style='width:100%;border-collapse:collapse;font-size:13px;'>
+    <tr style='background:#f8f9fa;'>
+      <th style='padding:6px 8px;text-align:left;font-weight:600;'>광고명</th>
+      <th style='padding:6px 8px;text-align:left;font-weight:600;'>광고세트</th>
+      <th style='padding:6px 8px;text-align:left;font-weight:600;'>ROAS</th>
+      <th style='padding:6px 8px;text-align:left;font-weight:600;'>CPA</th>
+      <th style='padding:6px 8px;text-align:left;font-weight:600;'>지출</th>
+      <th style='padding:6px 8px;text-align:left;font-weight:600;'>노출</th>
+    </tr>
+    {rows_html}
+  </table>
+  </div>
+</div>"""
+
+
+def _wrap_html(body_html, target_date, chart_cids=None, sheet_url="", ctx=None, ad_top5_html=""):
     from datetime import datetime, timezone, timedelta
     KST = timezone(timedelta(hours=9))
     generated_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
@@ -436,6 +496,9 @@ def _wrap_html(body_html, target_date, chart_cids=None, sheet_url="", ctx=None):
 
 <!-- 차트 -->
 {charts_html}
+
+<!-- 광고 소재 TOP 5 -->
+{ad_top5_html}
 
 <!-- 본문 -->
 <div style='background:white;border-radius:12px;border:1px solid #e1e4e8;padding:24px;margin-top:4px;box-shadow:0 1px 4px rgba(0,0,0,0.06);'>
@@ -475,14 +538,17 @@ def _fallback_text(target_date, metrics, flags, error_msg):
 def send_daily_email(target_date, metrics, self_bench, flags,
                     recent_trend, campaigns, winner_patterns,
                     sheet_url="", raw_account_rows=None,
-                    partial_data=False, partial_reasons=None):
+                    partial_data=False, partial_reasons=None,
+                    ads=None):
     """일일 심층 메일 발송. 성공 True / 실패 False.
 
     partial_data=True면 subject에 [PARTIAL] prefix + 본문 상단에 누락 데이터 명시.
+    ads: ad 단위 metrics list (P4-D TOP 5 카드용). None이면 카드 미표시.
     """
     ctx = _build_context(target_date, metrics, self_bench, flags,
                          recent_trend, campaigns, winner_patterns,
                          raw_account_rows=raw_account_rows)
+    ad_top5_html = _build_ad_top5_card(ads or [])
 
     # 차트 생성 (실패해도 메일은 발송)
     bench_static = ctx["static_benchmark_2026_kr_food"]
@@ -516,7 +582,7 @@ def send_daily_email(target_date, metrics, self_bench, flags,
     if analysis:
         body_html = partial_banner_html + glossary_details_html() + _md_to_html(analysis)
         html = _wrap_html(body_html, target_date, chart_cids=list(charts.keys()),
-                          sheet_url=sheet_url, ctx=ctx)
+                          sheet_url=sheet_url, ctx=ctx, ad_top5_html=ad_top5_html)
         text_body = partial_banner_md + analysis
         model_short = "Opus" if "opus" in CLAUDE_MODEL else "Sonnet"
         subject = f"📈 HeavyLover Meta 광고 일일 [{model_short}] — {target_date}"
@@ -538,7 +604,7 @@ def send_daily_email(target_date, metrics, self_bench, flags,
         text_body = partial_banner_md + _fallback_text(target_date, metrics, flags, err or "분석 실패")
         body_html = partial_banner_html + glossary_details_html() + _md_to_html(text_body)
         html = _wrap_html(body_html, target_date, chart_cids=list(charts.keys()),
-                          sheet_url=sheet_url, ctx=ctx)
+                          sheet_url=sheet_url, ctx=ctx, ad_top5_html=ad_top5_html)
         subject = f"⚠️ HeavyLover Meta 광고 일일 (fallback) — {target_date}"
         if partial_data:
             subject = f"[PARTIAL] {subject}"
