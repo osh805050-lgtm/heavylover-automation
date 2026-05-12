@@ -541,8 +541,13 @@ def fetch_ad_creatives(ad_ids, max_retries=3):
     result = {}
 
     for ad_id in ad_ids:
-        # 캐시 확인 (7일 TTL)
+        # 캐시 확인 (7일 TTL) — 복합 키 "{ad_id}:{creative_id}" 우선, fallback ad_id 단순 키
         cached = cache.get(ad_id)
+        if cached:
+            creative_id = cached.get("creative_id", "")
+            compound_key = f"{ad_id}:{creative_id}"
+            # 복합 키가 캐시에 없으면 stale (creative 교체됨) → API 재호출
+            cached = cache.get(compound_key) if creative_id else cached
         if cached:
             try:
                 fetched_at = datetime.fromisoformat(cached.get("fetched_at", "2000-01-01T00:00:00+00:00"))

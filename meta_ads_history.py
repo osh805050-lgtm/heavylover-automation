@@ -278,7 +278,11 @@ def append_ad_range(ad_summaries, raw_path=""):
         dict: {"ad_rows": int, "sheet": str}
     """
     rows = []
+    skipped = 0
     for s in ad_summaries:
+        if not s.get("ad_id"):
+            skipped += 1
+            continue
         rows.append(_row_from_ad(
             s.get("date"), s.get("ad_id"), s.get("ad_name"),
             s.get("adset_id"), s.get("adset_name"),
@@ -305,6 +309,8 @@ def append_ad_range(ad_summaries, raw_path=""):
     except AttributeError:
         sheet_msg = "ad 시트 함수(push_ad_rows) 없음 — 시트 skip"
 
+    if skipped:
+        print(f"⚠️ ad_id 없는 행 {skipped}건 skip (upsert 키 오염 방지)")
     return {"ad_rows": n, "sheet": sheet_msg}
 
 

@@ -12,6 +12,7 @@ Meta 광고 주간 리포트 (캠페인별, 직전 주 대비 비교)
 - 숫자 창작 금지. 모든 값은 API 응답에서 파생
 """
 
+import html as html_mod
 import io
 import json
 import os
@@ -305,7 +306,7 @@ def render_html(cur_range, prev_range, rows, totals, errors):
         cls = ' class="flagged"' if r["flagged"] else ""
         return f"""
         <tr{cls}>
-          <td class="name">{r['campaign_name']}</td>
+          <td class="name">{html_mod.escape(r['campaign_name'])}</td>
           <td>{_fmt(c.get('spend'), 0, '원')}</td>
           <td>{chg_span(ch['spend'])}</td>
           <td>{_fmt(c.get('cpa_krw'), 0, '원')}</td>
@@ -352,7 +353,7 @@ def render_html(cur_range, prev_range, rows, totals, errors):
                     bits.append(f"{kor}: {cell['label']}")
                 elif cell["change_pct"] is not None and abs(cell["change_pct"]) >= CHANGE_THRESHOLD_PCT:
                     bits.append(f"{kor} {cell['label']}")
-            hl_rows.append(f"<li><b>{r['campaign_name']}</b> — {', '.join(bits)}</li>")
+            hl_rows.append(f"<li><b>{html_mod.escape(r['campaign_name'])}</b> — {', '.join(bits)}</li>")
         highlight = f"""
         <h3>변동 ≥ {CHANGE_THRESHOLD_PCT:.0f}% 또는 신규/종료 ({len(flagged)}건)</h3>
         <ul>{''.join(hl_rows)}</ul>
