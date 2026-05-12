@@ -404,6 +404,29 @@ SS_STATUS_LABEL = {
 }
 
 
+def _ss_gross_amount(po: dict) -> int:
+    """SS 정가 fallback. totalPaymentAmount이 0/없으면 (unitPrice + optionPrice) × quantity.
+
+    100% 쿠폰·적립금 전액 사용 주문이 분석에서 누락되지 않도록 카페24와 정책 통일.
+    카페24의 0원 fallback (sheets_sync.py:246-264) 패턴을 SS에 적용.
+    """
+    try:
+        total = int(float(po.get("totalPaymentAmount", 0) or 0))
+    except (ValueError, TypeError):
+        total = 0
+    if total > 0:
+        return total
+    # fallback: 정가 합산
+    try:
+        unit = int(float(po.get("unitPrice", 0) or po.get("productPrice", 0) or 0))
+        qty = int(po.get("quantity", 1) or 1)
+        opt = int(float(po.get("optionPrice", 0) or 0))
+        gross = (unit + opt) * qty if unit > 0 else 0
+        return max(gross, 0)
+    except (ValueError, TypeError):
+        return 0
+
+
 def _ss_wrap_to_row(wrap: dict) -> list | None:
     """SS API wrap → 46컬럼 행.
 
@@ -460,7 +483,7 @@ def _ss_wrap_to_row(wrap: dict) -> list | None:
         _won(po.get("initialProductDiscountAmount", 0) or po.get("productDiscountAmount", 0)),  # 최초 상품별 할인액
         _won(po.get("sellerBurdenDiscountAmount", 0)),     # 판매자 부담 할인액
         _won(po.get("initialPaymentAmount", 0) or po.get("totalPaymentAmount", 0)),  # 최초 상품별 총 주문금액
-        _won(po.get("totalPaymentAmount", 0)),             # 최종 상품별 총 주문금액
+        _won(_ss_gross_amount(po)),                        # 최종 상품별 총 주문금액 (0원 시 정가 fallback)
         po.get("sellerProductCode", ""),                   # 판매자 상품코드
         "", "",                                             # 내부코드1, 2
         po.get("deliveryFeeGroupId", "") or "",            # 배송비 묶음번호

@@ -1,7 +1,17 @@
 # 실패 노트 (시간순 원시 로그)
 
 > 이 파일은 [작업 종류 매칭 시 grep 검색] / [월말 회고] / [에이전트 시작 전 위험 점검] 시 로드됩니다. CLAUDE.md §13의 정본입니다.
-> 마지막 갱신: 2026-05-01 · 갱신 주기: 즉시 누적 (실수 발생 시)
+> 마지막 갱신: 2026-05-12 · 갱신 주기: 즉시 누적 (실수 발생 시)
+
+- **2026-05-12** ㊵ | **GAS run_id에 'gas_' prefix 추가했다가 lib/sheet_staleness.py check_pipeline_freshness() startswith(today) 호환성 깨짐** → v5.1 작성 시 `gas_2026-05-12_HHmmss` 형식 명세. 그러나 lib/sheet_staleness.py:118이 `run_id.startswith(today)` 체크 → 매번 stale 판정. Codex 1회차 점검에서 발견. 수정: prefix를 suffix로 변경 (`2026-05-12_HHmmss_gas`) | **하지 말 것**: 다른 코드와 공유 데이터 포맷 변경 시 양쪽 코드 contract를 정확히 확인. 특히 string prefix/suffix matching.
+
+- **2026-05-12** ㊴ | **카페24 amount 누적이 매출 부풀림 — sheets_sync.py [row]*n 패턴 미인지** → Claude 점검에서 "카페24 amount 첫 row만 사용 vs SS 누적" 정책 불일치로 판단. 그러나 sheets_sync.py:290이 item 개수만큼 `[row]*n` 복제하며 각 row의 amount는 order-level 동일값. v5.1에서 누적으로 바꾸면 3-item 주문 50,000원 → 150,000원으로 부풀려짐. Codex 1회차 점검에서 발견. 수정: 첫 row만 저장(v5_0 동작 유지) | **하지 말 것**: 데이터 소스 동작(특히 row 복제·item-level 여부) 확인 없이 "정책 불일치"로 단순 결론 금지. sheets_sync 같은 upstream 코드 패턴 먼저 점검.
+
+- **2026-05-12** ㊳ | **GAS 재구매 분석 모듈 v5_0에서 수치 부정확 결함 10개 동시 존재** → 재구매율 분모 부풀림(같은 버킷 신규+재구매 dedup 안 됨), SS 0원 분석 제외, isCanceled 부분일치 오탐("취소가능"도 제외), 코호트 30/60/90일 분모에 미관찰 포함, 퍼널 분모에 미관찰 포함, 통합 식별자 비호환(카페24=휴대전화·SS=구매자ID), M+N 현재월 partial 처리, 0일 간격 제외, 기간 재구매율 sales-mix 의미. 모든 % 지표가 부정확한 상태로 5개월간 시트 발송 | **하지 말 것**: 비율 지표(재구매율·전환율·리텐션) 분모 정의 점검 필수. 특히 (a) 같은 버킷 중복 dedup, (b) 미관찰 고객 제외, (c) maturity window 적용 3가지.
+
+- **2026-05-12** ㊲ | **Plan-level codex adversarial review 4회 반복으로 무한 루프 진입** → plan v1(4결함) → v2(4결함) → v3(6결함) → v4(needs-attention) — 결함이 줄지 않고 더 많아짐. plan이 클수록(7개 변경사항) codex가 정밀화 결함 끝없이 발견. v5에서 plan 분할(2개 변경만)로 codex 점검 1~2회로 단축 | **하지 말 것**: plan adversarial review는 plan이 작을 때만 수렴. 큰 plan(5+ 변경)은 분할 후 점검. iteration cap 2회로 고정.
+
+- **2026-05-12** ㊱ | **Meta Advantage+ Creative를 "지금 당장 켜면 됨"으로 일반 추천** → 헤비로버 위너 계정(ROAS 6.20 위너 소재 존재)에서 Advantage+가 소재를 임의 변형해 위너 요소 희석·ROAS 하락 유발하는 알려진 문제 미검토. 계정 특성(위너 패턴 고정·소규모 데이터) 확인 없이 "무료니 켜라" 단순 권장 | **하지 말 것**: 광고 자동화 옵션 추천 시 헤비로버 위너 소재 보호 여부 먼저 확인. Advantage+ Creative는 위너 소재 계정엔 기본 OFF 권장.
 
 - **2026-05-12** ㉝ | **주간 Meta 광고 리포트 USD→KRW 환산 누락으로 "지출 638원" 오표시** → `meta_ads_weekly_report.py`가 `meta_ads_report.py`의 환산 함수를 쓰지 않고 USD 원본 그대로 출력. 일일 리포트(693줄 `convert_metrics_to_krw`)와 달리 주간은 환산 단계 없음 | **하지 말 것**: 신규 리포트 작성 시 `lib.meta_currency`에서 환산 함수 import. 자체 계산 금지. §외부API다루기 9번.
 
