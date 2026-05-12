@@ -274,3 +274,78 @@
 **2026-05-01 이후 정책 변경**:
 - `docs/analysis_10b/`, `proposals/outputs/`, `docs/strategy/outputs/`, `docs/expansion/outputs/`, `data/analysis_10b/sheets/` → git 추적 활성화
 - `.gitignore`에 추적 제외 대상 명시: `data/raw/`, `data/meta_ads/raw/`, 비밀파일 계열만
+
+
+## §plan점검 (Plan Adversarial Review Loop Prevention)
+
+**목적**: plan-level codex adversarial review에서 결함이 끝없이 발견되는 무한 루프 차단.
+
+**핵심 원칙**: codex는 adversarial 도구라 plan이 정밀해질수록 새 결함을 끝없이 찾음. 큰 plan일수록 결함 발견량이 줄지 않고 늘어남.
+
+**작업 시작 전 점검**:
+1. plan의 변경 사항 개수 카운트 → **5개 이상이면 분할 검토**
+2. 분할 기준: (a) 멈춤 방지/수치 정확성 — 우선, (b) UI·UX — 다음 plan, (c) 운영 프로세스 — 별도 plan
+3. plan 작성 직후 codex review 1회만 — 2회차는 1회차 결함 수정 후
+4. **iteration cap 2회 고정** — 3회차 진입 전에 사용자 결정 받기
+
+**무한 루프 신호**:
+- v1(N결함) → v2(N결함) → v3(N결함) — 결함 수가 줄지 않음 → 즉시 중단
+- 새 결함이 점점 정밀해짐 (구현 디테일·메타데이터 누락 등) → 코드 진입 권고
+- "이게 v5 패턴 재현" 같은 사용자 발화 → 즉시 옵션 제시 (분할 vs HIGH만 처리)
+
+**의사결정 가이드**:
+- 5개+ 변경 plan = 분할 (각 codex 1~2회면 충분)
+- 2~3개 변경 plan = 단일 plan OK
+- 의존성 강하면 순차 plan, 독립이면 병렬 plan
+
+**자가 검증 체크**:
+- [ ] 이 plan 변경 사항이 5개 미만인가
+- [ ] codex 점검을 2회 이상 돌렸을 때 결함 줄어드는 추세인가
+- [ ] iteration cap 2회 명시했는가
+- [ ] HIGH/CRITICAL만 block, MEDIUM은 residual-risk로 진행 정책 있는가
+
+**연관 실패**: failures.md ㊲(plan v1→v4 4회 무한 루프), v5/v6 분할로 해소
+
+**hookify 보강**: `.claude/hookify.warn-plan-codex-loop.local.md` + `.claude/hookify.warn-large-plan-split.local.md`
+
+
+## §비율지표분모 (Ratio Denominator Validation)
+
+**목적**: 재구매율·전환율·리텐션·M+N 등 비율 지표 분모 정의 오류로 인한 가짜 수치 차단.
+
+**핵심 원칙**: 분모 정의 따라 같은 데이터가 1.5~3배 차이. 비율 지표 점검 시 항상 3가지 확인.
+
+**분모 점검 3가지** (필수):
+1. **같은 버킷 중복 dedup** — 한 고객이 같은 일/주/월 안에서 신규 + 재구매 둘 다 했을 때 1명으로 카운트
+   - `totalCust = new Set([...newCust, ...repurchaseCust]).size`
+2. **미관찰(observing) 고객 제외** — 첫 구매 후 N일 미경과 고객은 분모에서 제외
+   - `eligible = total - observing`
+   - 비율 = `c / eligible`
+3. **maturity window 적용** — 코호트 첫 구매월 + N일 경과해야 확정
+   - 코호트 30/60/90일은 각 윈도우 경과 후만 확정
+   - 진행 중인 월의 M+1·M+N은 진행중 라벨 (🔄 변동중)
+
+**partial 가드 규칙**:
+- observing > 0일 때만 가드 적용 (eligible < 30 또는 observing/total > 50% → 관찰중)
+- **observing = 0**이면 시간 다 지난 옛 코호트 → 표본 작아도 표시 OK
+- 가드 너무 엄격하면 옛 코호트도 가려져 사용자 의사결정 못 함
+
+**partial 100% 가짜 수치 차단**:
+- eligible 분모가 너무 작으면 c/eligible ≈ 100% (가짜)
+- 사례: 2026-04 60일 전환율 53/53 = 100% — 60일 다 지난 사람 53명, 그 모두 재구매 (실제는 표본 부족)
+- 해결: observing > 0이면 eligible<30 또는 observing 비율 50%+ 일 때 partial 표시
+
+**기간 재구매율 = sales-mix 지표 명시**:
+- `repurchaseCust / (repurchaseCust + newCust)` 는 진짜 재구매율 아닌 sales-mix
+- 신규 많은 달은 기계적으로 낮음
+- 시트 헤더에 `재구매율%(sales-mix)` 또는 별도 라벨
+
+**자가 검증 체크**:
+- [ ] 이 비율 지표의 분모에 dedup·미관찰 제외·maturity 적용했는가
+- [ ] partial 케이스(observing > 0 + 작은 eligible)는 관찰중 표시인가
+- [ ] observing = 0 옛 코호트는 표시 허용했는가
+- [ ] sales-mix 지표를 진짜 재구매율로 오해할 위험 차단 (헤더 라벨)했는가
+
+**연관 실패**: failures.md ㊳(GAS v5_0 수치 결함 10개), ㊵(GAS run_id contract), ㊴(sheets_sync row 복제 패턴)
+
+**hookify 보강**: 없음 (코드 작성 시 자가 점검 + codex review로 잡음)

@@ -76,6 +76,8 @@
 - **§제출요건정본확인**: 사업계획서 제출 서류는 공고문 원문만 정본. 본문 언급 ≠ 제출 요건. → `patterns.md §제출요건정본확인`
 - **§파일안전성**: git 미추적 파일은 언제든 사라질 수 있다고 가정. 산출물 생성 시 git 추적 여부 확인. MCP/npm 실행 전 commit 권장. → `patterns.md §파일안전성`
 - **§hookify규칙**: `.claude/hookify.block-{cheerleading,exaggeration}.local.md` 활성. "최고의/혁신적/엄청난/완벽/적극 추천/분명히 성공" 등 패턴 매치 시 stop event에서 응답 차단. 대체: 숫자·비교·사실로 변환 후 재작성.
+- **§plan점검**: plan adversarial codex review는 최대 2회. 5개+ 변경 plan은 분할(2~3개씩). 결함이 줄지 않고 늘면 즉시 중단 + 코드 진입. → `patterns.md §plan점검`
+- **§비율지표분모**: 비율(재구매율·전환율·리텐션) 지표 분모 점검 3가지 필수 — (a) 같은 버킷 중복 dedup, (b) 미관찰(observing) 제외 = `eligible = total - observing`, (c) maturity window 적용. observing=0 케이스는 표시 허용. → `patterns.md §비율지표분모`
 
 ### 실수 자동 기록 (필수)
 - 승현님이 실수·오류·잘못된 판단·금지사항 위반을 지적하면 → **즉시 `docs/lessons/failures.md` 상단(시간 역순)에 한 줄 누적 기록**
@@ -192,7 +194,8 @@
 | 송장 등록 (`/tracking` 명령) | ✅ 바탕화면 xls → rclone → 카페24/SS 자동 등록 (PlusCL 인증 발급 시 병행 가능) |
 | 04:00 카페24 OAuth 자동 갱신 | ✅ 매일 |
 | 08:30 시트 sync (카페24 + SS 5상태) | ✅ 매일 |
-| 09:00 재구매 리포트 + 마트 4종 + 📊대시보드 + 텔레그램 | ✅ 매일 (Anthropic 401 시 fallback) |
+| 09:00 재구매 리포트 + 📊대시보드 3개(통합/카페24/SS) + 텔레그램 | ✅ 매일 — v6: 변동중 표시·시트 숨김·RuntimeError fail-fast |
+| 재구매 GAS 분석 v5.1 (수치 결함 10개 + 운영 결함 2개 수정) | ⚠️ 사용자 수동 붙여넣기 필요 (`scripts/gas/repurchase_v5_1.gs`) — clasp 자동화는 Phase 3에서 GAS 제거 예정 |
 | **GitHub push → Vultr 자동 배포** (`.github/workflows/deploy-vultr.yml`) | ✅ `*.py` push 시 SSH→`git reset --hard origin/main`→텔레그램 알림. 콘솔 진입 불필요 |
 | 카페24 N10→N20 / SS 신규→발주확인 | 수동 (API 한계) |
 
