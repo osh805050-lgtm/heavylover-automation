@@ -3,6 +3,8 @@
 > 이 파일은 [작업 종류 매칭 시 grep 검색] / [월말 회고] / [에이전트 시작 전 위험 점검] 시 로드됩니다. CLAUDE.md §13의 정본입니다.
 > 마지막 갱신: 2026-05-12 · 갱신 주기: 즉시 누적 (실수 발생 시)
 
+- **2026-05-13** ㊶ | **META_AD_ACCOUNT_CURRENCY=USD 고정 + System User Token 전환 후 API KRW 응답 → convert_metrics_to_krw ×1450 이중환산** → spend 2억 텔레그램 리포트. 원인: personal token 시절 API가 USD 반환, System User Token 후 계정 네이티브 KRW 반환. currency_unit="USD" 하드코딩으로 모든 금액 ×1450. 수정: convert_metrics_to_krw/summarize_row에서 os.getenv("META_AD_ACCOUNT_CURRENCY") 읽어 _to_krw에 전달, env=KRW+META_ALLOW_NON_USD=1 | **하지 말 것**: Meta API 통화 응답은 계정 토큰 유형(personal/system user)에 따라 달라질 수 있음. 토큰 변경 시 raw JSON spend/cpc 단위를 즉시 확인. META_AD_ACCOUNT_CURRENCY는 하드코딩 금지 — env var로 런타임 조회.
+
 - **2026-05-12** ㊵ | **GAS run_id에 'gas_' prefix 추가했다가 lib/sheet_staleness.py check_pipeline_freshness() startswith(today) 호환성 깨짐** → v5.1 작성 시 `gas_2026-05-12_HHmmss` 형식 명세. 그러나 lib/sheet_staleness.py:118이 `run_id.startswith(today)` 체크 → 매번 stale 판정. Codex 1회차 점검에서 발견. 수정: prefix를 suffix로 변경 (`2026-05-12_HHmmss_gas`) | **하지 말 것**: 다른 코드와 공유 데이터 포맷 변경 시 양쪽 코드 contract를 정확히 확인. 특히 string prefix/suffix matching.
 
 - **2026-05-12** ㊴ | **카페24 amount 누적이 매출 부풀림 — sheets_sync.py [row]*n 패턴 미인지** → Claude 점검에서 "카페24 amount 첫 row만 사용 vs SS 누적" 정책 불일치로 판단. 그러나 sheets_sync.py:290이 item 개수만큼 `[row]*n` 복제하며 각 row의 amount는 order-level 동일값. v5.1에서 누적으로 바꾸면 3-item 주문 50,000원 → 150,000원으로 부풀려짐. Codex 1회차 점검에서 발견. 수정: 첫 row만 저장(v5_0 동작 유지) | **하지 말 것**: 데이터 소스 동작(특히 row 복제·item-level 여부) 확인 없이 "정책 불일치"로 단순 결론 금지. sheets_sync 같은 upstream 코드 패턴 먼저 점검.

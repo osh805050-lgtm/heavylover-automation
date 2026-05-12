@@ -649,7 +649,7 @@ def _style_mart_tabs(spreadsheet):
 # 탭 정리 (채널별 중복 탭 숨김)
 # ============================================================
 
-# 숨김 대상: 채널별 중복 탭 + Meta 광고 탭 + 카페24/SS 재구매매출 탭 (통합 탭으로 충분)
+# 숨김 대상: 채널별 중복 탭 + Meta 광고 탭 + GAS 분석 시트 (대시보드 3개로 충분)
 # 이 탭들은 맨 뒤로 이동 후 숨김 처리 (데이터 보존)
 _REDUNDANT_TABS = [
     # 채널별 중복 — 통합 탭으로 충분
@@ -660,11 +660,22 @@ _REDUNDANT_TABS = [
     "구매횟수_퍼널_카페24",
     "구매횟수_퍼널_SS",
     "구매횟수_퍼널_통합",
+    # GAS 분석 시트 — 📊 대시보드 3개로 대체 (v6)
+    "재구매_통합_일별",
+    "재구매_통합_주별",
+    "재구매_카페24_일별",
+    "재구매_카페24_주별",
+    "재구매_SS_일별",
+    "재구매_SS_주별",
+    "코호트_통합_전환율",
+    "재구매_간격분석",
+    "코호트_월별잔존율",
     # 고객마스터 — 원본 탭으로 충분, 직접 볼 필요 없음
     "코호트_고객마스터",
     # Meta 광고 — 별도 시트에서 관리
     "Meta_Ads_Daily",
     "Meta_Ads_Daily_Campaign",
+    "Meta_Ads_Daily_AdSet",  # v6 신규 — 광고 adset 시계열, 재구매 분석 무관
     "Meta_Ads_Winners",
     # mart_* — 내부 BI용, 대시보드로 대체
     "mart_monthly",
@@ -679,9 +690,23 @@ _MOVE_TO_BACK_TABS = [
     "스마트스토어 재구매매출",
 ]
 
+# 절대 숨김 금지 — staleness 감지 + 대시보드 3개 (v6)
+_PROTECTED_TABS = {
+    "pipeline_meta",
+    "📊 대시보드",
+    "📊 대시보드 (통합)",
+    "📊 대시보드 (카페24)",
+    "📊 대시보드 (스마트스토어)",
+}
+
 
 def hide_redundant_tabs(spreadsheet):
     """숨김 대상 탭을 맨 뒤로 이동 후 일괄 숨김 처리."""
+    # [v6] 보호 탭이 숨김 리스트에 실수로 포함됐는지 RuntimeError 가드 (assert는 -O에서 제거됨)
+    overlap = _PROTECTED_TABS & set(_REDUNDANT_TABS + _MOVE_TO_BACK_TABS)
+    if overlap:
+        raise RuntimeError(f"보호 탭이 숨김 리스트에 포함됨 (절대 금지): {overlap}")
+
     all_ws = spreadsheet.worksheets()
     total = len(all_ws)
 
@@ -724,6 +749,33 @@ def hide_redundant_tabs(spreadsheet):
 # ============================================================
 
 _DASH_TAB = "📊 대시보드"
+
+
+# [v6] 변동중 판정 헬퍼 — 현재월 또는 진행 중인 코호트면 partial
+def _is_month_partial(target_month: str) -> bool:
+    """target_month("YYYY-MM")이 현재월 이상이면 partial (변동 가능).
+
+    예: 5/13에 호출 시
+      - "2026-05" → True (진행중)
+      - "2026-04" → False (확정)
+      - "2026-06" → True (미래)
+    """
+    if not target_month:
+        return True
+    cur_month = datetime.now(KST).strftime("%Y-%m")
+    return target_month >= cur_month
+
+
+def _next_month_str(yyyymm: str) -> str:
+    """yyyy-MM의 다음 달."""
+    try:
+        y, m = map(int, yyyymm.split("-"))
+        if m == 12:
+            return f"{y + 1}-01"
+        return f"{y}-{m + 1:02d}"
+    except (ValueError, AttributeError):
+        return ""
+
 
 # 상태 판정 (셀 텍스트)
 def _dash_status(value, good: float, warn: float, higher_is_better: bool = True) -> str:
@@ -838,10 +890,22 @@ def write_dashboard(spreadsheet, gt: dict):
     rows.append(["지표", "이번 달", "전월 대비", "목표 기준", "판정"])
 
     # KPI 카드 4개 — 전월값도 같은 행에
+    # [v6] 변동중 판정 — 현재월 매출 / 진행 중인 M+1 코호트
+    cur_month_str = datetime.now(KST).strftime("%Y-%m")
+    revenue_partial = True  # 통합 대시보드의 "이번 달" 매출은 항상 진행중
+
+    # M+1 변동중 판정: 최신 코호트의 다음 달이 현재월 이상이면 partial
+    m1_partial = False
+    if mn_list:
+        latest_cohort_month = mn_list[-1].get("코호트월", "")
+        target_month = _next_month_str(latest_cohort_month)
+        m1_partial = _is_month_partial(target_month)
+
     mom_str = _fmt_delta(mom_pct)
+    revenue_display = _fmt_won(cur_m.get("매출"))
     rows.append([
         "재구매 매출",
-        _fmt_won(cur_m.get("매출")),
+        f"🔄 변동중 {revenue_display}" if revenue_partial else revenue_display,
         f"{mom_str}  (전월 {_fmt_won(prev_m.get('매출'))})",
         "—",
         f"{'▲' if (mom_pct or 0) >= 0 else '▼'} {'양호' if (mom_pct or 0) >= 0 else '감소'}",
@@ -853,12 +917,13 @@ def write_dashboard(spreadsheet, gt: dict):
         "30% 이상이면 양호",
         _dash_status(conv_rate, 30, 20, True),
     ])
+    m1_display = _fmt_pct(m1_recent)
     rows.append([
         "한 달 후 재구매율 (최신)",
-        _fmt_pct(m1_recent),
+        f"🔄 변동중 {m1_display}" if m1_partial else m1_display,
         "—",
-        "20% 이상이면 양호",
-        _dash_status(m1_recent, 20, 14, True),
+        "20% 이상이면 양호 (확정 후 평가)" if m1_partial else "20% 이상이면 양호",
+        "🔄 진행중" if m1_partial else _dash_status(m1_recent, 20, 14, True),
     ])
     rows.append([
         "재구매 평균 주기",
@@ -931,6 +996,145 @@ def write_dashboard(spreadsheet, gt: dict):
     # ── 셀 포맷 적용 ─────────────────────────────────────────
     _apply_dashboard_formats(ws, spreadsheet, rows, conv_rate, m1_recent, p50_num, mom_pct, mn_recent3)
     _log(f"  [📊 대시보드] 갱신 완료 ({len(rows)}행)")
+
+    # [v6] 채널별 대시보드 (카페24·스마트스토어) — 통합 대시보드의 축소 버전
+    try:
+        _write_channel_dashboard(spreadsheet, gt, "카페24", "📊 대시보드 (카페24)", 1)
+    except Exception as e:
+        _log(f"  ⚠️ 카페24 대시보드 갱신 실패: {e}")
+    try:
+        _write_channel_dashboard(spreadsheet, gt, "스마트스토어", "📊 대시보드 (스마트스토어)", 2)
+    except Exception as e:
+        _log(f"  ⚠️ 스마트스토어 대시보드 갱신 실패: {e}")
+
+
+def _write_channel_dashboard(spreadsheet, gt: dict, channel: str, tab_name: str, dash_index: int):
+    """[v6] 채널별 대시보드 — 통합 대시보드의 축소 버전.
+
+    현재 build_ground_truth가 채널별로 제공하는 데이터:
+      - 재구매 매출 (당월·전월·MoM)
+      - 단계별 전환율 (1→2, 2→3)
+    M+1 리텐션, 재구매 간격 P50 등은 통합만 → "📌 통합 대시보드 참조" 라벨.
+    """
+    try:
+        ws = spreadsheet.worksheet(tab_name)
+    except Exception:
+        ws = spreadsheet.add_worksheet(title=tab_name, rows=30, cols=8)
+
+    ws.clear()
+    try:
+        spreadsheet.batch_update({
+            "requests": [{"updateSheetProperties": {
+                "properties": {"sheetId": ws.id, "index": dash_index},
+                "fields": "index",
+            }}]
+        })
+    except Exception:
+        pass
+
+    now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
+
+    # ── 데이터 추출 (채널 레벨은 flat 구조) ─────────────────────
+    src = gt.get("월별_재구매_매출", {}).get(channel, {})
+    cur_매출 = src.get("당월_매출")
+    prev_매출 = src.get("전월_매출")
+    mom_pct = src.get("MoM_pct")
+
+    stage = gt.get("단계별_전환율_현재", {}).get(channel, [])
+    s1_2 = next((s for s in stage if s.get("단계") == "1→2"), {})
+    conv_1_2 = s1_2.get("전환율")
+    # [v6 Codex 점검] 2→3은 채널별 source 없음 — 카드 제외
+
+    # ── 헬퍼 (write_dashboard와 동일 포맷) ─────────────────────
+    def _fmt_won(v):
+        if not v:
+            return "—"
+        v = int(v)
+        if v >= 100_000_000:
+            return f"{v / 100_000_000:.1f}억원"
+        if v >= 10_000:
+            return f"{v // 10_000:,}만원"
+        return f"{v:,}원"
+
+    def _fmt_pct(v, decimal=1):
+        if v is None:
+            return "—"
+        try:
+            return f"{float(v):.{decimal}f}%"
+        except (TypeError, ValueError):
+            return str(v)
+
+    def _fmt_delta(v):
+        if v is None:
+            return "—"
+        try:
+            f = float(v)
+            sign = "▲" if f > 0 else ("▼" if f < 0 else "")
+            return f"{sign}{abs(f):.1f}%"
+        except (TypeError, ValueError):
+            return str(v)
+
+    # ── 행 구성 ──────────────────────────────────────────────
+    rows: list[list] = []
+
+    # 제목
+    rows.append([f"HeavyLover 재구매 현황 — {channel}", "", "", "", "", now_str])
+    rows.append([""])
+    rows.append([f"※ {channel} 채널 전용 대시보드. M+1 리텐션·재구매 평균 주기 등 일부 지표는 [📊 대시보드 (통합)] 참조."])
+    rows.append([""])
+
+    # KPI 카드
+    rows.append(["지표", "이번 달", "전월 대비", "목표 기준", "판정"])
+
+    # [v6] 이번 달 매출은 항상 변동중 (진행중)
+    mom_str = _fmt_delta(mom_pct)
+    revenue_display = _fmt_won(cur_매출)
+    rows.append([
+        "재구매 매출",
+        f"🔄 변동중 {revenue_display}",
+        f"{mom_str}  (전월 {_fmt_won(prev_매출)})",
+        "—",
+        f"{'▲' if (mom_pct or 0) >= 0 else '▼'} {'양호' if (mom_pct or 0) >= 0 else '감소'}",
+    ])
+    rows.append([
+        "첫 구매 → 재구매 전환율 (1→2)",
+        _fmt_pct(conv_1_2),
+        "—",
+        "30% 이상이면 양호",
+        _dash_status(conv_1_2, 30, 20, True),
+    ])
+    # [v6 Codex cycle 1] 2→3은 통합 대시보드도 표시 안 함 — 미측정 명시
+    rows.append([
+        "재구매 → 3회 구매 전환율 (2→3)",
+        "미측정",
+        "—",
+        "—",
+        "측정 예정 (소스 데이터 미구축)",
+    ])
+    rows.append([
+        "한 달 후 재구매율 (M+1)",
+        "📌 통합 대시보드 참조",
+        "—",
+        "—",
+        "통합에서 확인",
+    ])
+    rows.append([
+        "재구매 평균 주기 (P50)",
+        "📌 통합 대시보드 참조",
+        "—",
+        "—",
+        "통합에서 확인",
+    ])
+    rows.append([""])
+
+    # 안내 메시지
+    rows.append(["▸ 더 상세한 분석"])
+    rows.append([f"• 코호트별 추세 / 재구매 유지율 / 재구매 평균 주기 → [📊 대시보드 (통합)] 참조"])
+    rows.append([f"• 통합 데이터는 카페24·SS 합산 (식별자 차이로 동일 고객 중복 가능)"])
+
+    # ── 시트에 쓰기 ─────────────────────────────────────────
+    ws.update(values=rows, range_name="A1")
+    _log(f"  [{tab_name}] 갱신 완료 ({len(rows)}행)")
 
 
 def _build_action_points(conv_rate, m1_recent, p50_num, mom_pct, cohort_trend) -> list[str]:
@@ -1424,9 +1628,18 @@ def run() -> dict:
         _log(f"⚠️ 마트 탭 갱신 실패: {e}")
 
     # 채널별 중복 탭 숨김 (첫 실행 시에만 실질적 변경, 이후는 no-op)
+    # [v6] _PROTECTED_TABS 위반은 RuntimeError로 fail-fast — 절대 진행 X
     try:
         _log("채널별 중복 탭 숨김 처리 중...")
         hide_redundant_tabs(ss)
+    except RuntimeError as e:
+        # 보호 탭 위반 — 시트 구성 안전성 invariant 깨짐. 즉시 중단.
+        _log(f"❌ CRITICAL: 보호 탭 위반 — {e}")
+        try:
+            send_message(f"🚨 재구매 리포트 중단 — 보호 탭 위반: {e}", channel="ops")
+        except Exception:
+            pass
+        return {"status": "fail", "issues": [f"protected_tab_violation: {e}"]}
     except Exception as e:
         _log(f"⚠️ 탭 숨김 실패: {e}")
 
