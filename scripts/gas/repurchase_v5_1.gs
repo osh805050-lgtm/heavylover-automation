@@ -507,9 +507,13 @@ function writeCohortSheet(orders, sheetName, platformLabel) {
     COHORT_WINDOWS.forEach(w => {
       // [v5.1 #5] eligible = total - observing
       const eligible = d.total - d['o' + w];
-      // [v5.1 patch] partial 판정: eligible 표본 < 30 또는 관찰중이 분모 절반 이상
-      // partial 코호트가 100% 가짜 수치 표시되는 결함 차단
-      const partial = eligible < 30 || (d.total > 0 && d['o' + w] / d.total > 0.5);
+      // [v5.1 patch v2] partial 판정 완화 — observing=0이면 시간 다 지난 확정 데이터
+      // (옛 코호트는 첫구매자 적어도 시간 충분히 경과 → 신뢰 가능)
+      // partial = "아직 관찰중인 멤버가 있고, 표본 부족 OR 관찰중 비율 높음"
+      let partial = false;
+      if (d['o' + w] > 0) {
+        partial = eligible < 30 || (d.total > 0 && d['o' + w] / d.total > 0.5);
+      }
       const rate = (!partial && eligible > 0)
         ? Math.round(d['c' + w] / eligible * 1000) / 10
         : null;
@@ -735,9 +739,12 @@ function writePurchaseFunnelSheet(orders, sheetName, platformLabel) {
        .setFontColor('#ffffff').setHorizontalAlignment('center').setFontSize(10);
 
   const stageRows = stageData.map(s => {
-    // [v5.1 patch] partial 판정 — eligible < 30 또는 관찰중이 절반 이상
+    // [v5.1 patch v2] partial 판정 — observing>0일 때만 가드. observing=0이면 확정.
     const baseTotal = s.eligible + s.observing;
-    const partial = s.eligible < 30 || (baseTotal > 0 && s.observing / baseTotal > 0.5);
+    let partial = false;
+    if (s.observing > 0) {
+      partial = s.eligible < 30 || (baseTotal > 0 && s.observing / baseTotal > 0.5);
+    }
     const rate    = (!partial && s.eligible > 0)
                     ? Math.round(s.converted / s.eligible * 1000) / 10
                     : null;
@@ -798,9 +805,9 @@ function writePurchaseFunnelSheet(orders, sheetName, platformLabel) {
     const eligible12 = d.total - d.observing12;
     // [v5.1 Codex cycle 1] 2→3 분모도 maturity 적용 — stage 로직과 동일
     const eligible23 = d.converted12 - d.observing23;
-    // [v5.1 patch] partial 판정 — eligible < 30 또는 관찰중이 분모 절반 이상
-    const partial12  = eligible12 < 30 || (d.total > 0 && d.observing12 / d.total > 0.5);
-    const partial23  = eligible23 < 30 || (d.converted12 > 0 && d.observing23 / d.converted12 > 0.5);
+    // [v5.1 patch v2] partial 판정 — observing>0일 때만 가드 적용
+    const partial12  = d.observing12 > 0 && (eligible12 < 30 || (d.total > 0 && d.observing12 / d.total > 0.5));
+    const partial23  = d.observing23 > 0 && (eligible23 < 30 || (d.converted12 > 0 && d.observing23 / d.converted12 > 0.5));
     const rate12     = (!partial12 && eligible12 > 0) ? Math.round(d.converted12 / eligible12 * 1000) / 10 : null;
     const rate23     = (!partial23 && eligible23 > 0) ? Math.round(d.converted23 / eligible23 * 1000) / 10 : null;
     const sorted12   = d.gaps12.slice().sort((a, b) => a - b);
