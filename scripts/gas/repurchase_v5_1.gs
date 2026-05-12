@@ -507,10 +507,15 @@ function writeCohortSheet(orders, sheetName, platformLabel) {
     COHORT_WINDOWS.forEach(w => {
       // [v5.1 #5] eligible = total - observing
       const eligible = d.total - d['o' + w];
-      const rate = eligible > 0
-        ? Math.round(d['c' + w] / eligible * 1000) / 10 : 0;
+      // [v5.1 patch] partial 판정: eligible 표본 < 30 또는 관찰중이 분모 절반 이상
+      // partial 코호트가 100% 가짜 수치 표시되는 결함 차단
+      const partial = eligible < 30 || (d.total > 0 && d['o' + w] / d.total > 0.5);
+      const rate = (!partial && eligible > 0)
+        ? Math.round(d['c' + w] / eligible * 1000) / 10
+        : null;
       const observingLabel = d['o' + w] > 0 ? '⏳ ' + d['o' + w] : '✅';
-      row.push(d['c' + w], eligible > 0 ? rate : '—', observingLabel);
+      const rateCell = partial ? '⏳ 관찰중' : (rate !== null ? rate : '—');
+      row.push(d['c' + w], rateCell, observingLabel);
     });
     return row;
   });
@@ -730,7 +735,12 @@ function writePurchaseFunnelSheet(orders, sheetName, platformLabel) {
        .setFontColor('#ffffff').setHorizontalAlignment('center').setFontSize(10);
 
   const stageRows = stageData.map(s => {
-    const rate    = s.eligible > 0 ? Math.round(s.converted / s.eligible * 1000) / 10 : 0;
+    // [v5.1 patch] partial 판정 — eligible < 30 또는 관찰중이 절반 이상
+    const baseTotal = s.eligible + s.observing;
+    const partial = s.eligible < 30 || (baseTotal > 0 && s.observing / baseTotal > 0.5);
+    const rate    = (!partial && s.eligible > 0)
+                    ? Math.round(s.converted / s.eligible * 1000) / 10
+                    : null;
     const sorted  = s.gaps.slice().sort((a, b) => a - b);
     const avgDay  = sorted.length > 0
                     ? Math.round(sorted.reduce((a, b) => a + b, 0) / sorted.length) : '-';
@@ -738,14 +748,17 @@ function writePurchaseFunnelSheet(orders, sheetName, platformLabel) {
                     ? sorted[Math.floor(sorted.length / 2)] : '-';
 
     let interpretation = '-';
-    if (s.eligible > 0) {
+    if (!partial && rate !== null) {
       if (rate >= 40) interpretation = '우수';
       else if (rate >= 25) interpretation = '양호';
       else if (rate >= 15) interpretation = '개선필요';
       else interpretation = '위험';
+    } else if (partial) {
+      interpretation = '⏳ 관찰중';
     }
 
-    return [s.label, s.eligible, s.observing, s.converted, rate, avgDay, medDay, interpretation];
+    const rateCell = partial ? '⏳ 관찰중' : (rate !== null ? rate : '-');
+    return [s.label, s.eligible, s.observing, s.converted, rateCell, avgDay, medDay, interpretation];
   });
 
   sheet.getRange(SEC2_ROW + 2, 1, stageRows.length, 8).setValues(stageRows).setFontSize(10);
@@ -785,12 +798,17 @@ function writePurchaseFunnelSheet(orders, sheetName, platformLabel) {
     const eligible12 = d.total - d.observing12;
     // [v5.1 Codex cycle 1] 2→3 분모도 maturity 적용 — stage 로직과 동일
     const eligible23 = d.converted12 - d.observing23;
-    const rate12     = eligible12 > 0 ? Math.round(d.converted12 / eligible12 * 1000) / 10 : 0;
-    const rate23     = eligible23 > 0 ? Math.round(d.converted23 / eligible23 * 1000) / 10 : 0;
+    // [v5.1 patch] partial 판정 — eligible < 30 또는 관찰중이 분모 절반 이상
+    const partial12  = eligible12 < 30 || (d.total > 0 && d.observing12 / d.total > 0.5);
+    const partial23  = eligible23 < 30 || (d.converted12 > 0 && d.observing23 / d.converted12 > 0.5);
+    const rate12     = (!partial12 && eligible12 > 0) ? Math.round(d.converted12 / eligible12 * 1000) / 10 : null;
+    const rate23     = (!partial23 && eligible23 > 0) ? Math.round(d.converted23 / eligible23 * 1000) / 10 : null;
     const sorted12   = d.gaps12.slice().sort((a, b) => a - b);
     const avg12      = sorted12.length > 0
                        ? Math.round(sorted12.reduce((a, b) => a + b, 0) / sorted12.length) : '-';
-    return [month, d.total, d.observing12, d.converted12, eligible12 > 0 ? rate12 : '—', avg12, d.converted23, eligible23 > 0 ? rate23 : '—'];
+    const rate12Cell = partial12 ? '⏳ 관찰중' : (rate12 !== null ? rate12 : '—');
+    const rate23Cell = partial23 ? '⏳ 관찰중' : (rate23 !== null ? rate23 : '—');
+    return [month, d.total, d.observing12, d.converted12, rate12Cell, avg12, d.converted23, rate23Cell];
   });
 
   if (trendRows.length > 0) {
