@@ -39,6 +39,22 @@ def test_check_account_currency_raises_when_missing():
             os.environ["META_AD_ACCOUNT_CURRENCY"] = saved
 
 
+def test_to_krw_rejects_unsupported_currency():
+    """_to_krw가 USD/KRW 외 통화에 RuntimeError 발생 — silent ×1450 사고 방지."""
+    os.environ.setdefault("META_AD_ACCOUNT_CURRENCY", "USD")
+    from lib.meta_currency import _to_krw
+    import pytest
+
+    # KRW: 그대로 반환
+    assert _to_krw(150000, currency_unit="KRW") == 150000
+    # USD: ×1450
+    assert _to_krw(100, currency_unit="USD") == 145000
+    # EUR/JPY/오타: RuntimeError (빈 문자열은 falsy → USD fallback)
+    for bad in ("EUR", "JPY", "usd_typo"):
+        with pytest.raises(RuntimeError):
+            _to_krw(100, currency_unit=bad)
+
+
 def test_build_ad_top5_card_empty_returns_empty_string():
     """ads=[] 전달 시 빈 문자열 반환 (카드 미표시)."""
     os.environ.setdefault("META_AD_ACCOUNT_CURRENCY", "USD")

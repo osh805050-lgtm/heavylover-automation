@@ -34,11 +34,20 @@ def _check_account_currency():
 
 
 def _to_krw(value, currency_unit="USD"):
-    """USD → KRW 환산. None은 None. 이미 KRW면 그대로."""
+    """USD → KRW 환산. None은 None. 이미 KRW면 그대로.
+    USD/KRW 외 통화는 RuntimeError — silent ×1450 사고 방지.
+    """
     if value is None:
         return None
-    if currency_unit == "KRW":
+    unit = (currency_unit or "USD").upper()
+    if unit == "KRW":
         return value
+    if unit != "USD":
+        raise RuntimeError(
+            f"⚠️ _to_krw: 지원하지 않는 통화 '{unit}'. "
+            f"USD 환율({CURRENCY_KRW_PER_USD})로 silent 변환하면 사고 발생. "
+            "lib/meta_currency.py 환율 추가 필요."
+        )
     try:
         return float(value) * CURRENCY_KRW_PER_USD
     except (TypeError, ValueError):
