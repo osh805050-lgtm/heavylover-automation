@@ -71,7 +71,11 @@ const HL = {
     FUNNEL_SS:     '구매횟수_퍼널_SS',
     FUNNEL_ALL:    '구매횟수_퍼널_통합',
     INTERVAL:      '재구매_간격분석',
-    MONTHLY_RET:   '코호트_월별잔존율',
+    // [v7] M+N 시트 채널별 분리 — 옛 'MONTHLY_RET' 단일 키 삭제. legacy 시트 '코호트_월별잔존율'은 markLegacyMonthlyRet_()에서 DEPRECATED 라벨 1회 기입.
+    MONTHLY_RET_ALL:    '코호트_통합_월별잔존율',
+    MONTHLY_RET_CAFE24: '코호트_카페24_월별잔존율',
+    MONTHLY_RET_SS:     '코호트_SS_월별잔존율',
+    MONTHLY_RET_LEGACY: '코호트_월별잔존율',  // 옛 시트 (markLegacyMonthlyRet_에서만 사용)
   },
 
   SHEET_ORDER: [
@@ -95,7 +99,10 @@ const HL = {
     '구매횟수_퍼널_SS',
     '구매횟수_퍼널_통합',
     '재구매_간격분석',
-    '코호트_월별잔존율',
+    // [v7] M+N 시트 채널별 3개 (legacy '코호트_월별잔존율'은 제거 — markLegacyMonthlyRet_가 DEPRECATED 처리)
+    '코호트_통합_월별잔존율',
+    '코호트_카페24_월별잔존율',
+    '코호트_SS_월별잔존율',
   ],
 };
 
@@ -212,11 +219,16 @@ function runAll() {
     writePurchaseFunnelSheet(ss,     HL.OUT.FUNNEL_SS,     '스마트스토어');
     writePurchaseFunnelSheet(all,    HL.OUT.FUNNEL_ALL,    '통합');
 
-    // 4. 코호트 월별 잔존율 — 현재월 진행중 라벨
-    writeMonthlyRetentionSheet(all);
+    // 4. 코호트 월별 잔존율 — [v7] 채널별 3개 시트 (통합·카페24·SS) — 현재월 진행중 라벨
+    writeMonthlyRetentionSheet(all,    HL.OUT.MONTHLY_RET_ALL);
+    writeMonthlyRetentionSheet(cafe24, HL.OUT.MONTHLY_RET_CAFE24);
+    writeMonthlyRetentionSheet(ss,     HL.OUT.MONTHLY_RET_SS);
 
     // 5. 재구매 간격 분석 — 0일 간격 포함
     writeIntervalSheet(all);
+
+    // [v7] legacy '코호트_월별잔존율' 시트가 남아있으면 DEPRECATED 라벨 1회 기입 (사용자가 펼쳐도 stale 오해 방지)
+    markLegacyMonthlyRet_();
 
     reorderSheets();
 
@@ -899,8 +911,10 @@ function writeIntervalSheet(orders) {
 // ── 코호트 월별 잔존율 시트 (v5.1 #9: 현재월 진행중 라벨)
 // ============================================================
 
-function writeMonthlyRetentionSheet(orders) {
+function writeMonthlyRetentionSheet(orders, sheetName) {
   if (!orders || orders.length === 0) return;
+  // [v7] 안전 기본값 — 시그니처 변경 회귀 가드. 인자 누락 시 통합 시트로 fallback.
+  sheetName = sheetName || HL.OUT.MONTHLY_RET_ALL;
 
   const history = buildHistory(orders);
 
@@ -919,7 +933,7 @@ function writeMonthlyRetentionSheet(orders) {
 
   const sortedCohorts = Object.keys(cohortCustomers).sort();
   const currentMonth  = fmt(new Date(), 'yyyy-MM');
-  const sheet         = getOrCreateSheet(HL.OUT.MONTHLY_RET);
+  const sheet         = getOrCreateSheet(sheetName);  // [v7] HL.OUT.MONTHLY_RET → sheetName 인자
   const updatedAt     = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm');
 
   sheet.clearContents(); sheet.clearFormats();
@@ -1041,7 +1055,29 @@ function writeMonthlyRetentionSheet(orders) {
   sheet.setColumnWidth(MAX_MONTHS + 3, 80);
   sheet.setFrozenRows(3);
 
-  Logger.log('✅ ' + HL.OUT.MONTHLY_RET + ' 완료');
+  Logger.log('✅ ' + sheetName + ' 완료');  // [v7] HL.OUT.MONTHLY_RET → sheetName
+}
+
+
+// ============================================================
+// ── [v7] legacy '코호트_월별잔존율' 시트 DEPRECATED 라벨
+// ============================================================
+// 옛 단일 시트가 새 채널별 3개 시트로 분리되며 더 이상 갱신되지 않음.
+// 시트가 남아있으면 사용자가 펼쳐 stale 데이터를 볼 위험 → 1행에 DEPRECATED 라벨 1회 기입.
+// [Codex HIGH 1] clear() 금지 — 부분 배포·롤백 시 옛 Python 폴백이 빈 시트 읽음.
+// 데이터 보존 + 1행 위에 라벨만 삽입 (insertRowBefore). 멱등 (이미 라벨이면 skip).
+function markLegacyMonthlyRet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const legacy = ss.getSheetByName(HL.OUT.MONTHLY_RET_LEGACY);
+  if (!legacy) return;  // 이미 삭제됐거나 없음 — 정상
+  const firstCellVal = String(legacy.getRange(1, 1).getValue() || '');
+  if (firstCellVal.indexOf('DEPRECATED') >= 0) return;  // 이미 라벨 기입됨 — 멱등
+  // [Codex HIGH 1] clear() 안 함. 1행 위에 새 row 삽입 — 옛 데이터는 2행 이하로 밀려 보존.
+  legacy.insertRowBefore(1);
+  legacy.getRange(1, 1).setValue('⚠️ DEPRECATED — 이 시트는 더 이상 갱신되지 않습니다. 코호트_통합_월별잔존율 / 코호트_카페24_월별잔존율 / 코호트_SS_월별잔존율 을 사용하세요. (옛 데이터는 2행 이하 보존 — Python legacy 폴백용)')
+        .setFontWeight('bold').setFontSize(11).setBackground('#fde68a');
+  legacy.setColumnWidth(1, 800);
+  Logger.log('🗑️ legacy 시트 DEPRECATED 라벨 1행 삽입 완료 (데이터 보존): ' + HL.OUT.MONTHLY_RET_LEGACY);
 }
 
 

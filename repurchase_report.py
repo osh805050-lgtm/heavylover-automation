@@ -67,7 +67,10 @@ def _classify_tabs(spreadsheet) -> dict:
         "cafe24_cohort": None,
         "ss_cohort": None,
         "integrated_cohort": None,
-        "mn_retention": None,
+        "mn_retention": None,          # legacy '코호트_월별잔존율' (v7 이전, 폴백 전용)
+        "mn_retention_integrated": None,  # [v7] '코호트_통합_월별잔존율'
+        "mn_retention_cafe24": None,      # [v7] '코호트_카페24_월별잔존율'
+        "mn_retention_ss": None,          # [v7] '코호트_SS_월별잔존율'
         "interval_stats": None,
         "visit_count_cafe24": None,
         "visit_count_ss": None,
@@ -81,7 +84,11 @@ def _classify_tabs(spreadsheet) -> dict:
         "코호트_카페24_전환율": "cafe24_cohort",
         "코호트_SS_전환율": "ss_cohort",
         "코호트_통합_전환율": "integrated_cohort",
-        "코호트_월별잔존율": "mn_retention",
+        # [v7] M+N 시트 채널별 3개 + legacy 폴백
+        "코호트_통합_월별잔존율": "mn_retention_integrated",
+        "코호트_카페24_월별잔존율": "mn_retention_cafe24",
+        "코호트_SS_월별잔존율":   "mn_retention_ss",
+        "코호트_월별잔존율":      "mn_retention",  # legacy 단일 시트 (v7 이전)
         "재구매_간격분석": "interval_stats",
         "구매횟수_퍼널_카페24": "visit_count_cafe24",
         "구매횟수_퍼널_SS": "visit_count_ss",
@@ -113,11 +120,17 @@ def _to_int(v) -> int | None:
 
 
 def _to_pct(v) -> float | None:
-    """'16.7%' → 16.7 (float)."""
+    """'16.7%' → 16.7 (float).
+    [v7] GAS 진행중 마커 '🔵 17.5' / 신호 마커 '🟢 14.3' 정규화 — 이모지 prefix 제거 후 숫자 추출.
+    """
     if v is None or v == "":
         return None
     s = str(v).replace("%", "").replace(",", "").strip()
-    if not s or s in ("-", "─"):
+    # [v7] 신호·진행중 이모지 prefix 제거 (GAS writeMonthlyRetentionSheet:967 등)
+    for emoji in ("🔵", "🟢", "🟡", "🔴", "⚪", "─"):
+        s = s.replace(emoji, "")
+    s = s.strip()
+    if not s or s == "-":
         return None
     try:
         return round(float(s), 2)
@@ -208,10 +221,20 @@ def _extract_cohort_stage(ws) -> list[dict]:
     return out
 
 
+def _is_partial_marker(v) -> bool:
+    """[v7 Codex HIGH 2] GAS '🔵 17.5' partial 마커 감지.
+    GAS writeMonthlyRetentionSheet:967이 현재월(진행중) 셀에 🔵 prefix를 부여.
+    이 플래그가 True면 dashboard에서 'final 값'으로 표시·색칠하지 말 것."""
+    if v is None:
+        return False
+    return "🔵" in str(v)
+
+
 def _extract_mn(ws) -> list[dict]:
     """M+N 잔존율 (코호트_월별잔존율).
 
     헤더 (3행): 코호트월|첫구매자수|M+1|M+2|M+3|M+4|M+5|M+6
+    [v7] 각 M+k 셀의 partial 마커(🔵) 보존 — M+k_partial 플래그 추가.
     """
     rows = _data_rows(ws)
     out = []
@@ -225,11 +248,93 @@ def _extract_mn(ws) -> list[dict]:
             "코호트월": m,
             "첫구매자수": _to_int(r[1]) if len(r) > 1 else 0,
             "M+1": _to_pct(r[2]) if len(r) > 2 else None,
+            "M+1_partial": _is_partial_marker(r[2]) if len(r) > 2 else False,
             "M+2": _to_pct(r[3]) if len(r) > 3 else None,
+            "M+2_partial": _is_partial_marker(r[3]) if len(r) > 3 else False,
             "M+3": _to_pct(r[4]) if len(r) > 4 else None,
+            "M+3_partial": _is_partial_marker(r[4]) if len(r) > 4 else False,
             "M+6": _to_pct(r[7]) if len(r) > 7 else None,
+            "M+6_partial": _is_partial_marker(r[7]) if len(r) > 7 else False,
         })
     return out
+
+
+# ============================================================
+# [v7] 코호트 추세·M+N 헬퍼 — 통합·채널 공통 (build_ground_truth에서 3회 호출)
+# ============================================================
+
+def _avg_or_none(values):
+    clean = [v for v in values if v is not None]
+    return round(sum(clean) / len(clean), 2) if clean else None
+
+
+def _trend_delta(t):
+    a = t.get("최근3개월_평균")
+    b = t.get("이전3개월_평균")
+    if a is None or b is None:
+        return None
+    return round(a - b, 2)
+
+
+def _compute_cohort_trend(cohort_rows: list[dict], min_size: int = 5) -> dict:
+    """코호트 추세 1→2, 2→3 (최근 3개월 vs 이전 3개월 평균).
+
+    [v7] 채널별 표본 부족 대응 — min_size 인자 (통합=5, 카페24/SS=3).
+    """
+    cohort_recent = cohort_rows[-8:]
+    if len(cohort_rows) >= 6:
+        completed = [c for c in cohort_rows if c.get("1→2_전환율") is not None and (c.get("첫구매자수") or 0) >= min_size]
+        last3 = completed[-3:] if len(completed) >= 3 else completed
+        prev3 = completed[-6:-3] if len(completed) >= 6 else []
+        trend_1to2 = {
+            "최근3개월_평균": _avg_or_none([c["1→2_전환율"] for c in last3]),
+            "이전3개월_평균": _avg_or_none([c["1→2_전환율"] for c in prev3]),
+            "최근3개월_코호트": [c["코호트월"] for c in last3],
+            "이전3개월_코호트": [c["코호트월"] for c in prev3],
+        }
+        trend_2to3 = {
+            "최근3개월_평균": _avg_or_none([c.get("2→3_전환율") for c in last3]),
+            "이전3개월_평균": _avg_or_none([c.get("2→3_전환율") for c in prev3]),
+        }
+    else:
+        trend_1to2 = {"최근3개월_평균": None, "이전3개월_평균": None, "최근3개월_코호트": [], "이전3개월_코호트": []}
+        trend_2to3 = {"최근3개월_평균": None, "이전3개월_평균": None}
+    trend_1to2["변화_pp"] = _trend_delta(trend_1to2)
+    trend_2to3["변화_pp"] = _trend_delta(trend_2to3)
+    return {
+        "최근_6개월": cohort_recent,
+        "1→2_추세": trend_1to2,
+        "2→3_추세": trend_2to3,
+    }
+
+
+def _classify_mn_completed(ws, now, min_size: int = 5) -> list[dict]:
+    """M+N 리텐션 추출 + is_complete 메타 + 표본 필터.
+
+    [v7]
+      1. _extract_mn으로 raw rows
+      2. is_complete: 코호트 다음 달 말일 + DATA_LAG_DAYS 이후만 True
+      3. min_size 필터 (통합 5, 채널 3)
+      4. M+1 not None (진행중 마커 정규화는 _to_pct에서 처리)
+    """
+    mn = _extract_mn(ws)
+    for m in mn:
+        cohort_str = m.get("코호트월", "")
+        try:
+            cy, cmo = map(int, cohort_str.split("-"))
+            next_first = date(cy + (cmo // 12), (cmo % 12) + 1, 1)
+            m1_window_end = next_first - timedelta(days=1)
+            m["is_complete"] = now.date() > m1_window_end + timedelta(days=DATA_LAG_DAYS)
+            m["m1_window_end"] = m1_window_end.isoformat()
+        except (ValueError, AttributeError):
+            m["is_complete"] = False
+            m["m1_window_end"] = None
+    return [
+        m for m in mn
+        if m.get("is_complete")
+        and m.get("M+1") is not None
+        and (m.get("첫구매자수") or 0) >= min_size
+    ]
 
 
 def _extract_interval_stats(ws) -> dict:
@@ -349,62 +454,24 @@ def build_ground_truth(spreadsheet) -> dict:
     cafe24_stage = _extract_stage_flat(tabs.get("cafe24_cohort"))
     ss_stage = _extract_stage_flat(tabs.get("ss_cohort"))
 
-    # 코호트 추세 (통합): 최근 6개월 30일·60일 전환율
+    # 코호트 추세 (통합) — [v7] 헬퍼로 추출. 채널은 아래에서 추가 호출
     integrated_cohort = _extract_cohort_stage(tabs.get("integrated_cohort"))
-    # 최근 6개월 중 완결 코호트만 (최근 1~2개월은 아직 집계 중일 수 있음)
-    cohort_recent = integrated_cohort[-8:]
+    cafe24_cohort_rows = _extract_cohort_stage(tabs.get("cafe24_cohort"))
+    ss_cohort_rows     = _extract_cohort_stage(tabs.get("ss_cohort"))
 
-    # 최근 3개월 vs 그 이전 3개월 평균
-    def _avg_or_none(values):
-        clean = [v for v in values if v is not None]
-        return round(sum(clean) / len(clean), 2) if clean else None
+    integrated_cohort_bundle = _compute_cohort_trend(integrated_cohort, min_size=5)
+    cafe24_cohort_bundle     = _compute_cohort_trend(cafe24_cohort_rows, min_size=3)
+    ss_cohort_bundle         = _compute_cohort_trend(ss_cohort_rows, min_size=3)
 
-    if len(integrated_cohort) >= 6:
-        # 최근 1~2개월은 제외 (진행 중), 완결 코호트 중 최신 3개월 vs 그 이전 3개월
-        completed = [c for c in integrated_cohort if c["1→2_전환율"] is not None and c["첫구매자수"] >= 5]
-        last3 = completed[-3:] if len(completed) >= 3 else completed
-        prev3 = completed[-6:-3] if len(completed) >= 6 else []
-        cohort_trend_1to2 = {
-            "최근3개월_평균": _avg_or_none([c["1→2_전환율"] for c in last3]),
-            "이전3개월_평균": _avg_or_none([c["1→2_전환율"] for c in prev3]),
-            "최근3개월_코호트": [c["코호트월"] for c in last3],
-            "이전3개월_코호트": [c["코호트월"] for c in prev3],
-        }
-        cohort_trend_2to3 = {
-            "최근3개월_평균": _avg_or_none([c["2→3_전환율"] for c in last3]),
-            "이전3개월_평균": _avg_or_none([c["2→3_전환율"] for c in prev3]),
-        }
-    else:
-        cohort_trend_1to2 = {"최근3개월_평균": None, "이전3개월_평균": None}
-        cohort_trend_2to3 = {"최근3개월_평균": None, "이전3개월_평균": None}
+    cohort_recent = integrated_cohort_bundle["최근_6개월"]
+    cohort_trend_1to2 = integrated_cohort_bundle["1→2_추세"]
+    cohort_trend_2to3 = integrated_cohort_bundle["2→3_추세"]
 
-    # 추세 변화 (%p)
-    def _delta(t):
-        a = t.get("최근3개월_평균")
-        b = t.get("이전3개월_평균")
-        if a is None or b is None:
-            return None
-        return round(a - b, 2)
-
-    cohort_trend_1to2["변화_pp"] = _delta(cohort_trend_1to2)
-    cohort_trend_2to3["변화_pp"] = _delta(cohort_trend_2to3)
-
-    # M+N 리텐션 — 각 코호트에 완결 메타데이터 부여 후 완결분만 필터
-    # is_complete: 코호트 다음 달 말일 + DATA_LAG_DAYS 이후에만 True
-    # 예) 2026-04 코호트 → m1_window_end = 2026-05-31 → 2026-06-07 이후에야 완결
-    mn = _extract_mn(tabs.get("mn_retention"))
-    for m in mn:
-        cohort_str = m.get("코호트월", "")
-        try:
-            cy, cmo = map(int, cohort_str.split("-"))
-            next_first = date(cy + (cmo // 12), (cmo % 12) + 1, 1)
-            m1_window_end = next_first - timedelta(days=1)
-            m["is_complete"] = now.date() > m1_window_end + timedelta(days=DATA_LAG_DAYS)
-            m["m1_window_end"] = m1_window_end.isoformat()
-        except (ValueError, AttributeError):
-            m["is_complete"] = False
-            m["m1_window_end"] = None
-    mn_completed = [m for m in mn if m.get("is_complete") and m.get("M+1") is not None]
+    # M+N 리텐션 — [v7] 채널별 3개 시트. legacy('mn_retention') 폴백.
+    mn_integrated_ws = tabs.get("mn_retention_integrated") or tabs.get("mn_retention")
+    mn_completed = _classify_mn_completed(mn_integrated_ws, now, min_size=5)
+    mn_completed_cafe24 = _classify_mn_completed(tabs.get("mn_retention_cafe24"), now, min_size=3)
+    mn_completed_ss     = _classify_mn_completed(tabs.get("mn_retention_ss"), now, min_size=3)
 
     gt = {
         "리포트_날짜": now.strftime("%Y-%m-%d"),
@@ -459,7 +526,13 @@ def build_ground_truth(spreadsheet) -> dict:
             "1→2_추세": cohort_trend_1to2,
             "2→3_추세": cohort_trend_2to3,
         },
+        # [v7] 채널별 코호트 추세 — _write_channel_dashboard에서 참조
+        "코호트_추세_카페24": cafe24_cohort_bundle,
+        "코호트_추세_스마트스토어": ss_cohort_bundle,
         "M+N_리텐션_통합": mn_completed[-6:] if mn_completed else [],
+        # [v7] 채널별 M+N 리텐션
+        "M+N_리텐션_카페24": mn_completed_cafe24[-6:] if mn_completed_cafe24 else [],
+        "M+N_리텐션_스마트스토어": mn_completed_ss[-6:] if mn_completed_ss else [],
         "재구매_간격": _extract_interval_stats(tabs.get("interval_stats")),
         "업계_벤치마크": {
             "M+1_리텐션_평균": "20~30%",
@@ -669,7 +742,11 @@ _REDUNDANT_TABS = [
     "재구매_SS_주별",
     "코호트_통합_전환율",
     "재구매_간격분석",
-    "코호트_월별잔존율",
+    # [v7] M+N 시트 채널별 분리 — 4개 모두 숨김 (대시보드 3개에서 모든 M+N 표시)
+    "코호트_월별잔존율",  # legacy 단일 시트 (v7 이전, markLegacyMonthlyRet_가 DEPRECATED 라벨 기입)
+    "코호트_통합_월별잔존율",   # v7 신규 — 통합 대시보드 §4 소스
+    "코호트_카페24_월별잔존율", # v7 신규 — 카페24 대시보드 §4 소스
+    "코호트_SS_월별잔존율",     # v7 신규 — SS 대시보드 §4 소스
     # 고객마스터 — 원본 탭으로 충분, 직접 볼 필요 없음
     "코호트_고객마스터",
     # Meta 광고 — 별도 시트에서 관리
@@ -973,14 +1050,25 @@ def write_dashboard(spreadsheet, gt: dict):
     # 재구매 유지율 테이블 (M+N)
     rows.append(["▸ 재구매 유지율 — 첫 구매 후 몇 달이 지나도 사는가 (최근 3개월)", "", "", "", "", ""])
     rows.append(["구매 월", "첫 구매 고객 수", "1개월 후", "2개월 후", "3개월 후", "6개월 후"])
+
+    # [v7 Codex HIGH 2] partial 셀은 '🔄 X.X%'로 표시 — final로 오해 방지
+    def _fmt_mn(v, partial):
+        if v is None:
+            return "—"
+        try:
+            s = f"{float(v):.1f}%"
+            return f"🔄 {s}" if partial else s
+        except (TypeError, ValueError):
+            return str(v)
+
     for r in mn_recent3:
         rows.append([
             r.get("코호트월", ""),
             f"{r.get('첫구매자수') or 0:,}명",
-            _fmt_pct(r.get("M+1")),
-            _fmt_pct(r.get("M+2")),
-            _fmt_pct(r.get("M+3")),
-            _fmt_pct(r.get("M+6")),
+            _fmt_mn(r.get("M+1"), r.get("M+1_partial", False)),
+            _fmt_mn(r.get("M+2"), r.get("M+2_partial", False)),
+            _fmt_mn(r.get("M+3"), r.get("M+3_partial", False)),
+            _fmt_mn(r.get("M+6"), r.get("M+6_partial", False)),
         ])
     rows.append([""])
 
@@ -997,29 +1085,32 @@ def write_dashboard(spreadsheet, gt: dict):
     _apply_dashboard_formats(ws, spreadsheet, rows, conv_rate, m1_recent, p50_num, mom_pct, mn_recent3)
     _log(f"  [📊 대시보드] 갱신 완료 ({len(rows)}행)")
 
-    # [v6] 채널별 대시보드 (카페24·스마트스토어) — 통합 대시보드의 축소 버전
+    # [v7] 채널별 대시보드 (카페24·스마트스토어) — 통합 대시보드와 동일 4섹션 구조
+    # tabs 인자 전달로 _classify_tabs 중복 호출 회피
     try:
-        _write_channel_dashboard(spreadsheet, gt, "카페24", "📊 대시보드 (카페24)", 1)
+        _write_channel_dashboard(spreadsheet, gt, "카페24", "📊 대시보드 (카페24)", 1, tabs=tabs)
     except Exception as e:
         _log(f"  ⚠️ 카페24 대시보드 갱신 실패: {e}")
     try:
-        _write_channel_dashboard(spreadsheet, gt, "스마트스토어", "📊 대시보드 (스마트스토어)", 2)
+        _write_channel_dashboard(spreadsheet, gt, "스마트스토어", "📊 대시보드 (스마트스토어)", 2, tabs=tabs)
     except Exception as e:
         _log(f"  ⚠️ 스마트스토어 대시보드 갱신 실패: {e}")
 
 
-def _write_channel_dashboard(spreadsheet, gt: dict, channel: str, tab_name: str, dash_index: int):
-    """[v6] 채널별 대시보드 — 통합 대시보드의 축소 버전.
+def _write_channel_dashboard(spreadsheet, gt: dict, channel: str, tab_name: str, dash_index: int, tabs: dict | None = None):
+    """[v7] 채널별 대시보드 — 통합 대시보드와 동일한 4섹션 구조.
 
-    현재 build_ground_truth가 채널별로 제공하는 데이터:
-      - 재구매 매출 (당월·전월·MoM)
-      - 단계별 전환율 (1→2, 2→3)
-    M+1 리텐션, 재구매 간격 P50 등은 통합만 → "📌 통합 대시보드 참조" 라벨.
+    섹션:
+      1. KPI 카드 3개 (재구매 매출 / 1→2 전환율 / M+1 리텐션) — 판정 컬럼 제거
+      2. 월별 재구매 추이 (최근 6개월) — 통합과 동일 6열
+      3. 첫 구매 → 재구매 전환율 (최근 6개월) — 판정 컬럼 제거 4열
+      4. 재구매 유지율 M+N (최근 3코호트)
+    채널별 P50/2→3 미산출 → KPI 카드 3개만. 액션 포인트 섹션 제외.
     """
     try:
         ws = spreadsheet.worksheet(tab_name)
     except Exception:
-        ws = spreadsheet.add_worksheet(title=tab_name, rows=30, cols=8)
+        ws = spreadsheet.add_worksheet(title=tab_name, rows=60, cols=10)
 
     ws.clear()
     try:
@@ -1034,7 +1125,8 @@ def _write_channel_dashboard(spreadsheet, gt: dict, channel: str, tab_name: str,
 
     now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
 
-    # ── 데이터 추출 (채널 레벨은 flat 구조) ─────────────────────
+    # ── 데이터 추출 ─────────────────────────────────────────
+    # 채널 매출은 기존 flat dict 유지 — gt nested 승격 X (다운스트림 호환)
     src = gt.get("월별_재구매_매출", {}).get(channel, {})
     cur_매출 = src.get("당월_매출")
     prev_매출 = src.get("전월_매출")
@@ -1043,9 +1135,23 @@ def _write_channel_dashboard(spreadsheet, gt: dict, channel: str, tab_name: str,
     stage = gt.get("단계별_전환율_현재", {}).get(channel, [])
     s1_2 = next((s for s in stage if s.get("단계") == "1→2"), {})
     conv_1_2 = s1_2.get("전환율")
-    # [v6 Codex 점검] 2→3은 채널별 source 없음 — 카드 제외
 
-    # ── 헬퍼 (write_dashboard와 동일 포맷) ─────────────────────
+    # [v7] 채널별 코호트·M+N (build_ground_truth 확장에서 추가)
+    cohort_bundle = gt.get(f"코호트_추세_{channel}", {})
+    cohort_recent = cohort_bundle.get("최근_6개월", [])
+    cohort_recent = [r for r in cohort_recent if (r.get("첫구매자수") or 0) >= 3][-6:]
+
+    mn_list = gt.get(f"M+N_리텐션_{channel}") or []
+    m1_recent = mn_list[-1].get("M+1") if mn_list else None
+    mn_recent3 = mn_list[-3:] if len(mn_list) >= 3 else mn_list
+
+    # 채널별 월별 추이 — raw 시트에서 직접 추출 (gt 구조 미변경 원칙)
+    if tabs is None:
+        tabs = _classify_tabs(spreadsheet)
+    monthly_tab_key = "cafe24_monthly" if channel == "카페24" else "ss_monthly"
+    monthly_rows = _extract_monthly(tabs.get(monthly_tab_key))[-6:]
+
+    # ── 숫자 포맷 헬퍼 ───────────────────────────────────────
     def _fmt_won(v):
         if not v:
             return "—"
@@ -1074,19 +1180,24 @@ def _write_channel_dashboard(spreadsheet, gt: dict, channel: str, tab_name: str,
         except (TypeError, ValueError):
             return str(v)
 
+    # ── M+1 변동중 판정 (통합과 동일 로직) ────────────────
+    m1_partial = False
+    if mn_list:
+        latest_cohort_month = mn_list[-1].get("코호트월", "")
+        target_month = _next_month_str(latest_cohort_month)
+        m1_partial = _is_month_partial(target_month)
+
     # ── 행 구성 ──────────────────────────────────────────────
     rows: list[list] = []
 
     # 제목
-    rows.append([f"HeavyLover 재구매 현황 — {channel}", "", "", "", "", now_str])
-    rows.append([""])
-    rows.append([f"※ {channel} 채널 전용 대시보드. M+1 리텐션·재구매 평균 주기 등 일부 지표는 [📊 대시보드 (통합)] 참조."])
+    rows.append([f"HeavyLover 재구매 현황 — {channel}", "", "", "", "", "", "", "", "", now_str])
     rows.append([""])
 
-    # KPI 카드
-    rows.append(["지표", "이번 달", "전월 대비", "목표 기준", "판정"])
+    # KPI 카드 헤더 (판정 컬럼 제거 — 4열)
+    rows.append(["지표", "이번 달", "전월 대비", "목표 기준"])
 
-    # [v6] 이번 달 매출은 항상 변동중 (진행중)
+    # KPI 카드 3개
     mom_str = _fmt_delta(mom_pct)
     revenue_display = _fmt_won(cur_매출)
     rows.append([
@@ -1094,46 +1205,91 @@ def _write_channel_dashboard(spreadsheet, gt: dict, channel: str, tab_name: str,
         f"🔄 변동중 {revenue_display}",
         f"{mom_str}  (전월 {_fmt_won(prev_매출)})",
         "—",
-        f"{'▲' if (mom_pct or 0) >= 0 else '▼'} {'양호' if (mom_pct or 0) >= 0 else '감소'}",
     ])
     rows.append([
-        "첫 구매 → 재구매 전환율 (1→2)",
+        "첫 구매 → 재구매 전환율",
         _fmt_pct(conv_1_2),
         "—",
         "30% 이상이면 양호",
-        _dash_status(conv_1_2, 30, 20, True),
     ])
-    # [v6 Codex cycle 1] 2→3은 통합 대시보드도 표시 안 함 — 미측정 명시
+    m1_display = _fmt_pct(m1_recent)
     rows.append([
-        "재구매 → 3회 구매 전환율 (2→3)",
-        "미측정",
+        "한 달 후 재구매율 (최신)",
+        f"🔄 변동중 {m1_display}" if m1_partial else m1_display,
         "—",
-        "—",
-        "측정 예정 (소스 데이터 미구축)",
-    ])
-    rows.append([
-        "한 달 후 재구매율 (M+1)",
-        "📌 통합 대시보드 참조",
-        "—",
-        "—",
-        "통합에서 확인",
-    ])
-    rows.append([
-        "재구매 평균 주기 (P50)",
-        "📌 통합 대시보드 참조",
-        "—",
-        "—",
-        "통합에서 확인",
+        "20% 이상이면 양호 (확정 후 평가)" if m1_partial else "20% 이상이면 양호",
     ])
     rows.append([""])
 
-    # 안내 메시지
-    rows.append(["▸ 더 상세한 분석"])
-    rows.append([f"• 코호트별 추세 / 재구매 유지율 / 재구매 평균 주기 → [📊 대시보드 (통합)] 참조"])
-    rows.append([f"• 통합 데이터는 카페24·SS 합산 (식별자 차이로 동일 고객 중복 가능)"])
+    # 월별 추이 테이블 (통합과 동일 6열)
+    rows.append(["▸ 월별 재구매 추이 (최근 6개월)", "", "", "", "", ""])
+    rows.append(["월", "재구매 고객 수", "재구매 매출", "1인당 평균 결제액", "재구매율", "전월 대비"])
+    prev_monthly_매출 = None
+    for r in monthly_rows:
+        매출 = r.get("재구매매출") or 0
+        delta_str = ""
+        if prev_monthly_매출 is not None and prev_monthly_매출 > 0:
+            delta = round((매출 - prev_monthly_매출) / prev_monthly_매출 * 100, 1)
+            sign = "▲" if delta > 0 else ("▼" if delta < 0 else "")
+            delta_str = f"{sign}{abs(delta):.1f}%"
+        rows.append([
+            r.get("월", ""),
+            f"{r.get('재구매자수') or 0:,}명",
+            _fmt_won(매출),
+            _fmt_won(r.get("AOV")),
+            _fmt_pct(r.get("재구매율")),
+            delta_str,
+        ])
+        prev_monthly_매출 = 매출
+    rows.append([""])
+
+    # 코호트 전환율 테이블 (판정 컬럼 제거 — 4열)
+    rows.append(["▸ 첫 구매 → 재구매 전환율 (최근 6개월)", "", "", ""])
+    rows.append(["구매 월", "첫 구매 고객 수", "30일 내 재구매율", "60일 내 재구매율"])
+    for r in cohort_recent:
+        rows.append([
+            r.get("코호트월", ""),
+            f"{r.get('첫구매자수') or 0:,}명",
+            _fmt_pct(r.get("30일_전환율")),
+            _fmt_pct(r.get("60일_전환율")),
+        ])
+    rows.append([""])
+
+    # 재구매 유지율 테이블 (M+N) — 4컬럼: M+1/M+2/M+3/M+6
+    rows.append(["▸ 재구매 유지율 — 첫 구매 후 몇 달이 지나도 사는가 (최근 3개월)", "", "", "", "", ""])
+    rows.append(["구매 월", "첫 구매 고객 수", "1개월 후", "2개월 후", "3개월 후", "6개월 후"])
+
+    # [v7 Codex HIGH 2] partial 셀 '🔄 X.X%' 표시 (통합과 동일)
+    def _fmt_mn(v, partial):
+        if v is None:
+            return "—"
+        try:
+            s = f"{float(v):.1f}%"
+            return f"🔄 {s}" if partial else s
+        except (TypeError, ValueError):
+            return str(v)
+
+    if mn_recent3:
+        for r in mn_recent3:
+            rows.append([
+                r.get("코호트월", ""),
+                f"{r.get('첫구매자수') or 0:,}명",
+                _fmt_mn(r.get("M+1"), r.get("M+1_partial", False)),
+                _fmt_mn(r.get("M+2"), r.get("M+2_partial", False)),
+                _fmt_mn(r.get("M+3"), r.get("M+3_partial", False)),
+                _fmt_mn(r.get("M+6"), r.get("M+6_partial", False)),
+            ])
+    else:
+        # [v7 M5] graceful — GAS 신규 시트 없음 (사용자 GAS 미반영) 시
+        rows.append(["—", "—", "M+N 데이터 갱신 중 (GAS runAll 1회 필요)", "", "", ""])
+    rows.append([""])
+    rows.append([f"※ 채널별 첫구매는 해당 플랫폼 기준. 동일 고객이 타 채널에서 먼저 구매했을 수 있음."])
 
     # ── 시트에 쓰기 ─────────────────────────────────────────
     ws.update(values=rows, range_name="A1")
+
+    # ── 셀 포맷 적용 (채널 전용) ─────────────────────────────
+    _apply_channel_dashboard_formats(ws, spreadsheet, rows, mom_pct, conv_1_2, m1_recent, mn_recent3)
     _log(f"  [{tab_name}] 갱신 완료 ({len(rows)}행)")
 
 
@@ -1349,7 +1505,10 @@ def _apply_dashboard_formats(ws, spreadsheet, rows: list, conv_rate, m1_recent, 
                 if col_i >= len(row):
                     break
                 val = row[col_i]
-                if val == "—" or val is None or val == "":
+                # [v7 Codex HIGH 2] partial 셀('🔄 ...')은 회색 — final로 오해 색칠 회피
+                if isinstance(val, str) and "🔄" in val:
+                    r_col = _COLOR_WHITE
+                elif val == "—" or val is None or val == "":
                     r_col = _COLOR_WHITE
                 else:
                     r_col = _rgb_for_status(val, 20, 14, True)
@@ -1375,6 +1534,156 @@ def _apply_dashboard_formats(ws, spreadsheet, rows: list, conv_rate, m1_recent, 
             spreadsheet.batch_update({"requests": requests})
         except Exception as e:
             _log(f"  ⚠️ 포맷 적용 실패: {e}")
+
+
+def _apply_channel_dashboard_formats(ws, spreadsheet, rows: list, mom_pct, conv_1_2, m1_recent, mn_recent3=None):
+    """[v7] 채널 대시보드 전용 서식 — 판정 컬럼 없음, 명시 픽셀 폭.
+
+    통합과 차이:
+      - KPI 카드 4열 (판정 컬럼 제거) → 색상은 "전월 대비"(col 2) 컬럼에 ▲/▼ 색칠
+      - 코호트 표 4열 → "60일 내 재구매율"(col 3) 셀 자체에 색칠
+      - 명시 픽셀 열 너비 (글씨 잘림 방지)
+    """
+    sheet_id = ws.id
+    requests = []
+
+    def _row_range(row_idx: int, col_start=0, col_end=9):
+        return {
+            "sheetId": sheet_id,
+            "startRowIndex": row_idx,
+            "endRowIndex": row_idx + 1,
+            "startColumnIndex": col_start,
+            "endColumnIndex": col_end + 1,
+        }
+
+    def _fmt_req(row_idx, bg, bold=False, font_size=10, col_start=0, col_end=9):
+        return {
+            "repeatCell": {
+                "range": _row_range(row_idx, col_start, col_end),
+                "cell": {"userEnteredFormat": _cell_fmt(bg, bold, font_size)},
+                "fields": "userEnteredFormat(backgroundColor,textFormat)",
+            }
+        }
+
+    # 제목 (row 0) — 블루 + 흰 볼드
+    requests.append({
+        "repeatCell": {
+            "range": _row_range(0),
+            "cell": {"userEnteredFormat": {
+                "backgroundColor": _COLOR_HEADER,
+                "textFormat": {"bold": True, "fontSize": 13, "foregroundColor": _COLOR_WHITE},
+            }},
+            "fields": "userEnteredFormat(backgroundColor,textFormat)",
+        }
+    })
+
+    # KPI 헤더 (row 2) — 진회색 + 볼드
+    requests.append(_fmt_req(2, {"red": 0.9, "green": 0.9, "blue": 0.9}, bold=True, col_end=3))
+
+    # KPI 카드 3개 (row 3, 4, 5) — [v7 Codex MED 1] 색상을 실제 KPI 값 셀에 적용
+    # - 재구매 매출: col 2(전월 대비, ▲X.X%)에 MoM 색칠 (col 1은 "🔄 변동중 ..." 진행중이라 색칠 회피)
+    # - 1→2 전환율: col 1(이번 달, 값) 색칠 (col 2는 '—'라 의미 없음)
+    # - M+1 리텐션: col 1(이번 달, 값) 색칠 (col 2는 '—', col 1이 실제 값)
+    # 행별 (row_idx, color, col_idx) 명시
+    kpi_color_specs = [
+        (3, _rgb_for_status(mom_pct, 0, -10, True), 2),    # 재구매 매출 — col 2 (전월 대비)
+        (4, _rgb_for_status(conv_1_2, 30, 20, True), 1),   # 1→2 전환율 — col 1 (이번 달)
+        (5, _rgb_for_status(m1_recent, 20, 14, True), 1),  # M+1 리텐션 — col 1 (이번 달)
+    ]
+    for row_idx, color, col_idx in kpi_color_specs:
+        requests.append(_fmt_req(row_idx, color, col_start=col_idx, col_end=col_idx))
+        # 지표명 컬럼(A=col 0) 연한 회색
+        requests.append(_fmt_req(row_idx, {"red": 0.97, "green": 0.97, "blue": 0.97}, col_start=0, col_end=0))
+
+    # 섹션 헤더 ("▸" 포함 행) — 라벤더 + 볼드
+    for idx, row in enumerate(rows):
+        if row and isinstance(row[0], str) and "▸" in row[0]:
+            requests.append(_fmt_req(idx, {"red": 0.851, "green": 0.886, "blue": 0.953}, bold=True, font_size=11, col_end=5))
+
+    # 월별 추이 컬럼 헤더 + 코호트 컬럼 헤더 색상
+    for idx, row in enumerate(rows):
+        if not row or not isinstance(row[0], str):
+            continue
+        if row[0] == "월" or row[0] == "구매 월":
+            col_end = 5 if row[0] == "월" else 3
+            requests.append(_fmt_req(idx, {"red": 0.9, "green": 0.9, "blue": 0.9}, bold=True, col_end=col_end))
+
+    # 코호트 전환율 데이터 — "60일 내 재구매율"(col 3) 셀 자체에 색칠
+    cohort_header_idx = None
+    for idx, row in enumerate(rows):
+        if row and isinstance(row[0], str) and "첫 구매 → 재구매 전환율" in row[0]:
+            cohort_header_idx = idx
+            break
+    if cohort_header_idx is not None:
+        r = cohort_header_idx + 2  # +1 헤더, +2 데이터 시작
+        while r < len(rows):
+            row = rows[r]
+            if not row or not row[0]:
+                break
+            if isinstance(row[0], str) and ("──" in row[0] or "▸" in row[0]):
+                break
+            conv60_str = row[3] if len(row) > 3 else None
+            if isinstance(conv60_str, str) and conv60_str != "—":
+                try:
+                    v = float(conv60_str.replace("%", "").strip())
+                    color = _rgb_for_status(v, 30, 20, True)
+                    requests.append(_fmt_req(r, color, col_start=3, col_end=3))
+                except (ValueError, TypeError):
+                    pass
+            # 코호트월 컬럼 연회색
+            requests.append(_fmt_req(r, {"red": 0.97, "green": 0.97, "blue": 0.97}, col_start=0, col_end=0))
+            r += 1
+
+    # M+N 히트맵 — M+1~M+6 (col 2~5) 각 셀 색칠
+    mn_header_idx = None
+    for idx, row in enumerate(rows):
+        if row and isinstance(row[0], str) and "재구매 유지율" in row[0]:
+            mn_header_idx = idx
+            break
+    if mn_header_idx is not None:
+        r = mn_header_idx + 2  # +1 헤더, +2 데이터 시작
+        while r < len(rows):
+            row = rows[r]
+            if not row or not row[0]:
+                break
+            if isinstance(row[0], str) and ("──" in row[0] or "▸" in row[0] or "※" in row[0]):
+                break
+            for col_i in range(2, 6):
+                if col_i >= len(row):
+                    break
+                val = row[col_i]
+                # [v7 Codex HIGH 2] partial 셀('🔄 ...')은 회색
+                if isinstance(val, str) and "🔄" in val:
+                    r_col = _COLOR_WHITE
+                elif val == "—" or val is None or val == "":
+                    r_col = _COLOR_WHITE
+                else:
+                    r_col = _rgb_for_status(val, 20, 14, True)
+                requests.append(_fmt_req(r, r_col, col_start=col_i, col_end=col_i))
+            requests.append(_fmt_req(r, {"red": 0.97, "green": 0.97, "blue": 0.97}, col_start=0, col_end=0))
+            r += 1
+
+    # 명시 픽셀 열 너비 (글씨 잘림 방지 — 사용자 요구사항)
+    col_widths = [240, 140, 180, 160, 130, 130]  # A~F
+    for col_idx, width in enumerate(col_widths):
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "COLUMNS",
+                    "startIndex": col_idx,
+                    "endIndex": col_idx + 1,
+                },
+                "properties": {"pixelSize": width},
+                "fields": "pixelSize",
+            }
+        })
+
+    if requests:
+        try:
+            spreadsheet.batch_update({"requests": requests})
+        except Exception as e:
+            _log(f"  ⚠️ 채널 포맷 적용 실패: {e}")
 
 
 # ============================================================
