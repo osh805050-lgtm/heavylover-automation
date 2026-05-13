@@ -1992,19 +1992,9 @@ def run() -> dict:
     gt_log.write_text(json.dumps(gt, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     _log(f"ground_truth 저장: {gt_log}")
 
-    # 텔레그램 요약 발송 (gt 재사용)
-    try:
-        _log("텔레그램 요약 발송 중...")
-        from report_telegram_brief import build_brief
-        msg = build_brief(gt)
-        send_message(msg, channel="report")
-        _log("✅ 텔레그램 발송 완료")
-    except Exception as e:
-        _log(f"⚠️ 텔레그램 발송 실패: {e}")
-        try:
-            send_message(f"🚨 텔레그램 요약 실패: {e}", channel="ops")
-        except Exception:
-            pass
+    # [2026-05-13] 09:00 텔레그램 발송 제거 — 09:05 report_telegram_brief.py cron에서 발송.
+    # 이전엔 둘 다 발송해서 사용자에게 동일 메시지 2건씩 옴 (사용자 보고로 발견).
+    # 09:05가 시트 재로드 후 build_brief 호출하므로 5분 lag 안전.
 
     # 이메일 심층 분석 발송 (gt 재사용)
     try:
