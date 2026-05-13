@@ -853,6 +853,8 @@ function writePurchaseFunnelSheet(orders, sheetName, platformLabel) {
 
 function writeIntervalSheet(orders) {
   const gaps  = calcGaps(orders).sort((a, b) => a - b);
+  // [v7] 1→2 첫 재구매 전용 — CRM 리마인드 발송 타이밍 기준
+  const gaps1to2 = calcFirstRepurchaseGaps(orders).sort((a, b) => a - b);
   const sheet = getOrCreateSheet(HL.OUT.INTERVAL);
   sheet.clearContents(); sheet.clearFormats();
 
@@ -866,27 +868,46 @@ function writeIntervalSheet(orders) {
     p50:   pct2(gaps, 50), p75: pct2(gaps, 75),
     p90:   pct2(gaps, 90), p95: pct2(gaps, 95),
   };
+  // [v7] 1→2 첫 재구매 통계 (gaps1to2가 비어있으면 0 처리)
+  const stats1to2 = gaps1to2.length > 0 ? {
+    count: gaps1to2.length,
+    p50:   pct2(gaps1to2, 50),
+    p75:   pct2(gaps1to2, 75),
+    p90:   pct2(gaps1to2, 90),
+  } : { count: 0, p50: 0, p75: 0, p90: 0 };
 
   const updatedAt = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm');
   sheet.getRange(1, 1).setValue('📊 재구매 간격 분포 분석 (0일 간격 포함)').setFontWeight('bold').setFontSize(12);
   sheet.getRange(1, 2).setValue('업데이트: ' + updatedAt).setFontColor('#888888').setFontSize(10);
-  sheet.setColumnWidth(1, 160); sheet.setColumnWidth(2, 80); sheet.setColumnWidth(3, 220);
+  sheet.setColumnWidth(1, 200); sheet.setColumnWidth(2, 80); sheet.setColumnWidth(3, 240);
 
   sheet.getRange(3, 1, 1, 3).setValues([['지표', '값', '의미']])
        .setFontWeight('bold').setBackground('#1a73e8').setFontColor('#ffffff').setFontSize(10);
 
+  // [v7] 1→2 P50을 최상단에 배치 — CRM 메인 지표
   const summaryRows = [
-    ['샘플 수',           stats.count + '건', '2회 이상 구매한 고객의 구매 간격 (0일 포함)'],
-    ['평균',              stats.mean  + '일', ''],
-    ['중앙값 (P50)',      stats.p50   + '일', '50% 고객이 이 일수 이내 재구매'],
-    ['P75',               stats.p75   + '일', '75% 고객이 이 일수 이내 재구매'],
-    ['P90 ← CRM 기준',   stats.p90   + '일', '▶ SMS 재구매 유도 발송 기준 추천'],
-    ['P95',               stats.p95   + '일', ''],
+    ['중앙값 P50 (1→2 첫 재구매)', stats1to2.p50 + '일', '★ CRM 리마인드 발송 타이밍 기준'],
+    ['P75 (1→2 첫 재구매)',         stats1to2.p75 + '일', '1→2 75% 고객이 이 일수 이내'],
+    ['P90 (1→2 첫 재구매)',         stats1to2.p90 + '일', '1→2 90% 고객이 이 일수 이내'],
+    ['샘플 수 (1→2 전용)',          stats1to2.count + '건', '첫 구매 후 두번째 구매한 고객 수'],
+    ['── 전체 인접 재구매 (참고) ──', '', ''],
+    ['샘플 수 (전체)',                stats.count + '건', '2회 이상 구매한 고객의 모든 인접 간격 (0일 포함)'],
+    ['평균 (전체)',                   stats.mean  + '일', ''],
+    ['중앙값 (P50, 전체)',            stats.p50   + '일', '50% 고객이 이 일수 이내 재구매'],
+    ['P75 (전체)',                    stats.p75   + '일', '75% 고객이 이 일수 이내 재구매'],
+    ['P90 ← CRM 기준 (전체)',         stats.p90   + '일', '▶ SMS 재구매 유도 발송 기준 추천'],
+    ['P95 (전체)',                    stats.p95   + '일', ''],
   ];
   sheet.getRange(4, 1, summaryRows.length, 3).setValues(summaryRows).setFontSize(10);
-  sheet.getRange(8, 1, 1, 3).setBackground('#fff8e1').setFontWeight('bold');
+  // [v7] 1→2 P50 (row 4) 노란색 강조 — CRM 메인 기준
+  sheet.getRange(4, 1, 1, 3).setBackground('#fff8e1').setFontWeight('bold');
+  // [v7] 구분선 (row 8) 회색
+  sheet.getRange(8, 1, 1, 3).setBackground('#e0e0e0').setFontStyle('italic');
+  // [v7] 전체 P90 (row 13) 옛 CRM 기준은 약한 강조 유지
+  sheet.getRange(13, 1, 1, 3).setBackground('#fef9e7');
 
-  const histStart = 11;
+  // [v7] summaryRows 11행 → histStart 4 + 11 + 1(빈) = 16
+  const histStart = 16;
   sheet.getRange(histStart, 1, 1, 3).setValues([['구간', '건수', '비율']])
        .setFontWeight('bold').setBackground('#34a853').setFontColor('#ffffff').setFontSize(10);
 
@@ -1146,6 +1167,19 @@ function calcGaps(orders) {
       const d = Math.round((list[i].orderDate - list[i - 1].orderDate) / 86400000);
       if (d >= 0) gaps.push(d);
     }
+  });
+  return gaps;
+}
+
+// [v7] 1→2 첫 재구매만 추출 — CRM 리마인드 발송 타이밍 기준 (대시보드 KPI 표시용)
+function calcFirstRepurchaseGaps(orders) {
+  const h = buildHistory(orders); const gaps = [];
+  Object.values(h).forEach(list => {
+    if (list.length < 2) return;
+    list.sort((a, b) => a.orderDate - b.orderDate);
+    // 1→2 첫 재구매만 (인덱스 0 → 1)
+    const d = Math.round((list[1].orderDate - list[0].orderDate) / 86400000);
+    if (d >= 0) gaps.push(d);
   });
   return gaps;
 }

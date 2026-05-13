@@ -341,7 +341,16 @@ def _extract_interval_stats(ws) -> dict:
     """재구매 간격 P50/P75/P90 (재구매_간격분석).
 
     헤더 (3행): 지표|값|의미
-    행 1열에 '중앙값 (P50)', 'P75', 'P90 ← CRM 기준' 등 — 키 매칭.
+    [v7] 1→2 첫 재구매 전용 통계와 전체 인접 통계 양쪽 모두 추출:
+      - "중앙값 P50 (1→2 첫 재구매)" → P50_1to2 (CRM 메인 기준)
+      - "P75 (1→2 첫 재구매)"        → P75_1to2
+      - "P90 (1→2 첫 재구매)"        → P90_1to2
+      - "샘플 수 (1→2 전용)"         → 샘플수_1to2
+      - "중앙값 (P50, 전체)"          → P50 (legacy 호환)
+      - "P75 (전체)"                  → P75
+      - "P90 ← CRM 기준 (전체)"      → P90
+      - "평균 (전체)"                 → 평균
+      - "샘플 수 (전체)"              → 샘플수
     """
     rows = _data_rows(ws)
     out: dict = {}
@@ -350,13 +359,29 @@ def _extract_interval_stats(ws) -> dict:
             continue
         key = r[0].strip()
         val = r[1].strip()
+        # [v7] 1→2 전용 키 우선 매칭 (전체 키와 구분 — 1→2 또는 ─ 포함 행은 1→2)
+        is_1to2 = "1→2" in key
+        if is_1to2:
+            if "P50" in key or "중앙값" in key:
+                out["P50_1to2"] = val
+            elif "P75" in key:
+                out["P75_1to2"] = val
+            elif "P90" in key:
+                out["P90_1to2"] = val
+            elif "샘플" in key:
+                out["샘플수_1to2"] = val
+            continue
+        # 구분선 ('── 전체 인접 재구매 (참고) ──') 무시
+        if "──" in key:
+            continue
+        # 전체 인접 키
         if "P50" in key or "중앙값" in key:
             out["P50"] = val
         elif "P75" in key:
             out["P75"] = val
         elif "P90" in key:
             out["P90"] = val
-        elif key == "평균":
+        elif "평균" in key:
             out["평균"] = val
         elif "샘플" in key:
             out["샘플수"] = val
@@ -680,7 +705,7 @@ def write_marts(spreadsheet, gt: dict, tabs: dict):
         ["1→2 전환율(%)", s1_2.get("전환율"), "30%+ ✅ / 23~30% ⚠️", _summary_status(s1_2.get("전환율"), 30, 23, True), now_str],
         ["2→3 전환율(%)", "미측정" if s2_3.get("전환율") is None else s2_3.get("전환율"), "측정 예정", _summary_status(s2_3.get("전환율"), 40, 30, True), now_str],
         ["M+1 리텐션 최신 코호트(%)", m1_recent, "20~30% ✅", _summary_status(m1_recent, 20, 14, True), now_str],
-        ["재구매 간격 P50(일)", interval.get("P50") or interval.get("중앙값") or interval.get("50%"), "10일 부근", "—", now_str],
+        ["재구매 간격 P50 (1→2 첫 재구매, 일)", interval.get("P50_1to2") or interval.get("P50") or interval.get("중앙값"), "10일 부근 · CRM 리마인드 기준", "—", now_str],
         ["재구매 간격 P90(일)", interval.get("P90") or interval.get("90%"), "31~62일", "—", now_str],
     ]
 
@@ -908,7 +933,8 @@ def write_dashboard(spreadsheet, gt: dict):
     m1_recent = mn_list[-1].get("M+1") if mn_list else None
 
     interval = gt.get("재구매_간격", {}) or {}
-    p50_raw = interval.get("P50") or interval.get("중앙값") or "—"
+    # [v7] CRM 메인 기준 = 1→2 첫 재구매 P50. legacy 폴백: 전체 P50.
+    p50_raw = interval.get("P50_1to2") or interval.get("P50") or interval.get("중앙값") or "—"
     try:
         p50_num = float(str(p50_raw).replace("일", "").strip())
     except (TypeError, ValueError):
@@ -1003,10 +1029,10 @@ def write_dashboard(spreadsheet, gt: dict):
         "🔄 진행중" if m1_partial else _dash_status(m1_recent, 20, 14, True),
     ])
     rows.append([
-        "재구매 평균 주기",
+        "재구매 평균 주기 (1→2 첫 재구매)",
         f"{p50_raw}" if p50_raw != "—" else "—",
         "—",
-        "10일 부근이면 양호",
+        "10일 부근이면 양호 · CRM 리마인드 기준",
         _dash_status(p50_num, 10, 18, False) if p50_num is not None else "—",
     ])
     rows.append([""])
