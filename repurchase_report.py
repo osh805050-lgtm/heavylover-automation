@@ -1148,8 +1148,8 @@ def _write_channel_dashboard(spreadsheet, gt: dict, channel: str, tab_name: str,
     # 채널별 월별 추이 — raw 시트에서 직접 추출 (gt 구조 미변경 원칙)
     if tabs is None:
         tabs = _classify_tabs(spreadsheet)
-    monthly_tab_key = "cafe24_monthly" if channel == "카페24" else "ss_monthly"
-    monthly_rows = _extract_monthly(tabs.get(monthly_tab_key))[-6:]
+    monthly_tab_name = "cafe24_monthly" if channel == "카페24" else "ss_monthly"
+    monthly_rows = _extract_monthly(tabs.get(monthly_tab_name))[-6:]
 
     # ── 숫자 포맷 헬퍼 ───────────────────────────────────────
     def _fmt_won(v):
