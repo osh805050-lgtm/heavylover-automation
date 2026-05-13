@@ -51,8 +51,7 @@ jobs:
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          META_AD_ACCOUNT_CURRENCY: ${{ vars.META_AD_ACCOUNT_CURRENCY || 'KRW' }}
-          META_ALLOW_NON_USD: ${{ vars.META_ALLOW_NON_USD || '1' }}
+          META_AD_ACCOUNT_CURRENCY: ${{ vars.META_AD_ACCOUNT_CURRENCY || 'USD' }}
         run: python meta_ads_weekly_report.py
 
       - name: Identify winner ad patterns

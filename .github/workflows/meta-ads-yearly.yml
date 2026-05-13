@@ -51,8 +51,7 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
-          META_AD_ACCOUNT_CURRENCY: ${{ vars.META_AD_ACCOUNT_CURRENCY || 'KRW' }}
-          META_ALLOW_NON_USD: ${{ vars.META_ALLOW_NON_USD || '1' }}
+          META_AD_ACCOUNT_CURRENCY: ${{ vars.META_AD_ACCOUNT_CURRENCY || 'USD' }}
         run: python meta_ads_yearly_report.py
 
       - name: Notify failure on Telegram
