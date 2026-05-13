@@ -27,22 +27,28 @@ jobs:
           port: ${{ secrets.VULTR_PORT }}
           script: |
             set -e
-            cd /root/heavylover-automation
-            echo "=== 배포 전 SHA ==="
-            git rev-parse --short HEAD
-            git fetch origin main
-            git reset --hard origin/main
-            echo "=== 배포 후 SHA ==="
-            git rev-parse --short HEAD
+            for DIR in /root/heavylover-automation /root/heavylover-repurchase; do
+              if [ ! -d "$DIR/.git" ]; then
+                echo "=== SKIP: $DIR not a git repo ==="
+                continue
+              fi
+              echo "=== [$DIR] 배포 전 SHA ==="
+              cd "$DIR"
+              git rev-parse --short HEAD
+              git fetch origin main
+              git reset --hard origin/main
+              echo "=== [$DIR] 배포 후 SHA ==="
+              git rev-parse --short HEAD
+            done
             echo "=== 배포 완료: $(date '+%Y-%m-%d %H:%M:%S') ==="
 
       - name: 텔레그램 알림
         if: always()
         run: |
           if [ "${{ job.status }}" = "success" ]; then
-            MSG="✅ [배포] heavylover-automation @ Vultr 갱신 완료 (${GITHUB_SHA::7})"
+            MSG="✅ [배포] heavylover-automation + heavylover-repurchase @ Vultr 갱신 완료 (${GITHUB_SHA::7})"
           else
-            MSG="❌ [배포] heavylover-automation 갱신 실패 — Actions 로그 확인 필요"
+            MSG="❌ [배포] Vultr 갱신 실패 — Actions 로그 확인 필요"
           fi
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
