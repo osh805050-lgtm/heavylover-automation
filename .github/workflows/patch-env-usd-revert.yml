@@ -1,0 +1,31 @@
+name: Vultr .env USD 환원 (1회성)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Vultr .env USD 환원 + META_ALLOW_NON_USD 제거
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VULTR_HOST }}
+          username: ${{ secrets.VULTR_USER }}
+          key: ${{ secrets.VULTR_SSH_KEY }}
+          port: ${{ secrets.VULTR_PORT }}
+          script: |
+            set -e
+            cd /root/heavylover-automation
+            sed -i 's/^META_AD_ACCOUNT_CURRENCY=.*/META_AD_ACCOUNT_CURRENCY=USD/' .env
+            sed -i '/^META_ALLOW_NON_USD=/d' .env
+            echo "=== 결과 ==="
+            grep -E "META_AD_ACCOUNT_CURRENCY|META_ALLOW_NON_USD" .env || echo "META_ALLOW_NON_USD 라인 정상 제거됨"
+
+      - name: 텔레그램 알림
+        if: always()
+        run: |
+          MSG="${{ job.status == 'success' && '✅ [Vultr .env] USD 환원 완료' || '❌ [Vultr .env] USD 환원 실패' }}"
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN_OPS || secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID_OPS || secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "text=${MSG}"
