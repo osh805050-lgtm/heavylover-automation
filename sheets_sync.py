@@ -718,8 +718,18 @@ def run() -> dict:
         try:
             from telegram_client import send_message
             err_str = "\n".join(result["errors"])
+            # [2026-05-15] 비전공자 친화 메시지
             send_message(
-                f"🚨 sheets_sync 오류 발생\n{err_str}",
+                f"🚨 데이터 동기화 실패\n"
+                f"\n"
+                f"오늘 아침 카페24/스마트스토어 주문 데이터를 시트로 가져오는 작업이 멈췄어요.\n"
+                f"\n"
+                f"원인:\n{err_str}\n"
+                f"\n"
+                f"대응:\n"
+                f"• 자동 재시도(최대 3번, 60초 간격)가 이미 돌아갔어요\n"
+                f"• 60초 안에 자동 복구되면 보통 OK\n"
+                f"• 이 메시지가 또 오면 Claude한테 점검 요청하세요",
                 channel="ops",
             )
         except Exception as e:

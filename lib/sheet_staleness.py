@@ -147,13 +147,34 @@ def alert_if_not_fresh(state: str) -> None:
     if alert_state.get(incident_key):
         return  # 오늘 이미 발송
 
-    label = "stale (분석 탭 미갱신)" if state == "stale" else "unknown (시트 접근 불가)"
-    msg = (
-        f"⚠️ 재구매 분석 시트 [{label}]\n"
-        f"pipeline_meta 탭의 writer=gas 최신 row가 오늘 날짜가 아니거나 없습니다.\n"
-        f"Google Apps Script 트리거 상태를 확인해주세요.\n"
-        f"(오늘: {today})"
-    )
+    # [2026-05-15] 비전공자 친화 메시지
+    if state == "stale":
+        msg = (
+            f"⚠️ 오늘 분석 자동 실행 안 됨\n"
+            f"\n"
+            f"대시보드가 어제 수치로 보일 수 있어요.\n"
+            f"오늘 아침 구글 시트 안에서 자동으로 돌아야 할 분석 (Apps Script)이 멈췄거나 안 돌았어요.\n"
+            f"\n"
+            f"대응:\n"
+            f"• 구글 시트 → 확장 프로그램 → Apps Script → ⏱시계 아이콘 → 트리거 페이지 확인\n"
+            f"• 트리거 없으면 setupDailyTrigger 함수 1회 실행\n"
+            f"• 또는 Claude한테 점검 요청\n"
+            f"\n"
+            f"(오늘 날짜: {today})"
+        )
+    else:  # unknown
+        msg = (
+            f"⚠️ 시트 접속 안 됨\n"
+            f"\n"
+            f"오늘 아침 구글 시트 자체에 접근이 안 됐어요.\n"
+            f"네트워크 문제 또는 시트 권한 문제 의심.\n"
+            f"\n"
+            f"대응:\n"
+            f"• 잠시 후 자동 재시도\n"
+            f"• 30분 후에도 같은 메시지 오면 Claude한테 점검 요청\n"
+            f"\n"
+            f"(오늘 날짜: {today})"
+        )
     try:
         from telegram_client import send_message
         send_message(msg, channel="ops")

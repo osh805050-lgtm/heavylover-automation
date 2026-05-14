@@ -1971,7 +1971,20 @@ def run() -> dict:
         # 보호 탭 위반 — 시트 구성 안전성 invariant 깨짐. 즉시 중단.
         _log(f"❌ CRITICAL: 보호 탭 위반 — {e}")
         try:
-            send_message(f"🚨 재구매 리포트 중단 — 보호 탭 위반: {e}", channel="ops")
+            # [2026-05-15] 비전공자 친화 메시지
+            send_message(
+                f"🚨 시트 안전장치 작동\n"
+                f"\n"
+                f"대시보드 시트가 실수로 숨겨질 뻔해서 자동 분석이 멈췄어요.\n"
+                f"(중요 데이터 보호용)\n"
+                f"\n"
+                f"오늘 대시보드 갱신 안 됨 — 어제 수치 그대로 표시.\n"
+                f"\n"
+                f"대응: Claude한테 점검 요청 (어떤 시트가 보호 목록에서 빠졌는지 확인 필요)\n"
+                f"\n"
+                f"기술 상세: {e}",
+                channel="ops",
+            )
         except Exception:
             pass
         return {"status": "fail", "issues": [f"protected_tab_violation: {e}"]}
@@ -2004,7 +2017,19 @@ def run() -> dict:
         if email_rc != 0:
             _log(f"⚠️ 이메일 발송 비정상 종료 (rc={email_rc})")
             try:
-                send_message(f"🚨 재구매 이메일 발송 실패 (rc={email_rc})", channel="ops")
+                # [2026-05-15] 비전공자 친화 메시지
+                send_message(
+                    f"🚨 오늘 일일 분석 메일 안 갔어요\n"
+                    f"\n"
+                    f"매일 osh805050@gmail.com으로 가는 분석 메일 발송이 실패했어요.\n"
+                    f"\n"
+                    f"시트 수치는 정상 갱신 — 메일 시스템만 문제.\n"
+                    f"\n"
+                    f"대응: Claude한테 점검 요청 (Gmail SMTP 또는 Anthropic API 의심)\n"
+                    f"\n"
+                    f"기술 상세: 종료 코드 {email_rc}",
+                    channel="ops",
+                )
             except Exception:
                 pass
         else:
@@ -2012,7 +2037,18 @@ def run() -> dict:
     except Exception as e:
         _log(f"⚠️ 이메일 발송 실패: {e}")
         try:
-            send_message(f"🚨 재구매 이메일 발송 예외: {e}", channel="ops")
+            # [2026-05-15] 비전공자 친화 메시지
+            send_message(
+                f"🚨 오늘 일일 분석 메일 안 갔어요 (예외)\n"
+                f"\n"
+                f"메일 발송 중 예상치 못한 오류가 발생했어요.\n"
+                f"시트 수치는 정상 — 메일만 안 감.\n"
+                f"\n"
+                f"대응: Claude한테 점검 요청\n"
+                f"\n"
+                f"기술 상세: {e}",
+                channel="ops",
+            )
         except Exception:
             pass
 
@@ -2044,7 +2080,22 @@ if __name__ == "__main__":
     except Exception as e:
         _log(f"치명적 오류: {e}")
         try:
-            send_message(f"🚨 재구매 리포트 치명적 오류: {e}", channel="ops")
+            # [2026-05-15] 비전공자 친화 메시지
+            send_message(
+                f"🚨 재구매 자동 분석 전체 멈춤\n"
+                f"\n"
+                f"오늘 매일 09:00에 돌아야 할 자동 분석이 실행 도중 멈췄어요.\n"
+                f"\n"
+                f"영향:\n"
+                f"• 시트 대시보드 3개 (통합/카페24/SS) 갱신 안 됨\n"
+                f"• 어제 수치 그대로 표시\n"
+                f"• 일일 분석 메일 안 감\n"
+                f"\n"
+                f"대응: Claude한테 즉시 점검 요청\n"
+                f"\n"
+                f"기술 상세: {e}",
+                channel="ops",
+            )
         except Exception:
             pass
         sys.exit(2)
