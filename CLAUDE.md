@@ -1,6 +1,6 @@
 # CLAUDE.md — HeavyLover 운영 컨텍스트
 
-**최종 업데이트**: 2026-05-13 (rev. 14) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
+**최종 업데이트**: 2026-05-15 (rev. 15) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
 
 > **외부 컨텍스트 우선 참조 규칙**: 정보 부족 시 추측 금지. 다음 위치를 먼저 Glob/Read 후 결정한다.
 > - 작업 종류별 회피 규칙: `docs/lessons/patterns.md`
@@ -20,6 +20,7 @@
 - **비전공자 설명**: 비유 + 실행 예시. 전문 용어는 풀어서.
 - **응답 인용 규칙**: 내부 메타데이터(failures.md 번호 ㊵·patterns.md 섹션명·hook 파일 경로) 인용 금지. 사실 자체만. 예: "오늘만 5건이 외부 API 키 미확인" (O) / "failures.md ㊵㊴㊳ §외부API다루기 9번 위반" (X)
 - **한국어 기본.** 기술 용어만 영어 병기.
+- **병렬 처리**: 독립 작업(Read·Grep·SSH·API 호출 등)은 단일 메시지에 multiple tool 호출로 동시 실행. 순차 의존성 없으면 기다리지 않음.
 
 ### 금지 (절대)
 - **사적·감정 이슈**: 연애 등 — 승현이 먼저 꺼내기 전엔 언급 금지.
@@ -83,6 +84,7 @@
 - **§Go도구regex**: gitleaks/grafana/prometheus 등 Go re2 엔진은 lookahead `(?!)`/lookbehind `(?<=)` 미지원. Python regex 그대로 적용 금지 — char class 기반 재작성. 커밋 전 Python `re.search`로 양방향 검증: 진짜 시크릿 5+ 차단 + 정상 케이스 5+ 통과. (failures.md ㊹)
 - **§환경변수3곳동기화**: 시스템 통화·토큰·계정 ID 등 글로벌 설정은 (a) GitHub Variables/Secrets, (b) `.github/workflows/*.yml` 기본값, (c) Vultr `.env` 3곳 동시 동기화. 한 곳만 바꾸면 다음 cron 실행이 사고 트리거. Vultr .env는 SSH 키 직접 없음 → `appleboy/ssh-action` 임시 워크플로우 생성·실행·삭제 패턴.
 - **§코드후실행검증**: 코드/설정 변경 후 "수정 완료" 보고 전에 **실제 실행해서 결과 확인 후 보고**. (a) 코드: pytest 또는 dryrun 실행, (b) 워크플로우: `gh workflow run` + `gh run watch` + 로그 grep, (c) regex/필터: Python `re.search` 양방향 케이스, (d) 환경변수: 다음 cron 실제 실행 결과 또는 즉시 dispatch. "이론상 맞을 것"이라는 보고 금지 — 실측 데이터로 보고.
+- **§ops알림언어**: 텔레그램·이메일 ops 알림에 `gspread/quota/atomic/cron/API/worksheet` 등 기술 용어 배제. 구조: 무슨 일 발생(사용자 관점) → 왜(일반 언어) → 행동 단계(Apps Script 메뉴 경로·Claude 점검 요청 등). 승현님이 기술 지식 없이도 읽고 즉시 대응 가능해야 함. → `patterns.md §ops알림언어`
 
 ### 실수 자동 기록 (필수)
 - 승현님이 실수·오류·잘못된 판단·금지사항 위반을 지적하면 → **즉시 `docs/lessons/failures.md` 상단(시간 역순)에 한 줄 누적 기록**
@@ -200,7 +202,7 @@
 | 04:00 카페24 OAuth 자동 갱신 | ✅ 매일 |
 | 08:30 시트 sync (카페24 + SS 5상태) | ✅ 매일 |
 | 09:00 재구매 리포트 + 📊대시보드 3개(통합/카페24/SS) + 텔레그램 | ✅ 매일 — v6: 변동중 표시·시트 숨김·RuntimeError fail-fast |
-| 재구매 GAS 분석 v5.1 (수치 결함 10개 + 운영 결함 2개 수정) | ⚠️ 사용자 수동 붙여넣기 필요 (`scripts/gas/repurchase_v5_1.gs`) — clasp 자동화는 Phase 3에서 GAS 제거 예정 |
+| 재구매 GAS 분석 v5.1 (수치 결함 10개 + 운영 결함 2개 수정) | ⚠️ 사용자 수동 붙여넣기 필요 (`scripts/gas/repurchase_v5_1.gs`). `setupDailyTrigger()` 함수로 매일 오전 8시대 트리거 등록 완료 (2026-05-15). clasp 자동화는 Phase 3에서 GAS 제거 예정. |
 | **GitHub push → Vultr 자동 배포** (`.github/workflows/deploy-vultr.yml`) | ✅ `*.py` push 시 SSH→`git reset --hard origin/main`→텔레그램 알림. 콘솔 진입 불필요 |
 | 카페24 N10→N20 / SS 신규→발주확인 | 수동 (API 한계) |
 
