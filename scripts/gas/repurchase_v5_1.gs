@@ -1218,3 +1218,58 @@ function getOrCreateSheet(name) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   return ss.getSheetByName(name) || ss.insertSheet(name);
 }
+
+
+// ============================================================
+// [v7] 매일 오전 8시대 runAll 자동 트리거 등록 (사용자 1회 실행)
+// ============================================================
+// 사용자 가이드:
+//   1. Apps Script 에디터 상단 함수 드롭다운 → 'setupDailyTrigger' 선택
+//   2. ▶ 실행 클릭
+//   3. Google 권한 인증 팝업 → 승인 (트리거가 시트·외부 API 접근 권한 요구)
+//   4. 실행 로그에 "✅ 트리거 등록 완료" 확인
+//   5. 좌측 ⏱ 시계 아이콘 → 트리거 페이지에서 runAll 트리거 1개 확인
+//
+// 멱등성: 기존 runAll 트리거가 있으면 모두 삭제 후 1개만 새로 등록.
+//         여러 번 실행해도 트리거 중복 등록 X.
+//
+// 시간 제한 (Apps Script API): atHour()는 시간 단위만 가능 (08:00~08:59 사이 임의).
+//   분 단위(08:45 정확히) 지정 불가. Vultr 09:00 cron까지 충분한 여유.
+function setupDailyTrigger() {
+  // 기존 runAll 트리거 모두 삭제 (멱등)
+  const existing = ScriptApp.getProjectTriggers();
+  let deleted = 0;
+  existing.forEach(t => {
+    if (t.getHandlerFunction() === 'runAll') {
+      ScriptApp.deleteTrigger(t);
+      deleted++;
+    }
+  });
+  if (deleted > 0) {
+    Logger.log('🗑️ 기존 runAll 트리거 ' + deleted + '개 삭제');
+  }
+
+  // 매일 오전 8시대 (08:00~08:59 임의) runAll 자동 실행
+  ScriptApp.newTrigger('runAll')
+    .timeBased()
+    .everyDays(1)
+    .atHour(8)
+    .create();
+
+  Logger.log('✅ 트리거 등록 완료: 매일 오전 8시대 runAll 자동 실행');
+  Logger.log('   확인: 좌측 사이드바 ⏱ 시계 아이콘 → 트리거 페이지');
+  Logger.log('   내일 08:00~08:59 사이 자동 실행. pipeline_meta 탭에 writer=gas row 누적 예정.');
+}
+
+// 트리거 제거가 필요할 때 (디버깅·복구용)
+function removeAllRunAllTriggers() {
+  const existing = ScriptApp.getProjectTriggers();
+  let deleted = 0;
+  existing.forEach(t => {
+    if (t.getHandlerFunction() === 'runAll') {
+      ScriptApp.deleteTrigger(t);
+      deleted++;
+    }
+  });
+  Logger.log('🗑️ runAll 트리거 ' + deleted + '개 삭제 완료');
+}
