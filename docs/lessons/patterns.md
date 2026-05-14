@@ -384,3 +384,46 @@
 **연관 실패**: failures.md ㊷(GAS v5.1 화이트리스트 silent drop)
 
 **hookify 보강**: 없음 (시트 raw 값 직접 확인은 코드 작성 시 자가 점검 필요. hook은 자동 트리거 어려움)
+
+---
+
+## §외부API호출패턴 (External API Call Patterns — Rate Limit & Cache)
+
+**목적**: 외부 API (Google Sheets·Cafe24·Naver Commerce·Meta) 호출 실패 시 silent error로 디버깅 시간 낭비 차단.
+
+**핵심 원칙**:
+1. **호출 실패는 단일 원인으로 단정 X** — quota / throttle / 인증 만료 3가지 가능성 동시 점검
+2. **silent continue 금지** — 예외 처리 시 traceback 로그 필수. `try: ... except Exception: continue` 패턴은 진짜 원인 숨김
+3. **분당 호출 횟수 사전 산정** — Google Sheets API 60회/분, Naver 200회/일 등. 호출 패턴 (status × 일자 loop)이 한계 초과 가능성 확인
+4. **재시도 패턴은 quota reset 주기 맞춤** — Google Sheets: 60초, Cafe24: 1초, Meta: 200ms
+
+**Google Sheets API 특화**:
+- 분당 60회 'Read requests per minute per user' 한계
+- 429 응답: `gspread.exceptions.APIError: [429]: Quota exceeded`
+- `worksheets()` 결과 캐시 활용 — 매번 호출 X
+- atomic swap 같은 rename 작업 직후엔 spreadsheet 객체 재할당으로 캐시 무효화
+- `ws.row_values()` 같은 메타데이터 호출도 quota 소진
+
+**재시도 표준 패턴**:
+```python
+def _find_tab_with_retry(spreadsheet, ..., max_attempts=3, wait_seconds=60.0):
+    for attempt in range(1, max_attempts + 1):
+        ws = _find_tab(spreadsheet, ...)
+        if ws is not None:
+            return ws, spreadsheet
+        if attempt < max_attempts:
+            time.sleep(wait_seconds)  # quota reset 주기
+            spreadsheet = _open_sheet()  # 캐시 무효화
+    return None, spreadsheet
+```
+
+**자가 검증 체크**:
+- [ ] 외부 API 호출 실패 시 traceback 로그 남는가
+- [ ] silent continue 패턴 없는가
+- [ ] 분당·일별 호출 횟수가 API quota 안에 있는가
+- [ ] 재시도 wait 주기가 API reset 주기에 맞는가
+- [ ] cache hit / miss 명시적 로그 있는가
+
+**연관 실패**: failures.md ㊽(SS sync 429 quota silent fail), ⑤(OAuth 만료)
+
+**hookify 보강**: 없음 (외부 API 응답은 런타임에만 확인 가능)

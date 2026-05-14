@@ -221,6 +221,50 @@ def _find_tab(spreadsheet, expected_first: str, expected_second: str | None = No
     return None
 
 
+def _find_tab_with_retry(
+    spreadsheet,
+    expected_first: str,
+    expected_second: str | None = None,
+    max_attempts: int = 3,
+    wait_seconds: float = 60.0,
+):
+    """[2026-05-15] atomic swap race condition + Google API rate limit (429) 회피.
+
+    `_find_tab`이 None 반환 시 spreadsheet 객체를 재할당하여 worksheets() 캐시
+    강제 갱신 + 분당 quota reset 대기 후 최대 max_attempts회 재시도.
+
+    배경 (2가지 사고 동시 대응):
+    1. atomic swap race condition: `_atomic_replace_worksheet` Stage 4 직후
+       gspread `spreadsheet.worksheets()` 캐시가 미갱신 → 옛 워크시트 리스트로 매칭 실패
+    2. Google Sheets API rate limit (429): 분당 60회 'Read requests' 한계 초과 →
+       `ws.row_values(1)` 호출 시 APIError → _find_tab 내부에서 continue → None 반환
+
+    해결: wait_seconds=60 → 분당 quota 60초 단위 reset 주기에 맞춤. spreadsheet
+    재할당으로 새 worksheets() fetch (캐시 무효화).
+
+    반환: (worksheet, spreadsheet) — spreadsheet도 재할당된 객체 반환 (caller가 후속
+    호출에 사용해야 일관성 유지). 못 찾으면 (None, last_spreadsheet) 반환.
+    """
+    import time as _time
+    for attempt in range(1, max_attempts + 1):
+        ws = _find_tab(spreadsheet, expected_first, expected_second)
+        if ws is not None:
+            if attempt > 1:
+                _log(f"  ✅ _find_tab 재시도 {attempt}회차 성공 (헤더='{expected_first}')")
+            return ws, spreadsheet
+        if attempt < max_attempts:
+            _log(
+                f"  ⚠️ _find_tab miss (시도 {attempt}/{max_attempts}, "
+                f"헤더='{expected_first}') — {wait_seconds}초 대기 후 spreadsheet 재할당"
+            )
+            _time.sleep(wait_seconds)
+            try:
+                spreadsheet = _open_sheet()  # 새 객체 = worksheets() 캐시 무효화
+            except Exception as e:
+                _log(f"  ⚠️ spreadsheet 재할당 실패 (계속): {e}")
+    return None, spreadsheet
+
+
 # ============================================================
 # 카페24
 # ============================================================
@@ -296,9 +340,15 @@ def sync_cafe24(spreadsheet, days: int = BACKFILL_DAYS) -> int:
     같은 주문이 옵션·수량으로 여러 행으로 분해될 수 있으므로
     (주문번호 + 결제일시 + 실결제금액) 조합 키로 시트 내 중복 제거.
     """
-    ws = _find_tab(spreadsheet, CAFE24_HEADER_FIRST, CAFE24_HEADER_SECOND)
+    # [2026-05-15] atomic swap race condition 회피 — 3회 재시도 + spreadsheet 재할당
+    ws, spreadsheet = _find_tab_with_retry(
+        spreadsheet, CAFE24_HEADER_FIRST, CAFE24_HEADER_SECOND
+    )
     if ws is None:
-        raise RuntimeError("카페24 원본 탭을 찾지 못했습니다 (헤더 불일치)")
+        raise RuntimeError(
+            "카페24 원본 탭을 3회 재시도 후에도 찾지 못함. "
+            "시트 헤더 변경 또는 권한 문제 의심"
+        )
     _log(f"카페24 탭: {ws.title}")
 
     # 1) API에서 최근 days일 주문 pull
@@ -512,9 +562,14 @@ def sync_smartstore(spreadsheet, days: int = BACKFILL_DAYS) -> int:
     cutoff는 구매확정일(있으면) 또는 결제일(없으면) 기준으로 비교.
     """
     import time as _time
-    ws = _find_tab(spreadsheet, SS_HEADER_FIRST)
+    # [2026-05-15] atomic swap race condition 회피 — 3회 재시도 + spreadsheet 재할당
+    # 2026-05-14 사고: 카페24 atomic swap 직후 gspread 캐시 미갱신으로 SS 탭 못 찾음
+    ws, spreadsheet = _find_tab_with_retry(spreadsheet, SS_HEADER_FIRST)
     if ws is None:
-        raise RuntimeError("스마트스토어 원본 탭을 찾지 못했습니다")
+        raise RuntimeError(
+            "스마트스토어 원본 탭을 3회 재시도 후에도 찾지 못함. "
+            "시트 헤더 변경 또는 권한 문제 의심"
+        )
     _log(f"스마트스토어 탭: {ws.title}")
 
     # 구매확정 + 결제완료 + 발송처리 + 배송중 + 배송완료 모두 수집

@@ -1,7 +1,9 @@
 # 실패 노트 (시간순 원시 로그)
 
 > 이 파일은 [작업 종류 매칭 시 grep 검색] / [월말 회고] / [에이전트 시작 전 위험 점검] 시 로드됩니다. CLAUDE.md §13의 정본입니다.
-> 마지막 갱신: 2026-05-13 · 갱신 주기: 즉시 누적 (실수 발생 시)
+> 마지막 갱신: 2026-05-15 · 갱신 주기: 즉시 누적 (실수 발생 시)
+
+- **2026-05-15** ㊽ | **sheets_sync.py SS sync가 Google Sheets API 분당 quota(60회) 초과로 "스마트스토어 원본 탭을 찾지 못했습니다" 실패 (2026-05-14·15 양일)** | 첫 진단: 카페24 atomic swap 직후 gspread `worksheets()` 캐시 미갱신 race condition으로 추정. 실제 SSH 실행해 보니 `gspread.exceptions.APIError: [429]: Quota exceeded for quota metric 'Read requests'`. SS sync는 status 5개 × 일자별 API 호출 + 카페24 swap 직후 호출 누적 → 분당 60회 한계 초과. `_find_tab` 내부의 `ws.row_values(1)` 호출이 429 받아 silent continue → None 반환 → RuntimeError. 수정: `_find_tab_with_retry` 헬퍼 신규 — 분당 quota reset 주기(60초) 대기 + spreadsheet 객체 재할당(캐시 무효화) + 최대 3회 재시도. sync_cafe24·sync_smartstore 둘 다 적용 | **하지 말 것**: API 호출 실패를 단일 원인(예: race condition)으로 단정 금지 — 실제 API 응답(stderr·exception traceback) 확인 먼저. Google Sheets 같은 외부 서비스는 quota·throttle·인증 만료 3가지 가능성 점검. `_find_tab` 같은 헬퍼가 예외를 silent continue 하면 진짜 원인(429·403) 숨김 → 디버깅 어려움. 외부 API 호출 패턴: status별·일자별 loop는 sleep 0.5초 이상 + 호출 횟수 사전 산정 (한 cron당 분당 60회 한계).
 
 - **2026-05-13** ㊼ | **09:00 repurchase_report.py + 09:05 report_telegram_brief.py 둘 다 같은 build_brief() 호출 → 사용자에게 동일 텔레그램 메시지 5분 차로 2건씩 발송** | cron 추가 시 기존 발송 위치 미점검. 같은 함수를 두 cron이 각자 호출하는데 한쪽에 있는 줄 몰랐음. 사용자가 "똑같은게 두개씩와" 보고로 발견. 수정: repurchase_report.py main()의 텔레그램 발송 블록 제거 (09:05 cron 단독 발송) | **하지 말 것**: 새 cron 추가 전 동일 작업이 다른 cron/스크립트에서 이미 수행되는지 `grep "send_message|build_brief"` 같은 키워드로 전체 검색. "별도 파일이라 안전"하다는 가정 금지 — Python import로 같은 함수 공유 가능.
 
