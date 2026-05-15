@@ -16,4 +16,15 @@ jobs:
           port: ${{ secrets.VULTR_PORT }}
           script: |
             cd /root/heavylover-automation
-            /root/heavylover-automation/venv/bin/python3 -c "from tracking_register import run_from_excel; run_from_excel()" 2>&1
+            /root/heavylover-automation/venv/bin/python3 - <<'EOF'
+            import pandas as pd
+            from pathlib import Path
+            files = list(Path("/tmp/tracking_excel").glob("더다냉동물류*.xls*"))
+            if not files:
+                print("파일 없음 — rclone 먼저 실행")
+            else:
+                df = pd.read_excel(files[-1], dtype=str)
+                print("컬럼:", list(df.columns))
+                print("첫 2행:")
+                print(df.head(2).to_string())
+            EOF
