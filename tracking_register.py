@@ -174,6 +174,14 @@ def read_tracking_excel(path: Path):
         # openpyxl 엔진은 dtype=str로 읽어야 16자리 정수가 1.234E+15로 손실되지 않음
         df = pd.read_excel(path, dtype=str)
 
+    # 더다냉동물류 발주양식 컬럼명 → 표준 컬럼명 alias
+    _COL_ALIAS = {
+        "고객주문번호": "주문번호",
+        "받는분전화번호": "수취인 휴대전화",
+        "받는분기타연락처": "수취인 전화",
+    }
+    df.rename(columns={k: v for k, v in _COL_ALIAS.items() if k in df.columns}, inplace=True)
+
     def _normalize_id(val, *, field_name: str, row_idx: int) -> str:
         """주문번호/송장번호 셀을 string으로 안전 변환.
 
