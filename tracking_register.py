@@ -89,22 +89,33 @@ def find_today_excel():
     """OneDrive 바탕화면에서 오늘 날짜 송장 엑셀만 다운로드 후 경로 반환.
 
     오늘 날짜 파일이 없으면 None 반환 (이전 날짜 fallback 없음 — 잘못된 송장번호 등록 차단).
+    지원 파일명 패턴:
+      - 일반_20260515.xls(x)
+      - 더다냉동물류 발주양식 26.5.15 송장번호.xls(x)
     """
     import subprocess
     LOCAL_TRACKING_DIR.mkdir(parents=True, exist_ok=True)
 
-    # rclone으로 최신 파일 동기화
-    r = subprocess.run(
-        ["rclone", "copy", ONEDRIVE_TRACKING_DIR, str(LOCAL_TRACKING_DIR),
-         "--include", "일반_*.xls*", "--max-depth", "1", "--transfers=4"],
-        capture_output=True, text=True, timeout=120,
-    )
-    if r.returncode != 0:
-        print(f"rclone 오류: {r.stderr[:200]}")
+    # rclone으로 최신 파일 동기화 — 두 패턴 모두 수신
+    for include_pat in ["일반_*.xls*", "더다냉동물류 발주양식*.xls*"]:
+        subprocess.run(
+            ["rclone", "copy", ONEDRIVE_TRACKING_DIR, str(LOCAL_TRACKING_DIR),
+             "--include", include_pat, "--max-depth", "1", "--transfers=4"],
+            capture_output=True, text=True, timeout=120,
+        )
 
-    # 오늘 날짜 파일만 찾음 — 없으면 None (이전 날짜 fallback 제거)
-    today = datetime.now().strftime("%Y%m%d")
-    today_files = sorted(LOCAL_TRACKING_DIR.glob(f"일반_*{today}*.xls*"))
+    now = datetime.now()
+    today = now.strftime("%Y%m%d")                   # 20260515
+    yy = now.strftime("%y")                          # 26
+    m  = str(now.month)                              # 5 (no leading zero)
+    d  = str(now.day)                                # 15 (no leading zero)
+
+    # 패턴 1: 일반_20260515.xlsx
+    p1 = sorted(LOCAL_TRACKING_DIR.glob(f"일반_*{today}*.xls*"))
+    # 패턴 2: 더다냉동물류 발주양식 26.5.15 송장번호.xlsx
+    p2 = sorted(LOCAL_TRACKING_DIR.glob(f"더다냉동물류 발주양식 {yy}.{m}.{d}*.xls*"))
+
+    today_files = p1 + p2
     return today_files[-1] if today_files else None
 
 
