@@ -16,8 +16,4 @@ jobs:
           port: ${{ secrets.VULTR_PORT }}
           script: |
             cd /root/heavylover-automation
-            echo "=== crontab 확인 ==="
-            crontab -l | grep python | head -5
-            echo "=== venv 탐색 ==="
-            find /root/heavylover-automation -name "python3" -o -name "python" 2>/dev/null | head -5
-            ls /root/heavylover-automation/venv/bin/python3 2>/dev/null || echo "venv 없음"
+            /root/heavylover-automation/venv/bin/python3 -c "from tracking_register import run_from_excel; run_from_excel()" 2>&1
