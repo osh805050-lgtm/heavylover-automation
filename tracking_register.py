@@ -105,15 +105,21 @@ def find_today_excel():
         )
 
     now = datetime.now()
-    today = now.strftime("%Y%m%d")                   # 20260515
-    yy = now.strftime("%y")                          # 26
-    m  = str(now.month)                              # 5 (no leading zero)
-    d  = str(now.day)                                # 15 (no leading zero)
+    today = now.strftime("%Y%m%d")  # 20260515
 
     # 패턴 1: 일반_20260515.xlsx
     p1 = sorted(LOCAL_TRACKING_DIR.glob(f"일반_*{today}*.xls*"))
-    # 패턴 2: 더다냉동물류 발주양식 26.5.15 송장번호.xlsx
-    p2 = sorted(LOCAL_TRACKING_DIR.glob(f"더다냉동물류 발주양식 {yy}.{m}.{d}*.xls*"))
+
+    # 패턴 2: 더다냉동물류 발주양식 26.5.15(또는 26.05.15 등) 송장번호.xlsx
+    # glob으로 넓게 수집 후 날짜 숫자 비교 — 월·일 앞자리 0 유무 무관
+    _DADA_DATE_RE = re.compile(r"더다냉동물류 발주양식 (\d{2})\.(\d{1,2})\.(\d{1,2})")
+    p2 = sorted(
+        f for f in LOCAL_TRACKING_DIR.glob("더다냉동물류 발주양식*.xls*")
+        if (m := _DADA_DATE_RE.search(f.stem)) and
+           int(m.group(1)) == now.year % 100 and
+           int(m.group(2)) == now.month and
+           int(m.group(3)) == now.day
+    )
 
     today_files = p1 + p2
     return today_files[-1] if today_files else None
