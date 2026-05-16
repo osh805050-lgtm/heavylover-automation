@@ -69,6 +69,74 @@ def _safe_get(url, **kwargs):
         return None
 
 
+def _fetch_with_playwright(url, wait_selector=None, wait_timeout_ms=10000, total_timeout_ms=25000):
+    """Playwright Python으로 JS 렌더링 후 HTML 반환 (codex fix E 반영).
+
+    SPA·JS 동적 사이트(중기부 main, 농림부, sbiz24 등)용. requests로 빈 HTML
+    돌려받으면 이걸로 폴백.
+
+    안전성:
+      - 좀비 프로세스 방지: try/finally로 browser·page close 강제
+      - 호출당 총 timeout 상한 (기본 25초)
+      - User-Agent 명시 (정적 fetch와 동일)
+      - 한 cron 실행에서 여러 사이트 호출 시 각각 분리된 브라우저 인스턴스
+
+    Returns:
+        (html: str, final_url: str) — 실패 시 ("", url)
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        log.warning("playwright 미설치 — SPA 사이트 크롤링 불가")
+        return "", url
+
+    html, final_url = "", url
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                context = browser.new_context(
+                    user_agent=USER_AGENT,
+                    viewport={"width": 1280, "height": 900},
+                )
+                page = context.new_page()
+                try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=total_timeout_ms)
+                    if wait_selector:
+                        try:
+                            page.wait_for_selector(wait_selector, timeout=wait_timeout_ms)
+                        except Exception:
+                            # 셀렉터가 안 떠도 일단 현재 DOM 반환 — 부분 결과라도 활용
+                            pass
+                    else:
+                        try:
+                            page.wait_for_load_state("networkidle", timeout=wait_timeout_ms)
+                        except Exception:
+                            pass
+                    html = page.content()
+                    final_url = page.url
+                finally:
+                    page.close()
+            finally:
+                browser.close()
+    except Exception as e:
+        log.warning(f"[playwright fail] {url} → {type(e).__name__}: {str(e)[:160]}")
+    return html, final_url
+
+
+def _norm_item(source, title, url, agency, deadline=None, raw=None):
+    """공통 스키마 dict 생성 헬퍼 — 중복 코드 감소."""
+    return {
+        "source": source,
+        "title": title,
+        "url": url,
+        "agency": agency,
+        "deadline": deadline,
+        "posted_date": None,
+        "raw": raw or {},
+    }
+
+
 # ==================== 1. 기업마당 (공식 Open API) ====================
 def fetch_bizinfo():
     """기업마당 통합 — 공공데이터포털 공식 API
@@ -175,8 +243,8 @@ def fetch_kotra():
 
 # ==================== 4. 중소벤처기업부 ====================
 def fetch_mss():
-    """중기부 — 부처 직접 공고"""
-    url = "https://www.mss.go.kr/site/smba/ex/bbs/List.do?cbIdx=86"
+    """중기부 — 부처 직접 공고 (cbIdx=126: 실측 2026-05-16 256KB 작동 확인)"""
+    url = "https://www.mss.go.kr/site/smba/ex/bbs/List.do?cbIdx=126"
     r = _safe_get(url)
     if not r:
         return []
@@ -277,8 +345,8 @@ def fetch_gobiz():
 
 # ==================== 7. 경기도경제과학진흥원 ====================
 def fetch_gbsa():
-    """경기도경제과학진흥원 — 경기/용인 지역"""
-    url = "https://www.gbsa.or.kr/pages/board/list.asp?b_code=K_BIZ"
+    """경기도경제과학진흥원 — 경기기업비서(egbiz.or.kr) 지원사업 목록"""
+    url = "https://egbiz.or.kr/sp/supportPrjCatList.do"
     r = _safe_get(url)
     if not r:
         return []
@@ -286,71 +354,70 @@ def fetch_gbsa():
     soup = BeautifulSoup(r.text, "lxml")
     items = []
 
-    for row in soup.select("table tbody tr"):
-        title_el = row.select_one("a")
-        if not title_el:
+    for link in soup.select("a"):
+        text = link.get_text(" ", strip=True)
+        if not text or len(text) < 8:
             continue
-        title = title_el.get_text(" ", strip=True)
-        if not title or len(title) < 5:
+        if not any(k in text for k in ["지원", "모집", "공고", "신청", "사업", "창업", "육성"]):
             continue
-        href = title_el.get("href", "")
-        full_url = urljoin(url, href) if href else url
-
-        text = row.get_text(" ", strip=True)
-        deadline = _parse_date(text)
+        href = link.get("href", "")
+        if not href or href.startswith("#") or href.startswith("javascript"):
+            continue
+        full_url = urljoin(url, href) if not href.startswith("http") else href
 
         items.append({
             "source": "경기경제과학진흥원",
-            "title": title,
+            "title": text,
             "url": full_url,
             "agency": "경기도경제과학진흥원",
-            "deadline": deadline,
+            "deadline": _parse_date(text),
             "posted_date": None,
             "raw": {},
         })
 
-    return items[:40]
+        if len(items) >= 40:
+            break
+
+    return items
 
 
 # ==================== 8. 용인시산업진흥원 (YPA) ====================
 def fetch_ypa():
-    """용인시산업진흥원 — 지역 직접 (실측 메일에서 확인된 고가치 소스)"""
-    url = "https://www.ypa.or.kr/ypa/sub/news/notice.do"
-    r = _safe_get(url)
-    if not r:
-        url = "https://www.ypa.or.kr/"
+    """용인시산업진흥원 — 용인기업지원시스템 (ybs.ypa.or.kr) + 메인"""
+    candidates = [
+        "https://ybs.ypa.or.kr/application.do?pageIndex=1",
+        "https://ypa.or.kr/",
+    ]
+    for url in candidates:
         r = _safe_get(url)
         if not r:
-            return []
-
-    soup = BeautifulSoup(r.text, "lxml")
-    items = []
-
-    for link in soup.select("a"):
-        text = link.get_text(strip=True)
-        if not text or len(text) < 8:
             continue
-        if not any(k in text for k in ["지원", "모집", "공고", "신청", "교육"]):
-            continue
-        href = link.get("href", "")
-        if not href or href.startswith("#"):
-            continue
-        full_url = urljoin(url, href)
-
-        items.append({
-            "source": "용인시산업진흥원",
-            "title": text,
-            "url": full_url,
-            "agency": "용인시산업진흥원",
-            "deadline": None,
-            "posted_date": None,
-            "raw": {},
-        })
-
-        if len(items) >= 30:
-            break
-
-    return items
+        soup = BeautifulSoup(r.text, "lxml")
+        items = []
+        for link in soup.select("a"):
+            text = link.get_text(strip=True)
+            if not text or len(text) < 8:
+                continue
+            if not any(k in text for k in ["지원", "모집", "공고", "신청", "교육", "사업"]):
+                continue
+            href = link.get("href", "")
+            if not href or href.startswith("#"):
+                continue
+            full_url = urljoin(url, href)
+            items.append({
+                "source": "용인시산업진흥원",
+                "title": text,
+                "url": full_url,
+                "agency": "용인시산업진흥원",
+                "deadline": None,
+                "posted_date": None,
+                "raw": {},
+            })
+            if len(items) >= 30:
+                break
+        if items:
+            return items
+    return []
 
 
 # ==================== 9. NIPA (정보통신산업진흥원) ====================
@@ -392,8 +459,9 @@ def fetch_nipa():
 
 # ==================== 10. 창업진흥원 KISED ====================
 def fetch_kised():
-    """창업진흥원 직접 — K-Startup과 별도 페이지"""
-    url = "https://www.kised.or.kr/menu.es?mid=a10302000000"
+    """창업진흥원 직접 — K-Startup과 별도 페이지
+    2026-05-16: misAnnouncement/index.es로 redirect됨. 셀렉터 li.lstyle_list."""
+    url = "https://www.kised.or.kr/misAnnouncement/index.es?mid=a10302000000"
     r = _safe_get(url)
     if not r:
         return []
@@ -401,28 +469,23 @@ def fetch_kised():
     soup = BeautifulSoup(r.text, "lxml")
     items = []
 
-    for row in soup.select("table tbody tr, .board_list li, ul.list li"):
-        title_el = row.select_one("a")
+    # 새 셀렉터: li.lstyle_list 안의 a 태그 — probe 결과 25건 확인
+    for li in soup.select("li.lstyle_list, ul.lstyle li, li[class*='list']"):
+        title_el = li.select_one("a")
         if not title_el:
             continue
         title = title_el.get_text(" ", strip=True)
-        if not title or len(title) < 5:
+        if not title or len(title) < 8:
             continue
         href = title_el.get("href", "")
+        if not href or href.startswith("#") or href.startswith("javascript"):
+            continue
         full_url = urljoin(url, href)
 
-        text = row.get_text(" ", strip=True)
+        text = li.get_text(" ", strip=True)
         deadline = _parse_date(text)
 
-        items.append({
-            "source": "창업진흥원",
-            "title": title,
-            "url": full_url,
-            "agency": "창업진흥원",
-            "deadline": deadline,
-            "posted_date": None,
-            "raw": {},
-        })
+        items.append(_norm_item("창업진흥원", title, full_url, "창업진흥원", deadline))
 
     return items[:40]
 
@@ -625,10 +688,10 @@ def fetch_gyeonggi():
     return items
 
 
-# ==================== 16. 경기테크노파크 (GTEK) ====================
+# ==================== 16. 경기테크노파크 (GTP) ====================
 def fetch_gtek():
-    """경기테크노파크 — 경기도 입주공간·장비지원·스마트공장"""
-    url = "https://www.gtek.or.kr/gtek/board/list.do?bbsId=BBSMSTR_000000000027"
+    """경기테크노파크 — 경기도 입주공간·장비지원·스마트공장 (URL 수정: gtp.or.kr)"""
+    url = "https://www.gtp.or.kr/"
     r = _safe_get(url)
     if not r:
         return []
@@ -665,10 +728,9 @@ def fetch_gtek():
 # ==================== 17. 중소기업유통센터 (SBDC/KODMA) ====================
 def fetch_sbdc():
     """중소기업유통센터 — D2C 온라인유통·판로개척 전문"""
-    url = "https://www.kodma.or.kr/usr/pbancInfo/selectPbancInfoList.do"
+    url = "https://www.kodma.or.kr/usr/pbancInfo/selectPbancInfoList.do?menuId=32"
     r = _safe_get(url)
     if not r:
-        # 메인 페이지 폴백
         url = "https://www.kodma.or.kr"
         r = _safe_get(url)
         if not r:
@@ -704,7 +766,320 @@ def fetch_sbdc():
     return items
 
 
-# ==================== 통합 (17개 소스) ====================
+# ==================== 18. 국가식품클러스터진흥원 (foodpolis) ====================
+def fetch_foodpolis():
+    """국가식품클러스터 — 식품 전용 최대 7,000만원. 경쟁 극히 낮음."""
+    candidates = [
+        "https://www.foodpolis.kr/web/Board/1/list.do",   # 공지사항
+        "https://www.foodpolis.kr/web/index.do",
+    ]
+    for url in candidates:
+        r = _safe_get(url)
+        if not r:
+            continue
+        soup = BeautifulSoup(r.text, "lxml")
+        items = []
+        for link in soup.select("a"):
+            text = link.get_text(strip=True)
+            if not text or len(text) < 8:
+                continue
+            if not any(k in text for k in ["지원", "모집", "공고", "신청", "사업", "과제"]):
+                continue
+            href = link.get("href", "")
+            if not href or href.startswith("#") or href.startswith("javascript"):
+                continue
+            full_url = urljoin(url, href)
+            items.append({
+                "source": "국가식품클러스터",
+                "title": text,
+                "url": full_url,
+                "agency": "한국식품산업클러스터진흥원",
+                "deadline": None,
+                "posted_date": None,
+                "raw": {},
+            })
+            if len(items) >= 30:
+                break
+        if items:
+            return items
+    return []
+
+
+# ==================== 19. 경기스타트업플랫폼 (gsp) ====================
+def fetch_gsp():
+    """경기스타트업플랫폼 — SPA (href='#' 전체). Playwright로 동적 렌더링 후 카드 추출.
+    실측 2026-05-16: li[class*=item] 26개 카드 확인."""
+    BASE_URL = "https://gsp.or.kr/supportProject/UVSL0001.do"
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            page = browser.new_page()
+            try:
+                page.goto(BASE_URL, timeout=30000)
+                page.wait_for_load_state("networkidle", timeout=20000)
+                html = page.content()
+            finally:
+                browser.close()
+    except Exception as e:
+        log.warning(f"경기스타트업플랫폼 Playwright 실패: {e}")
+        return []
+
+    soup = BeautifulSoup(html, "lxml")
+    items = []
+    kw = ["지원", "모집", "공고", "신청", "사업", "창업", "컨설팅"]
+    for card in soup.select("li[class*=item], .project-list li, .project-item"):
+        text = card.get_text(" ", strip=True)
+        if not text or len(text) < 10:
+            continue
+        if not any(k in text for k in kw):
+            continue
+        # 제목: 줄 구분 후 첫 의미 있는 줄
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip() and len(ln.strip()) > 5]
+        title = lines[0][:100] if lines else text[:80]
+        deadline = _parse_date(text)
+        items.append({
+            "source": "경기스타트업플랫폼",
+            "title": title,
+            "url": BASE_URL,
+            "agency": "경기스타트업플랫폼",
+            "deadline": deadline,
+            "posted_date": None,
+            "raw": {},
+        })
+        if len(items) >= 30:
+            break
+    return items
+
+
+# ==================== 20. 소상공인 온라인 판로지원 (fanfandaero) ====================
+def fetch_fanfandaero():
+    """소상공인 온라인쇼핑몰 판매지원 — D2C 카페24/스마트스토어 직결.
+    URL 실측 2026-05-16: introV2.do(0건)→preSprtBizPbancAll.do+main.do 폴백."""
+    import re
+    candidates = [
+        "https://fanfandaero.kr/portal/v2/preSprtBizPbancAll.do",
+        "https://fanfandaero.kr/portal/main.do",
+    ]
+    kw = ["모집", "공고", "지원", "판로", "브랜드", "쇼핑몰", "온라인", "사업"]
+    for url in candidates:
+        r = _safe_get(url)
+        if not r:
+            continue
+        soup = BeautifulSoup(r.text, "lxml")
+        items = []
+        for link in soup.select("a"):
+            text = link.get_text(" ", strip=True)
+            if not text or len(text) < 8:
+                continue
+            if not any(k in text for k in kw):
+                continue
+            href = link.get("href", "")
+            m = re.search(r"detailPage\('(\d+)'\)", href or "")
+            if m:
+                full_url = f"https://fanfandaero.kr/portal/v2/readNtcBbsDtl.do?ntcSn={m.group(1)}"
+            elif href and not href.startswith("#") and not href.startswith("javascript"):
+                full_url = urljoin(url, href)
+            else:
+                continue
+            title = re.sub(r"\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}", "", text).strip()
+            parent = link.find_parent()
+            deadline = _parse_date(parent.get_text(" ", strip=True) if parent else text)
+            items.append({
+                "source": "소상공인판로지원",
+                "title": title,
+                "url": full_url,
+                "agency": "소상공인시장진흥공단",
+                "deadline": deadline,
+                "posted_date": None,
+                "raw": {},
+            })
+            if len(items) >= 25:
+                break
+        if items:
+            return items
+    return []
+
+
+# ==================== 21. 한국식품산업협회 (kfia) ====================
+def fetch_kfia():
+    """한국식품산업협회 — 식품 업종 전용 지원사업. 협회 회원사 우대."""
+    url = "https://www.kfia.or.kr/"
+    r = _safe_get(url)
+    if not r:
+        return []
+    soup = BeautifulSoup(r.text, "lxml")
+    items = []
+    for link in soup.select("a"):
+        text = link.get_text(strip=True)
+        if not text or len(text) < 8:
+            continue
+        if not any(k in text for k in ["지원", "모집", "공고", "신청", "사업", "교육"]):
+            continue
+        href = link.get("href", "")
+        if not href or href.startswith("#") or href.startswith("javascript"):
+            continue
+        full_url = urljoin(url, href)
+        items.append({
+            "source": "한국식품산업협회",
+            "title": text,
+            "url": full_url,
+            "agency": "한국식품산업협회",
+            "deadline": None,
+            "posted_date": None,
+            "raw": {},
+        })
+        if len(items) >= 20:
+            break
+    return items
+
+
+# ==================== 22. 경기바로 (ggbaro) ====================
+def fetch_ggbaro():
+    """경기바로 — 경기도 소상공인 전용 플랫폼. 기업마당 미등록 공고 포함."""
+    url = "https://ggbaro.kr/apply/biz-announce.do"
+    r = _safe_get(url)
+    if not r:
+        return []
+    soup = BeautifulSoup(r.text, "lxml")
+    items = []
+    for link in soup.select("a"):
+        text = link.get_text(strip=True)
+        if not text or len(text) < 8:
+            continue
+        if not any(k in text for k in ["지원", "모집", "공고", "신청", "사업", "창업", "자금"]):
+            continue
+        href = link.get("href", "")
+        if not href or href.startswith("#") or href.startswith("javascript"):
+            continue
+        full_url = urljoin(url, href)
+        items.append({
+            "source": "경기바로",
+            "title": text,
+            "url": full_url,
+            "agency": "경기도시장상권진흥원",
+            "deadline": None,
+            "posted_date": None,
+            "raw": {},
+        })
+        if len(items) >= 25:
+            break
+    return items
+
+
+# ==================== 23. 중소벤처기업진흥공단 (중진공) ====================
+def fetch_kosmes():
+    """중진공 — 정책자금 직접 융자 핵심 창구 (청년창업자금·사업화자금 등)"""
+    candidates = [
+        "https://www.kosmes.or.kr/nsh/SH/NTS/SHNTS001M0.do",
+        "https://www.kosmes.or.kr/",
+    ]
+    for url in candidates:
+        r = _safe_get(url)
+        if not r:
+            continue
+        soup = BeautifulSoup(r.text, "lxml")
+        items = []
+        for link in soup.select("a"):
+            text = link.get_text(strip=True)
+            if not text or len(text) < 8:
+                continue
+            if not any(k in text for k in ["지원", "모집", "공고", "신청", "사업", "융자", "자금", "창업"]):
+                continue
+            href = link.get("href", "")
+            if not href or href.startswith("#") or href.startswith("javascript"):
+                continue
+            full_url = urljoin(url, href)
+            items.append({
+                "source": "중소벤처기업진흥공단",
+                "title": text,
+                "url": full_url,
+                "agency": "중소벤처기업진흥공단",
+                "deadline": None,
+                "posted_date": None,
+                "raw": {},
+            })
+            if len(items) >= 30:
+                break
+        if items:
+            return items
+    return []
+
+
+# ==================== 19. 경기신용보증재단 (GCGF) ====================
+def fetch_gcgf():
+    """경기신용보증재단 — 경기도 소재 기업 보증·저리 대출 (용인 직결)"""
+    candidates = [
+        "https://www.gcgf.or.kr/gcgf/main.do",
+        "https://untact.gcgf.or.kr/",
+    ]
+    for url in candidates:
+        r = _safe_get(url)
+        if not r:
+            continue
+        soup = BeautifulSoup(r.text, "lxml")
+        items = []
+        for link in soup.select("a"):
+            text = link.get_text(strip=True)
+            if not text or len(text) < 8:
+                continue
+            if not any(k in text for k in ["지원", "모집", "공고", "신청", "보증", "자금", "사업"]):
+                continue
+            href = link.get("href", "")
+            if not href or href.startswith("#") or href.startswith("javascript"):
+                continue
+            full_url = urljoin(url, href)
+            items.append({
+                "source": "경기신용보증재단",
+                "title": text,
+                "url": full_url,
+                "agency": "경기신용보증재단",
+                "deadline": None,
+                "posted_date": None,
+                "raw": {},
+            })
+            if len(items) >= 30:
+                break
+        if items:
+            return items
+    return []
+
+
+# ==================== 20. 중소벤처24 (SMES) ====================
+def fetch_smes24():
+    """중소벤처24 — 중기부 통합 원스톱 포털 공고"""
+    url = "https://www.smes.go.kr/main/sportsBsnsPolicy"
+    r = _safe_get(url)
+    if not r:
+        return []
+    soup = BeautifulSoup(r.text, "lxml")
+    items = []
+    for row in soup.select("li, .item, .card, article, tr"):
+        title_el = row.select_one("a")
+        if not title_el:
+            continue
+        text = title_el.get_text(" ", strip=True)
+        if not text or len(text) < 8:
+            continue
+        if not any(k in text for k in ["지원", "모집", "공고", "신청", "사업", "창업"]):
+            continue
+        href = title_el.get("href", "")
+        full_url = urljoin(url, href) if href else url
+        raw_text = row.get_text(" ", strip=True)
+        deadline = _parse_date(raw_text)
+        items.append({
+            "source": "중소벤처24",
+            "title": text,
+            "url": full_url,
+            "agency": "중소벤처기업부",
+            "deadline": deadline,
+            "posted_date": None,
+            "raw": {},
+        })
+    return items[:50]
+
+
+# ==================== 통합 (20개 소스) ====================
 ALL_SOURCES = [
     ("기업마당", fetch_bizinfo),                # 1
     ("K-Startup", fetch_kstartup),              # 2
@@ -723,6 +1098,14 @@ ALL_SOURCES = [
     ("경기도", fetch_gyeonggi),                  # 15
     ("경기테크노파크", fetch_gtek),              # 16
     ("중소기업유통센터", fetch_sbdc),            # 17
+    ("국가식품클러스터", fetch_foodpolis),        # 18
+    ("경기스타트업플랫폼", fetch_gsp),           # 19
+    ("소상공인판로지원", fetch_fanfandaero),     # 20
+    ("한국식품산업협회", fetch_kfia),            # 21
+    ("경기바로", fetch_ggbaro),                 # 22
+    ("중소벤처기업진흥공단", fetch_kosmes),      # 23
+    ("경기신용보증재단", fetch_gcgf),            # 24
+    ("중소벤처24", fetch_smes24),               # 25
 ]
 
 

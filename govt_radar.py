@@ -102,9 +102,11 @@ def collect_layer2(log, days_back=2):
 
 
 _SENDER_AGENCY_MAP = [
+    # 기존 14개
     ("ypa.or.kr", "용인시산업진흥원"),
     ("gbsa.or.kr", "경기도경제과학진흥원"),
     ("gtek.or.kr", "경기테크노파크"),
+    ("gtp.or.kr", "경기테크노파크"),
     ("at.or.kr", "농수산식품유통공사"),
     ("bizinfo.go.kr", "중소벤처기업부"),
     ("mss.go.kr", "중소벤처기업부"),
@@ -116,6 +118,17 @@ _SENDER_AGENCY_MAP = [
     ("nipa.kr", "정보통신산업진흥원"),
     ("smtech.go.kr", "중소기업기술정보진흥원"),
     ("gg.go.kr", "경기도"),
+    # 2026-05-16 추가 — 1차 크롤러 사이트 차단 시 메일 IMAP 안전망 (codex fix D Stage 3)
+    ("kosmes.or.kr", "중소벤처기업진흥공단"),
+    ("smes.go.kr", "중소벤처기업부"),
+    ("gcgf.or.kr", "경기신용보증재단"),
+    ("kodma.or.kr", "중소기업유통센터"),
+    ("fanfandaero.kr", "소상공인시장진흥공단"),
+    ("gsp.or.kr", "경기스타트업플랫폼"),
+    ("foodpolis.kr", "한국식품산업클러스터진흥원"),
+    ("kfia.or.kr", "한국식품산업협회"),
+    ("ksure.or.kr", "한국무역보험공사"),
+    ("gbiz.go.kr", "중소벤처기업부"),
 ]
 
 
@@ -627,38 +640,249 @@ def _build_source_health(stats_l1: dict, count_l2: int, layer2_ok: bool) -> dict
     return health
 
 
-def _check_outage(source_health: dict, log) -> tuple[bool, list[str]]:
-    """소스 다운 감지. ops 채널 알림 필요 여부 + 실패 소스 목록 반환.
+# ─────────────────────────────────────────────────────────────────
+# 2026-05-16: silent failure 방지 — 일별 박제 + 누락 가능성 3종 신호
+# failures.md (52)·codex adversarial 점검 fix A/B/F 반영
+# ─────────────────────────────────────────────────────────────────
 
-    트리거:
-      - 성공률 < 50%
-      - 또는 전체 0건이면서 실패한 소스가 1건 이상
+SOURCE_HEALTH_HISTORY_PATH = Path(__file__).parent / "data" / "govt_radar" / "source_health.json"
+SOURCE_HEALTH_HISTORY_DAYS = 30
+SOURCE_HEALTH_BOOTSTRAP_DAYS = 7  # 7일 미만 history면 drops·meta_drop 신호 비활성화
+
+
+def _load_full_source_health_history() -> dict:
+    """source_health.json 전체 로드. 손상·없음 시 빈 dict."""
+    if not SOURCE_HEALTH_HISTORY_PATH.exists():
+        return {}
+    try:
+        return json.loads(SOURCE_HEALTH_HISTORY_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _persist_source_health(source_health: dict, today_iso: str) -> None:
+    """일별 소스 건수 박제. atomic write — 같은 cron 중복 실행에도 안전.
+    30일 초과분 자동 정리."""
+    SOURCE_HEALTH_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    history = _load_full_source_health_history()
+    today_record = {
+        name: h.get("count", 0)
+        for name, h in source_health.items()
+        if h.get("ok")
+    }
+    history[today_iso] = today_record
+
+    sorted_dates = sorted(history.keys(), reverse=True)
+    if len(sorted_dates) > SOURCE_HEALTH_HISTORY_DAYS:
+        for old_date in sorted_dates[SOURCE_HEALTH_HISTORY_DAYS:]:
+            history.pop(old_date, None)
+
+    tmp_path = SOURCE_HEALTH_HISTORY_PATH.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(SOURCE_HEALTH_HISTORY_PATH)
+
+
+def _load_yesterday_health(today_iso: str) -> dict:
+    """어제 박제값. 없으면 빈 dict — 부트스트랩 시 drops/meta_drop 자동 비활성화."""
+    history = _load_full_source_health_history()
+    today_dt = datetime.fromisoformat(today_iso).date()
+    yesterday_iso = (today_dt - timedelta(days=1)).isoformat()
+    return history.get(yesterday_iso, {})
+
+
+def _load_7day_avg(today_iso: str) -> tuple[dict, int]:
+    """최근 7일 이동평균 + 실제 박제된 일수. 부트스트랩 가드용."""
+    history = _load_full_source_health_history()
+    today_dt = datetime.fromisoformat(today_iso).date()
+    recent_days = []
+    for i in range(1, 8):
+        d_iso = (today_dt - timedelta(days=i)).isoformat()
+        if d_iso in history:
+            recent_days.append(history[d_iso])
+    if not recent_days:
+        return {}, 0
+    avg = {}
+    all_sources = set()
+    for day in recent_days:
+        all_sources.update(day.keys())
+    for src in all_sources:
+        vals = [d.get(src, 0) for d in recent_days]
+        avg[src] = sum(vals) / len(vals) if vals else 0
+    return avg, len(recent_days)
+
+
+def _diagnose_signals(source_health: dict, today_iso: str) -> dict:
+    """누락 가능성 3종 신호 분류 (codex fix A·F 반영).
+
+    Returns:
+        {
+          'new_zero': [...],         # 어제는 정상, 오늘 0건 — 즉시 알림 대상
+          'persisting_zero': [...],  # 어제도 0/없음, 오늘도 0 — 3일 지속 시만 재알림
+          'drops': [(name, y, t)],   # 어제 대비 70% 이상 급감 (y>=20 둔감화)
+          'meta_drop': [(name, avg, t)],  # 기업마당·K-Startup 평소 평균 50% 이하
+          'bootstrap': bool,         # history 7일 미만 → drops/meta_drop 비활성화 여부
+          'history_days': int,
+        }
+    """
+    yesterday = _load_yesterday_health(today_iso)
+    weekly_avg, history_days = _load_7day_avg(today_iso)
+    bootstrap = history_days < SOURCE_HEALTH_BOOTSTRAP_DAYS
+
+    new_zero, persisting_zero, drops, meta_drops = [], [], [], []
+
+    for name, h in source_health.items():
+        if not h.get("ok"):
+            continue
+        today = h.get("count", 0)
+        y_count = yesterday.get(name) if yesterday else None
+
+        if today == 0:
+            if y_count is None or y_count == 0:
+                persisting_zero.append(name)
+            else:
+                new_zero.append(name)
+            continue
+
+        # drop 검사 — 부트스트랩 아닐 때만, y_count >= 20 둔감화 (codex fix A)
+        if not bootstrap and y_count is not None and y_count >= 20:
+            if today <= max(3, int(y_count * 0.3)):
+                drops.append((name, y_count, today))
+
+        # meta portal drop — 부트스트랩 아닐 때만
+        if not bootstrap and name in ("기업마당", "K-Startup"):
+            avg = weekly_avg.get(name, 0)
+            if avg >= 50 and today < avg * 0.5:
+                meta_drops.append((name, int(avg), today))
+
+    return {
+        "new_zero": new_zero,
+        "persisting_zero": persisting_zero,
+        "drops": drops,
+        "meta_drop": meta_drops,
+        "bootstrap": bootstrap,
+        "history_days": history_days,
+    }
+
+
+def _check_outage(source_health: dict, today_iso: str, log) -> tuple[bool, dict]:
+    """소스 다운 감지. codex fix A·F 반영 — 누락 가능성 3종 신호 기반.
+
+    Trigger:
+      - 성공률 < 75% (강화: 50→75)
+      - 또는 새로 0건이 된 소스 3개 이상 (다발 silent failure)
+      - 또는 어제 대비 70% 이상 급감 (셀렉터 부분 깨짐 초기 징후, y>=20 둔감화)
+      - 또는 메타 포털 평소 평균 50% 이하 (가장 위험)
+      - 또는 전체 0건 + 실패 1건 이상 (기존 유지)
+
+    Returns: (outage, signals_dict)
     """
     if not source_health:
-        return False, []
+        return False, {}
+
     total = len(source_health)
     ok_count = sum(1 for h in source_health.values() if h["ok"])
     failed = [name for name, h in source_health.items() if not h["ok"]]
     total_items = sum(h["count"] for h in source_health.values())
-
     success_ratio = ok_count / total if total else 1.0
-    outage = (success_ratio < 0.5) or (total_items == 0 and failed)
+
+    signals = _diagnose_signals(source_health, today_iso)
+    signals.update({
+        "failed": failed,
+        "success_ratio": success_ratio,
+        "total_items": total_items,
+        "ok_count": ok_count,
+        "total": total,
+    })
+
+    # bootstrap(7일 미만)이면 new_zero만 체크 — 이력 없어 persisting인지 진짜 0건인지 모름
+    # 정상 운영 시 new_zero+persisting_zero 합산 (codex fix A·F + 사후 재점검 🔴 수정)
+    if signals["bootstrap"]:
+        total_zero = len(signals["new_zero"])
+    else:
+        total_zero = len(signals["new_zero"]) + len(signals["persisting_zero"])
+    outage = (
+        success_ratio < 0.75
+        or total_zero >= 3
+        or len(signals["drops"]) >= 1
+        or len(signals["meta_drop"]) >= 1
+        or (total_items == 0 and failed)
+    )
 
     log.info(
-        "source health: %d/%d ok (%.0f%%) · 총 %d건 · 실패=%s",
-        ok_count, total, success_ratio * 100, total_items, failed or "-",
+        "source health: %d/%d ok (%.0f%%) · 총 %d건 · 실패=%s · "
+        "new_zero=%d · persisting_zero=%d · drops=%d · meta_drop=%d · bootstrap=%s(%d일)",
+        ok_count, total, success_ratio * 100, total_items,
+        failed or "-",
+        len(signals["new_zero"]), len(signals["persisting_zero"]),
+        len(signals["drops"]), len(signals["meta_drop"]),
+        signals["bootstrap"], signals["history_days"],
     )
-    return outage, failed
+    return outage, signals
+
+
+def _format_health_alert(signals: dict, today_iso: str) -> str:
+    """헬스 알림 본문 — CLAUDE.md §ops알림언어 준수. 기술 용어 배제.
+    codex fix B 반영 — [수집상태 점검 필요] 접두어로 공고 알림과 구분."""
+    lines = ["[수집상태 점검 필요]"]
+    lines.append(f"오늘({today_iso}) 정부지원 사이트 수집에 이상 신호가 잡혔습니다.")
+    lines.append("")
+
+    if signals.get("failed"):
+        lines.append(f"■ 접속 실패한 사이트 ({len(signals['failed'])}곳)")
+        lines.append(", ".join(signals["failed"][:15]))
+        lines.append("")
+
+    if signals.get("new_zero"):
+        lines.append(f"■ 오늘 새로 한 건도 못 가져온 사이트 ({len(signals['new_zero'])}곳)")
+        lines.append(", ".join(signals["new_zero"][:15]))
+        lines.append("")
+
+    if signals.get("persisting_zero"):
+        lines.append(f"■ 계속 0건인 사이트 ({len(signals['persisting_zero'])}곳)")
+        lines.append(", ".join(signals["persisting_zero"][:10]))
+        lines.append("")
+
+    if signals.get("drops"):
+        lines.append(f"■ 어제 대비 크게 줄어든 사이트 ({len(signals['drops'])}곳)")
+        for name, y, t in signals["drops"][:8]:
+            lines.append(f"  · {name}: 어제 {y}건 → 오늘 {t}건")
+        lines.append("")
+
+    if signals.get("meta_drop"):
+        lines.append(f"■ 메인 포털 급감 경고 ({len(signals['meta_drop'])}곳)")
+        for name, avg, t in signals["meta_drop"]:
+            lines.append(f"  · {name}: 평소 평균 {avg}건 → 오늘 {t}건 ← 가장 위험")
+        lines.append("")
+
+    if signals.get("bootstrap"):
+        lines.append(
+            f"※ 헬스체크 박제 {signals.get('history_days', 0)}일치만 누적("
+            f"7일 미만)이라 어제 대비·평균 신호는 비활성. 7일 후 정상 동작."
+        )
+        lines.append("")
+
+    lines.append("다음 단계: Claude에게 \"정부지원 자동화 점검해\" 요청")
+    return "\n".join(lines)
+
+
+def _send_alert(text: str, kind: str, log) -> bool:
+    """알림 통합 발송 (codex fix B). kind에 따라 채널 분기.
+
+    Args:
+        kind: "health" → govt 채널 / "ops" → ops 채널 (백업·디버그용)
+    """
+    channel = "govt" if kind == "health" else "ops"
+    try:
+        ok = telegram_client.send_message(text[:4090], channel=channel)
+        return bool(ok)
+    except Exception as e:
+        log.error(f"{channel} 알림 발송 실패: {e}")
+        return False
 
 
 def _send_ops_alert(text: str, log) -> bool:
-    """ops 채널에 운영 알림 (실패해도 main 흐름 차단 안 함)."""
-    try:
-        ok = telegram_client.send_message(text[:4090], channel="ops")
-        return bool(ok)
-    except Exception as e:
-        log.error(f"ops 알림 발송 실패: {e}")
-        return False
+    """ops 채널 알림 (기존 호출자 호환용 — Layer4 fail-closed 알림 등 유지)."""
+    return _send_alert(text, kind="ops", log=log)
 
 
 def _announcement_stable_key(item: dict) -> str:
@@ -954,16 +1178,35 @@ def main():
     else:
         items_l2, layer2_ok = collect_layer2(log, days_back=args.days_back)
 
-    # Codex 2026-05-10: source health 집계 + outage 감지
+    # 2026-05-16: silent failure 방지 — 일별 박제 + 누락 가능성 3종 신호
+    # codex adversarial 점검 fix A·B·F 반영
+    today_iso = datetime.now(KST).strftime("%Y-%m-%d")
     source_health = _build_source_health(stats_l1, len(items_l2), layer2_ok)
-    outage_detected, failed_sources = _check_outage(source_health, log)
+
+    # 일별 박제 — dry-run에서도 누적해야 history 형성됨
+    try:
+        _persist_source_health(source_health, today_iso)
+    except Exception as e:
+        log.warning(f"source_health.json 박제 실패: {e}")
+
+    outage_detected, signals = _check_outage(source_health, today_iso, log)
     if outage_detected and not args.dry_run:
-        _send_ops_alert(
-            f"🚨 정부지원 레이더 — 소스 outage 감지\n"
-            f"실패 소스 ({len(failed_sources)}건): {', '.join(failed_sources[:8])}\n"
-            f"성공: {sum(1 for h in source_health.values() if h['ok'])}/{len(source_health)}\n"
-            f"수집 합계: {sum(h['count'] for h in source_health.values())}건",
-            log,
+        # govt 채널: 비전공자 친화 메시지 (CLAUDE.md §ops알림언어 준수)
+        health_msg = _format_health_alert(signals, today_iso)
+        _send_alert(health_msg, kind="health", log=log)
+        # ops 채널: 디버깅용 간략 백업
+        _send_alert(
+            f"🚨 정부지원 레이더 — outage 감지\n"
+            f"성공: {signals.get('ok_count')}/{signals.get('total')} "
+            f"({signals.get('success_ratio', 0)*100:.0f}%) · "
+            f"수집 {signals.get('total_items', 0)}건\n"
+            f"실패 {len(signals.get('failed', []))} · "
+            f"신규0건 {len(signals.get('new_zero', []))} · "
+            f"급감 {len(signals.get('drops', []))} · "
+            f"메타포털 {len(signals.get('meta_drop', []))}\n"
+            f"실패 소스: {', '.join(signals.get('failed', [])[:8])}",
+            kind="ops",
+            log=log,
         )
 
     # 통합 + 중복 제거
