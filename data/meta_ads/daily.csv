@@ -1,4 +1,5 @@
 date,level,campaign_id,campaign_name,spend,impressions,clicks,ctr_pct,cpc_krw,frequency,purchases,purchase_value_krw,cpa_krw,roas,roas_source,raw_json_path,appended_at
+2026-05-16,account,account,,125860.0,21974.0,315.0,1.433512,399.55620000000005,1.252365,9.0,429954.0,13984.443800000001,3.416129,omni_purchase,data/meta_ads/raw/2026-05-16.json,2026-05-17T08:59:08+09:00
 2026-05-15,account,account,,118116.99999999999,19536.0,259.0,1.325758,456.04965,1.211084,8.0,413728.5,14764.624999999998,3.502701,omni_purchase,data/meta_ads/raw/2026-05-15.json,2026-05-16T08:58:12+09:00
 2026-05-14,account,account,,135444.5,21771.0,342.0,1.570897,396.03705,1.205615,10.0,499061.0,13544.449999999999,3.684616,omni_purchase,data/meta_ads/raw/2026-05-14.json,2026-05-15T09:01:31+09:00
 2026-05-13,account,account,,139171.0,20938.0,331.0,1.580858,420.4565,1.29832,13.0,789162.5,10705.46165,5.670452,omni_purchase,data/meta_ads/raw/2026-05-13.json,2026-05-14T09:07:39+09:00
