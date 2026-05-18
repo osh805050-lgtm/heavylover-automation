@@ -8,6 +8,11 @@
             "type": "command",
             "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/inject-patterns.py\"",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/inject-failures-before-code.py\"",
+            "timeout": 5
           }
         ]
       }
