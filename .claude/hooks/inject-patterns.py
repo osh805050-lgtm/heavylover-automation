@@ -35,6 +35,7 @@ KEYWORDS = {
     "§출력관리": r"장문|5000자|분할|토큰.*초과|출력.*길이",
     "§지역자격필터": r"지역|region|경기|용인|소재지|govt.?radar|정부지원|지원사업|시·군|시군",
     "§환경컨텍스트": r"메일|gmail|naver.*메일|imap|smtp|claude\s*-[cr]|wsl|powershell",
+    "§코드워크플로우": r"함수|구현|리팩|TDD|pytest|ruff|디버깅|debug|단위테스트|unit\s*test|코드\s*작성|짜줘|작성해줘",
 }
 
 # 다중 섹션 매칭 시 최대 개수 (토큰 절약)

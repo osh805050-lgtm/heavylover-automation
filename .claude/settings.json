@@ -11,6 +11,18 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/big-change-gate.py\"",
+            "timeout": 150
+          }
+        ]
+      }
     ]
   },
   "permissions": {

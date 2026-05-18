@@ -1,12 +1,13 @@
 # 회피 패턴 (작업 종류별 재사용 규칙)
 
 > 이 파일은 [위험 작업 시작 전 / 에이전트 자동 참조] 시 로드됩니다. `failures.md` 시간순 로그에서 **1회 발생 즉시** 해당 카테고리에 회피 규칙을 반영합니다 (3회 대기 없음).
-> 마지막 갱신: 2026-05-15 · 갱신 주기: 신규 패턴 발생 시 / 월말 회고
+> 마지막 갱신: 2026-05-18 · 갱신 주기: 신규 패턴 발생 시 / 월말 회고
 
 ## 작업 종류별 빠른 매칭
 
 | 지금 하려는 작업 | 먼저 읽을 카테고리 |
 |---|---|
+| **사실 확인이 필요한 모든 질문 (상태·파일·설정·존재 여부·수치)** | **§대답전검증** |
 | API·cron·.env 의존 자동화 | §자동화점검 + §외부API다루기 |
 | 카페24·SS·Meta·Anthropic 등 외부 API 통합 | §외부API다루기 |
 | 시간 윈도우·dedupe 로직 | §시간중복처리 + §데이터범위와분석분리 |
@@ -19,6 +20,46 @@
 | **산출물 생성·MCP/npm 실행·OneDrive 작업** | **§파일안전성** |
 | **독립 작업 동시 실행·tool 호출 병렬화** | **§병렬처리** |
 | **텔레그램·이메일 ops 알림 작성** | **§ops알림언어** |
+| **신규 함수·로직·자동화 코드 작성** | **§코드워크플로우** |
+
+---
+
+## §대답전검증 (Verify-Before-Answer)
+
+**원칙**: 모든 응답 전 — 사실 확인이 필요한 항목이면 실측 후 답변. 메모리·이전 대화·CLAUDE.md 박제값·추정 단정 금지.
+
+### 트리거 (이런 질문엔 무조건 검증 먼저)
+- 시스템 상태: "이거 지금 돌고 있어?", "어제 cron 성공했어?"
+- 파일·설정 내용: "X 파일에 Y 있어?", ".env 어떻게 설정돼 있어?"
+- 존재 여부: "이 플러그인/MCP/에이전트 있어?", "이 함수 어디 있어?"
+- 코드 동작: "이 함수 뭐 반환해?", "이 워크플로우 마지막에 뭐 함?"
+- 수치·일정: "이번 달 매출은?", "마감일 언제?"
+- 비교·차이: "A랑 B 뭐 달라?"
+
+### 검증 도구 (질문 종류별)
+| 질문 | 도구 |
+|---|---|
+| 파일·디렉터리 존재 | Glob, `ls` |
+| 파일 내용 | Read, Grep |
+| 시스템 상태 | Bash (실측 명령) |
+| 외부 API | curl + raw JSON 1건 (§외부API다루기) |
+| 시트·DB 수치 | mcp 또는 직접 쿼리 |
+
+### 금지
+- "아마도", "보통은", "기존에 ~였을 텐데" 같은 추정 단정 — 검증 안 한 사실을 사실처럼 말하지 않음
+- CLAUDE.md 박제 수치를 현재값처럼 인용 — §수치현행성검증 같이 적용
+- 이전 대화 결론을 재검증 없이 재사용 — 상황 바뀌었을 수 있음
+
+### 허용 (검증 불필요)
+- 일반 개념 설명 ("ROAS가 뭐야?")
+- 의견·아이디어 요청 ("어떻게 생각해?", "방안 제안해")
+- 명백히 알고 있는 외부 지식 (Python 문법 등)
+
+### 검증 불가 시
+- "확인 후 답변" 또는 "데이터 없음" 명시. 추측으로 빈칸 채우지 않음.
+
+### Failure 패턴
+- 사용자가 시스템 상태·존재 여부를 묻는데 Read/Grep 없이 "있을 것 같다/없을 것 같다" 추정으로 답변 → 사용자가 재확인 요구 → 시간 낭비 + 신뢰 손상. 첫 답변에서 30초 검증 우선.
 
 ---
 
@@ -493,3 +534,82 @@ def _find_tab_with_retry(spreadsheet, ..., max_attempts=3, wait_seconds=60.0):
 **연관 실패**: failures.md ㊾(ops 알림 6개 기술 용어로 작성)
 
 **hookify 보강**: 없음 (알림 내용은 코드 작성 시 자가 점검 필요)
+
+---
+
+## §코드워크플로우 (Code Workflow — Plan→TDD→Verify→Codex)
+
+**목적**: 코드 작성 시 오류·디버깅 반복 차단. 3단계(plan→debug→verify) + TDD(Red-Green-Refactor) + 큰 변경 자동 게이트.
+
+### 모든 코드 변경 (logic 변경 시 강제 6단계)
+
+1. **Plan** — `use_skill('writing-plans')` 호출, plan 파일 작성, 사용자 승인
+2. **Red** — `tests/test_*.py`에 실패하는 테스트 먼저 작성
+3. **Green** — 최소 구현으로 테스트 통과
+4. **Refactor** — 리팩토링 + 테스트 재실행
+5. **오류 시** — `use_skill('systematic-debugging')` 호출 (추측 진단 금지)
+6. **완료 전** — `use_skill('verification-before-completion')` 호출 + 실제 실행 결과 보고
+
+### "코드 변경" 정의
+
+**강제 대상** (3단계 + TDD):
+- 함수/클래스 신규 정의 또는 수정
+- 로직 분기 추가·변경
+- 데이터 처리·변환
+- API 통합 (요청·응답 처리)
+- 정규식·파서
+- 환경 설정 (.env·cron·OAuth) 신규/수정
+
+**면제** (logic-neutral, 통과):
+- 변수명 변경, 주석/docstring 추가, log/print 메시지 수정
+- import 정렬, 줄바꿈, 들여쓰기
+- 설정 파일 단순 값 수정 (.ini·.json·.yml·.toml)
+- 문서 (.md·.txt·.rst)
+- `.claude/` 내 hookify·agent·command 정의
+- `.github/workflows/*.yml`
+- 데이터 (.csv·.jsonl), `data/` 폴더
+
+### 큰 변경 자동 게이트 (Stop hook)
+
+**스크립트**: `.claude/hooks/big-change-gate.py`
+
+**발동 조건**:
+- git diff (staged + unstaged) 총 50줄+
+- 또는 변경 파일명에 키워드: `cron`, `\.env`, `\.github/workflows`, `tracking_`, `repurchase_`, `_api\.py`, `/api/`, `oauth`
+
+**자동 실행**:
+- `python -m pytest` (전체) — 실패 시 차단
+- `python -m ruff check {변경된 .py 파일만}` — 실패 시 차단 (기존 코드 false positive 차단을 위해 변경 파일만)
+- 통과 시: Codex 리뷰 권장 메시지 (`systemMessage` JSON)
+
+**차단 시 조치**:
+1. `use_skill('systematic-debugging')` 호출해 원인 분석
+2. `/codex:rescue` 호출해 cross-review
+3. 수정 후 다시 응답 진행
+
+### 관련 hookify 룰
+
+- `.claude/hookify.block-code-without-superpowers.local.md` — verification 스킬 미호출 시 차단
+- `.claude/hookify.block-code-without-test.local.md` — 신규 함수 + test 없으면 차단
+
+### 인프라
+
+- `pytest.ini` — `testpaths = tests`, 루트 일회용 스크립트는 수집 제외
+- `requirements.txt` — pytest>=9.0, ruff>=0.7
+- 현재 tests/: 33개 통과
+
+### 자가 검증 체크
+
+- [ ] writing-plans 호출했는가
+- [ ] tests/test_*.py 먼저 작성했는가 (Red)
+- [ ] pytest 실패 확인했는가
+- [ ] 구현 후 pytest 통과 확인했는가 (Green)
+- [ ] 오류 시 systematic-debugging 호출했는가
+- [ ] "완료" 보고 전 verification-before-completion 호출했는가
+- [ ] 50줄+ 변경이면 Codex cross-review 요청했는가
+
+### 연관 실패
+
+failures.md 56(systematic-debugging 생략), 58(슬래시 명령어 가용성 미확인), 59(Playwright 1회 실패 후 포기), ㊸("이론상 맞을 것" 보고 후 동작 안 함)
+
+**hookify 보강**: 신규 `block-code-without-test.local.md` + Stop hook `big-change-gate.py`

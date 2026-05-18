@@ -1,6 +1,6 @@
 # CLAUDE.md — HeavyLover 운영 컨텍스트
 
-**최종 업데이트**: 2026-05-15 (rev. 15) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
+**최종 업데이트**: 2026-05-18 (rev. 17) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
 
 > **외부 컨텍스트 우선 참조 규칙**: 정보 부족 시 추측 금지. 다음 위치를 먼저 Glob/Read 후 결정한다.
 > - 작업 종류별 회피 규칙: `docs/lessons/patterns.md`
@@ -65,9 +65,10 @@
 - 블로그 → `docs/context/blog.md` (또는 blog-writer 서브에이전트)
 - 광고 → `docs/context/ads.md` (또는 meta-ads-analyst 서브에이전트)
 - 코드 → §11 (디렉토리)
-- **실수 회피** → `docs/lessons/patterns.md` 카테고리 매칭 → 필요 시 `failures.md` grep
+- **실수 회피 (강제)** → 코드·자동화·API 작업 시작 전 `docs/lessons/failures.md` **최근 15건 Read 필수** (grep 아님, 직접 Read). 읽기 전 코드 작성 진입 금지. 이후 `docs/lessons/patterns.md` 카테고리 매칭.
 
 ### 안전 규칙 요약 (상세는 patterns.md)
+- **§대답전검증** (모든 응답 전 강제): 사용자 질문이 **시스템 상태·파일 내용·설정·코드 동작·플러그인/MCP/에이전트/패키지 존재 여부·수치·일정** 등 사실 확인이 필요한 항목이면 응답 전 반드시 Read/Grep/Glob/Bash로 실측 후 답변. 메모리·이전 대화·CLAUDE.md 박제값·추정으로 단정 금지. 빠른 답이라도 30초 검증 우선. 검증 불가 시 "확인 후 답변" 또는 "데이터 없음" 명시. 예외: 일반 개념 설명·의견·아이디어 요청. → `patterns.md §대답전검증`
 - **§자동화점검** (Pre-flight): API·cron·.env 작업 전 키 존재·토큰 만료·디렉터리 실재·`crontab -l` 실측 확인. 문서 신뢰 금지. → `patterns.md §자동화점검`
 - **§외부API다루기**: raw JSON 1건 출력 후 키 검증 / 페이지네이션 끝까지 / 식별자 인코딩은 공식 문서 / Claude 메모리 인덱스(시스템 자동 로드) 사전 훑기. → `patterns.md §외부API다루기`
 - **§엑셀편집**: 색상·폰트·테두리·열너비만 건드림. 수식·freeze panes·숨김·셀 타입 금지. 편집 후 `openpyxl.load_workbook()` 검증. → `patterns.md §엑셀편집`
@@ -84,6 +85,7 @@
 - **§Go도구regex**: gitleaks/grafana/prometheus 등 Go re2 엔진은 lookahead `(?!)`/lookbehind `(?<=)` 미지원. Python regex 그대로 적용 금지 — char class 기반 재작성. 커밋 전 Python `re.search`로 양방향 검증: 진짜 시크릿 5+ 차단 + 정상 케이스 5+ 통과. (failures.md ㊹)
 - **§환경변수3곳동기화**: 시스템 통화·토큰·계정 ID 등 글로벌 설정은 (a) GitHub Variables/Secrets, (b) `.github/workflows/*.yml` 기본값, (c) Vultr `.env` 3곳 동시 동기화. 한 곳만 바꾸면 다음 cron 실행이 사고 트리거. Vultr .env는 SSH 키 직접 없음 → `appleboy/ssh-action` 임시 워크플로우 생성·실행·삭제 패턴.
 - **§코드후실행검증**: 코드/설정 변경 후 "수정 완료" 보고 전에 **실제 실행해서 결과 확인 후 보고**. (a) 코드: pytest 또는 dryrun 실행, (b) 워크플로우: `gh workflow run` + `gh run watch` + 로그 grep, (c) regex/필터: Python `re.search` 양방향 케이스, (d) 환경변수: 다음 cron 실제 실행 결과 또는 즉시 dispatch. "이론상 맞을 것"이라는 보고 금지 — 실측 데이터로 보고.
+- **§코드워크플로우** (2026-05-18 강화 — 모든 코드 변경 6단계 + 큰 변경 자동 게이트): (1) **Plan** — logic 변경 시 `use_skill('writing-plans')` 호출. "코드 변경" 정의: 함수/클래스 신규·수정, 로직 분기, API 통합, 정규식, env/cron. 면제: 변수명·주석·log·import 정렬·설정 단순 값·문서·`.claude/`·`.github/workflows/`. (2) **Red** — `tests/test_*.py`에 실패하는 테스트 먼저 작성, `python -m pytest`로 실패 확인. (3) **Green/Refactor** — 최소 구현으로 통과 → 리팩토링 → 재실행. (4) **오류 시** — `use_skill('systematic-debugging')` 호출 (추측 금지). (5) **완료 전** — `use_skill('verification-before-completion')` + 실제 실행 결과 보고. (6) **큰 변경 자동 게이트** — git diff 50줄+ 또는 `cron`/`\.env`/`\.github/workflows`/`tracking_`/`repurchase_`/`_api\.py`/`oauth` 키워드 매치 시 Stop hook(`.claude/hooks/big-change-gate.py`)이 `pytest` + `ruff check {변경 .py만}` 자동 실행. 실패 시 차단 → systematic-debugging + `/codex:rescue`. 통과해도 50줄+면 Codex 권장. → `patterns.md §코드워크플로우`
 - **§ops알림언어**: 텔레그램·이메일 ops 알림에 `gspread/quota/atomic/cron/API/worksheet` 등 기술 용어 배제. 구조: 무슨 일 발생(사용자 관점) → 왜(일반 언어) → 행동 단계(Apps Script 메뉴 경로·Claude 점검 요청 등). 승현님이 기술 지식 없이도 읽고 즉시 대응 가능해야 함. → `patterns.md §ops알림언어`
 
 ### 실수 자동 기록 (필수)
@@ -202,7 +204,7 @@
 | 04:00 카페24 OAuth 자동 갱신 | ✅ 매일 |
 | 08:30 시트 sync (카페24 + SS 5상태) | ✅ 매일 |
 | 09:00 재구매 리포트 + 📊대시보드 3개(통합/카페24/SS) + 텔레그램 | ✅ 매일 — v6: 변동중 표시·시트 숨김·RuntimeError fail-fast |
-| 재구매 GAS 분석 v5.1 (수치 결함 10개 + 운영 결함 2개 수정) | ⚠️ 사용자 수동 붙여넣기 필요 (`scripts/gas/repurchase_v5_1.gs`). `setupDailyTrigger()` 함수로 매일 오전 8시대 트리거 등록 완료 (2026-05-15). clasp 자동화는 Phase 3에서 GAS 제거 예정. |
+| 재구매 GAS 분석 v5.1 (수치 결함 10개 + 운영 결함 2개 수정) | ⚠️ 사용자 수동 붙여넣기 필요 (`scripts/gas/repurchase_v5_1.gs`). `setupDailyTrigger()` **미실행** — Apps Script에서 직접 실행해야 트리거 등록. 미등록 시 pipeline_meta에 gas row 없음 → `stale` 알림 매일 발생. |
 | **GitHub push → Vultr 자동 배포** (`.github/workflows/deploy-vultr.yml`) | ✅ `*.py` push 시 SSH→`git reset --hard origin/main`→텔레그램 알림. 콘솔 진입 불필요 |
 | 카페24 N10→N20 / SS 신규→발주확인 | 수동 (API 한계) |
 
@@ -263,7 +265,7 @@
 
 ## 9. Top of Mind
 
-### 즉시 대응 (이번 주 — 2026-05-12 기준)
+### 즉시 대응 (이번 주 — 2026-05-15 기준)
 1. **결제 퍼널 개선**: 배송비 상품 페이지 사전 표시 + 카카오 소셜 로그인 추가 (비용 0, 반나절) — 미진행
 2. **2026-02 M+1 29.5% 코호트 후속 심층 분석** (Claude) — 1차 원인 규명 §4 박제 완료. CRM 설계 전 추가 검증 필요
 3. **재구매 고객 그룹 분류 인프라 구축** (Claude, **진행중**) — 이메일 자동화의 선결조건
@@ -271,6 +273,24 @@
 5. **고반복 고객 13명 레퍼럴 쿠폰 발송** — 트레이너 가설 검증 + B2B 방향 결정 (미진행)
 6. 상생성장지원자금 1억 → **현장실사 완료 → 결과 대기** (K4 연동)
 7. 시리얼 프리오더 (4~5월) → 6월 정식 출시 (미진행 — 일정 재점검 필요)
+
+### 정부지원사업 신규 발굴 (2026-05-15 크롤링 결과)
+> Playwright Python으로 기존 자동화 0건 사이트 6개 직접 확인. 아래 마감 임박 항목 즉시 검토 필요.
+
+| 마감 | 사업명 | 지원 내용 | 출처 |
+|---|---|---|---|
+| **D-5 (05.20)** | **제조창업기업성장지원사업** | 시제품 개발 사업화자금 직접 지원 | K-Startup |
+| D-11 (05.26) | 경기도 소상공인 전문컨설팅단 | 무료 마케팅·운영 컨설팅 | 경기바로 |
+| 06.08 | AI 청년창업기업 동반성장 바우처 | AI 서비스 바우처 | NIPA |
+| 상시 | 소상공인 정책자금 융자계획 | 저금리 직접 융자 | 소상공인24 |
+| 상시 | 용인IP지원센터 IP전략수립 지원 | 상표·IP 전략 (용인시 직결) | 경기테크노파크 |
+| 상시 | 소상공인 고용보험료 지원 | 보험료 지원 | 소상공인24/경기바로 |
+
+**크롤링 시스템 현황 (2026-05-15 기준)**
+- 총 25개 소스 / 940건 수집 / 작동 15개 소스
+- 이번 세션 수정: `fetch_fanfandaero` (0→6건), `fetch_gbsa` (0→9건, egbiz.or.kr로 변경)
+- 여전히 SPA라 자동화 불가 (Playwright 수동 필요): 소상공인24(447건 DB)·경기스타트업플랫폼·경기테크노파크
+- 기업마당·K-Startup이 중기부·농림부·창업진흥원 통합 커버 (실질 공백 아님)
 
 ### 진행 중 (2026-04~07)
 - 스마트스토어 API 자동화 (프록시 IP 확보 + **코드 완성 → 테스트 중**)
