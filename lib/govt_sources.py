@@ -726,43 +726,50 @@ def fetch_gtek():
 
 # ==================== 17. 중소기업유통센터 (SBDC/KODMA) ====================
 def fetch_sbdc():
-    """중소기업유통센터 — D2C 온라인유통·판로개척 전문"""
-    url = "https://www.kodma.or.kr/usr/pbancInfo/selectPbancInfoList.do?menuId=32"
+    """중소기업유통센터(한국중소벤처기업유통원) — D2C 온라인유통·판로개척 전문
+
+    실제 사이트 구조: div.title > a[onclick="goView('XXXXXXX')"]
+    href은 모두 '#'이고 onclick에서 pstSn 추출 → bbs/view.do URL 조합
+    """
+    import re as _re
+    BASE = "https://www.kodma.or.kr"
+    BBS_KEY = "2409240028"
+    url = f"{BASE}/bbs/list.do?key={BBS_KEY}"
     r = _safe_get(url)
     if not r:
-        url = "https://www.kodma.or.kr"
-        r = _safe_get(url)
-        if not r:
-            return []
+        return []
 
     soup = BeautifulSoup(r.text, "lxml")
     items = []
+    seen = set()
 
-    for link in soup.select("a"):
-        text = link.get_text(strip=True)
-        if not text or len(text) < 8:
+    for div in soup.select("div.title"):
+        a = div.find("a")
+        if not a:
             continue
-        if not any(k in text for k in ["지원", "모집", "공고", "신청", "판로", "유통"]):
+        onclick = a.get("onclick", "")
+        m = _re.search(r"goView\('(\d+)'\)", onclick)
+        if not m:
             continue
-        href = link.get("href", "")
-        if not href or href.startswith("#"):
+        pst_sn = m.group(1)
+        text = a.get_text(" ", strip=True)
+        if not text or len(text) < 5:
             continue
-        full_url = urljoin(url, href)
-
+        full_url = f"{BASE}/bbs/view.do?key={BBS_KEY}&pstSn={pst_sn}"
+        if full_url in seen:
+            continue
+        seen.add(full_url)
         items.append({
             "source": "중소기업유통센터",
-            "title": text,
+            "title": text[:200],
             "url": full_url,
-            "agency": "중소기업유통센터",
-            "deadline": None,
+            "agency": "한국중소벤처기업유통원",
+            "deadline": _parse_date(text),
             "posted_date": None,
             "raw": {},
         })
 
-        if len(items) >= 30:
-            break
-
-    return items
+    return items[:30]
 
 
 # ==================== 18. 국가식품클러스터진흥원 (foodpolis) ====================
