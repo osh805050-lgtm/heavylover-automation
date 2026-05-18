@@ -377,6 +377,51 @@ def fetch_sbiz24_pw():
     return items[:50]
 
 
+# ==================== 9. 고비즈코리아 (SSL 차단 우회) ====================
+def fetch_gobiz_pw():
+    """고비즈코리아 — Python SSLv3 차단 우회. Playwright Chromium으로 접속.
+    수출지원사업 링크(/support/ebsns/) 수집.
+    """
+    url = "https://kr.gobizkorea.com/"
+    html, final_url = _fetch_with_playwright(
+        url,
+        wait_selector="a[href*='/support/']",
+        wait_timeout_ms=10000,
+    )
+    if not html:
+        return []
+
+    soup = BeautifulSoup(html, "lxml")
+    items = []
+    seen = set()
+
+    for a in soup.select("a[href]"):
+        href = a.get("href", "")
+        text = _clean_text(a.get_text(" ", strip=True))
+        if not text or len(text) < 5:
+            continue
+        if not _is_announcement_text(text) and not any(
+            k in text for k in ["지원사업", "참여기업", "모집", "공고", "신청"]
+        ):
+            continue
+        if "javascript:" in href.lower() or href.strip() == "#":
+            continue
+        full_url = urljoin(final_url, href)
+        if full_url in seen:
+            continue
+        seen.add(full_url)
+        items.append(_norm_item(
+            source="고비즈코리아",
+            title=text[:200],
+            url=full_url,
+            agency="KOTRA 고비즈코리아",
+            deadline=_parse_date(text),
+        ))
+
+    log.info(f"고비즈코리아(PW): {len(items)}건")
+    return items[:30]
+
+
 # ==================== 통합 ====================
 # stats 키는 "(PW)" 접미사를 붙여 기존 stats_l1과 분리 추적한다.
 # items의 source 필드는 그대로 (예: "경기테크노파크") — reconciler가 매칭 가능.
@@ -389,6 +434,7 @@ PLAYWRIGHT_SOURCES = [
     ("중소벤처기업진흥공단(PW)", fetch_kosmes_pw),
     ("경기스타트업플랫폼(PW)", fetch_gsp_pw),
     ("소상공인24(PW)", fetch_sbiz24_pw),
+    ("고비즈코리아(PW)", fetch_gobiz_pw),
 ]
 
 
