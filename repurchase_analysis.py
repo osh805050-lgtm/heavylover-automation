@@ -93,6 +93,10 @@ def _parse_datetime(s) -> datetime | None:
     except ValueError:
         pass
     try:
+        return datetime.strptime(s, "%Y-%m-%d %H:%M")  # SS: "2025-10-21 1:44"
+    except ValueError:
+        pass
+    try:
         return datetime.strptime(s[:10], "%Y-%m-%d")
     except ValueError:
         return None

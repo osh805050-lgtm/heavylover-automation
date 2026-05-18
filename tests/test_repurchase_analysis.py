@@ -6,6 +6,7 @@ from datetime import date
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from repurchase_analysis import (
+    _parse_datetime,
     is_canceled_status,
     load_cafe24_orders_from_rows,
     load_ss_orders_from_rows,
@@ -469,3 +470,28 @@ def test_cohort_sameday_repurchase_counts_as_converted():
     new_logic = any(o["order_no"] != first_order_no and o["order_date"] <= deadline
                     for o in cust_orders)
     assert new_logic is True, "new logic must pass (Green)"
+
+
+# ── _parse_datetime: SS 형식 "YYYY-MM-DD H:MM" ──────────────────
+
+def test_parse_datetime_ss_format_single_digit_hour():
+    """SS date_raw '2025-10-21 1:44' 형식 파싱 — 시각 보존."""
+    from datetime import datetime as dt
+    result = _parse_datetime("2025-10-21 1:44")
+    # 현재 버그: 시각 버리고 00:00 반환
+    assert result is not None
+    assert result == dt(2025, 10, 21, 1, 44), f"expected 01:44 got {result}"
+
+def test_parse_datetime_ss_format_two_digit_hour():
+    """SS date_raw '2025-10-21 20:56' 형식 파싱 — 시각 보존."""
+    from datetime import datetime as dt
+    result = _parse_datetime("2025-10-21 20:56")
+    assert result is not None
+    assert result == dt(2025, 10, 21, 20, 56), f"expected 20:56 got {result}"
+
+def test_parse_datetime_hhmm_sort_order():
+    """01:44 < 20:56 정렬 — build_history가 올바른 순서로 정렬해야 한다."""
+    from datetime import datetime as dt
+    early = _parse_datetime("2025-10-21 1:44")
+    late  = _parse_datetime("2025-10-21 20:56")
+    assert early < late, "새벽 주문이 저녁 주문보다 먼저여야 한다"

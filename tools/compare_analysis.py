@@ -145,7 +145,7 @@ def main() -> int:
         print(msg, flush=True)
         return 1
     else:
-        print(f"✅ 비교 통과 {checked}/{len(TAB_PAIRS)} 탭", flush=True)
+        print(f"[OK] 비교 통과 {checked}/{len(TAB_PAIRS)} 탭", flush=True)
         return 0
 
 
