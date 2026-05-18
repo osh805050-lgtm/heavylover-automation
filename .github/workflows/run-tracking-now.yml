@@ -1,4 +1,4 @@
-name: Run Tracking Now (one-shot)
+name: Run Tracking Now (임시)
 
 on:
   workflow_dispatch: {}
@@ -7,7 +7,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: SSH로 Vultr에서 송장 등록 실행
+      - name: SSH로 tracking 직접 실행
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VULTR_HOST }}
@@ -16,4 +16,10 @@ jobs:
           port: ${{ secrets.VULTR_PORT }}
           script: |
             cd /root/heavylover-automation
-            /root/heavylover-automation/venv/bin/python3 -c "from tracking_register import run_from_excel; run_from_excel()" 2>&1
+            echo "=== git SHA ==="
+            git log --oneline -2
+            echo "=== tracking 직접 실행 ==="
+            ./venv/bin/python -c "
+import tracking_register
+tracking_register.run_from_excel()
+" 2>&1
