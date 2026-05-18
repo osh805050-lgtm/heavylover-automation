@@ -178,7 +178,7 @@ NATIONWIDE_OVERRIDE_KEYWORDS = [
 # - 타지역(부산·광주 등) 공고도 본문이 헤비로버 적합하면 점수 충분히 받도록 함 (지역 가점 비중 ↓)
 PREFERRED_REGIONS = ["경기", "용인", "수지", "전국"]
 PREFERRED_AGENCIES = [
-    "농림축산식품부", "aT", "K-Food",
+    "aT", "K-Food",  # 농림축산식품부 제거 — 무관 공고(방역·할당관세)에 과가점 방지
     "용인", "경기", "수지구",
     "중소벤처기업부", "창업진흥원",
     "소상공인시장진흥공단", "소진공",
@@ -237,6 +237,8 @@ def score_announcement(item):
         }
 
     text = f"{title} {body} {agency}"
+    # 키워드 점수 산출은 제목+본문만 사용 — 기관명에 '식품' 포함돼도 오매칭 방지
+    text_content = f"{title} {body}"
 
     # 비공고 패턴 (협약·평가결과·채용·입찰공고 등) → 즉시 0점
     if any(p in title for p in NON_ANNOUNCEMENT_PATTERNS):
@@ -397,37 +399,37 @@ def score_announcement(item):
     fit_score = 0
 
     # 헤비로버 직결 강한 매칭 (초기창업패키지·강한소상공인·농식품글로벌·K-FOOD 등)
-    strong_hits = _count_hits(text, STRONG_MATCH_KEYWORDS)
+    strong_hits = _count_hits(text_content, STRONG_MATCH_KEYWORDS)
     has_strong = strong_hits > 0
     if strong_hits > 0:
-        matched += [k for k in STRONG_MATCH_KEYWORDS if k.lower() in text.lower()][:3]
+        matched += [k for k in STRONG_MATCH_KEYWORDS if k.lower() in text_content.lower()][:3]
         fit_score += min(6, strong_hits * 3)  # 강한 매칭 1개 = 3점, 2개 = 6점 cap
 
     # 핵심 키워드 (식품·D2C·이커머스·수출 등)
-    core_hits = _count_hits(text, CORE_KEYWORDS)
+    core_hits = _count_hits(text_content, CORE_KEYWORDS)
     if core_hits > 0:
-        matched += [k for k in CORE_KEYWORDS if k.lower() in text.lower()][:3]
+        matched += [k for k in CORE_KEYWORDS if k.lower() in text_content.lower()][:3]
         fit_score += min(3, core_hits * 0.8)
 
     # 성장·창업 키워드
-    growth_hits = _count_hits(text, GROWTH_KEYWORDS)
+    growth_hits = _count_hits(text_content, GROWTH_KEYWORDS)
     if growth_hits > 0:
-        matched += [k for k in GROWTH_KEYWORDS if k.lower() in text.lower()][:3]
+        matched += [k for k in GROWTH_KEYWORDS if k.lower() in text_content.lower()][:3]
         fit_score += min(2, growth_hits * 0.5)
 
     # 기술 키워드 (보너스)
-    tech_hits = _count_hits(text, TECH_KEYWORDS)
+    tech_hits = _count_hits(text_content, TECH_KEYWORDS)
     if tech_hits > 0:
         fit_score += min(1, tech_hits * 0.3)
 
     # 헤비로버 우선순위 지원 유형 가점 (자금·인프라·공간)
-    high_prio_hits = _count_hits(text, HIGH_PRIORITY_SUPPORT_KEYWORDS)
+    high_prio_hits = _count_hits(text_content, HIGH_PRIORITY_SUPPORT_KEYWORDS)
     if high_prio_hits > 0:
-        matched += [k for k in HIGH_PRIORITY_SUPPORT_KEYWORDS if k.lower() in text.lower()][:3]
+        matched += [k for k in HIGH_PRIORITY_SUPPORT_KEYWORDS if k.lower() in text_content.lower()][:3]
         fit_score += min(2.5, high_prio_hits * 1.2)  # 1개 = +1.2, 2개 = +2.4 cap
 
     # 부적합 지원 유형 감점 (단순 교육·세미나만)
-    low_prio_hits = _count_hits(text, LOW_PRIORITY_SUPPORT_KEYWORDS)
+    low_prio_hits = _count_hits(text_content, LOW_PRIORITY_SUPPORT_KEYWORDS)
     if low_prio_hits > 0:
         # 단, 자금·인프라·공간 키워드도 같이 있으면 감점 안 함 (실질 지원이면 OK)
         if not high_prio_hits:
@@ -442,12 +444,13 @@ def score_announcement(item):
     # 헤비로버 직결 발주기관(식품·수출·창업) — 단독으로도 A 등급 도달 가능하게
     KEY_AGENCIES_STRONG = [
         "KOTRA", "aT(", "한국농수산식품유통공사",  # 식품·수출 직결
-        "창업진흥원", "농림축산식품부",              # 헤비로버 핵심 정책 발주
+        "창업진흥원",                               # 헤비로버 핵심 (초기창업패키지)
         "용인시산업진흥원", "용인시",                # 본사 지자체
         "경기도경제과학진흥원", "(재)경기도경제과학진흥원",  # 본사 광역
         "소상공인시장진흥공단",                       # 소진공
     ]
     KEY_AGENCIES_NORMAL = [
+        "농림축산식품부",  # 식품 무관 공고(방역·할당관세 등) 과가점 방지 — food 키워드와 조합 시 자연히 점수 높아짐
         "중소벤처기업부", "중소기업기술정보진흥원",
         "산업통상부", "산업통상자원부",
         "정보통신산업진흥원",
