@@ -10,7 +10,6 @@ Claude API 의미 판정은 Layer 4에서 (비용 절감 위해 분리).
   9 이상 → 긴급 알림 (별도 이모지)
 """
 
-import re
 from datetime import datetime, timedelta, timezone
 
 KST = timezone(timedelta(hours=9))
@@ -544,8 +543,6 @@ def score_all(items):
 
 
 if __name__ == "__main__":
-    import json
-
     sample = [
         {"title": "2026년 초기창업패키지 모집공고", "agency": "창업진흥원", "deadline": "2026-05-15"},
         {"title": "냉동식품 K-Food 수출 바우처 지원사업", "agency": "aT", "deadline": "2026-04-30"},
