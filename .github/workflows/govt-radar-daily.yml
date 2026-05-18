@@ -16,7 +16,7 @@ concurrency:
 jobs:
   radar:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45  # 2026-05-18: Playwright 7 사이트 추가로 15→45 증가
 
     steps:
       - name: Checkout
@@ -28,10 +28,25 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-chromium-1.40
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: python -m playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (cache hit fallback)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: python -m playwright install-deps chromium
 
       - name: Run govt radar
         env:

@@ -36,8 +36,10 @@ if sys.platform == "win32":
 sys.path.insert(0, str(Path(__file__).parent))
 
 from lib import govt_sources
+from lib import govt_playwright
 from lib import naver_mail_client
 from lib import dedupe as dedupe_mod
+from lib import reconciler
 from lib import scorer
 
 import telegram_client
@@ -67,6 +69,18 @@ def collect_layer1(log):
     log.info("Layer 1 시작: 1차 크롤링 (15개 포털)")
     items, stats = govt_sources.fetch_all(verbose=False)
     log.info(f"Layer 1 완료: {len(items)}건 (소스별: {stats})")
+    return items, stats
+
+
+def collect_layer1_playwright(log):
+    """1차 (PW) - 화면 직접 렌더링으로 API/requests 누락 공고 추가 수집.
+
+    silent failure 해소 핵심: API 잘 잡힘에도 사이트 화면엔 더 있을 수 있다는
+    의심을 데이터로 검증. 결과는 reconciler가 items_l1과 매칭·합치기.
+    """
+    log.info("Layer 1 (PW) 시작: Playwright 7개 사이트 화면 추출")
+    items, stats = govt_playwright.fetch_all_playwright(verbose=False)
+    log.info(f"Layer 1 (PW) 완료: {len(items)}건 (소스별: {stats})")
     return items, stats
 
 
@@ -1169,6 +1183,42 @@ def main():
         log.info("Layer 1 스킵")
     else:
         items_l1, stats_l1 = collect_layer1(log)
+
+        # ─── Playwright primary 수집 + reconciliation ────────────────
+        # 사용자 요구: "API로 받은 데이터에 누락이 있는지 모른다" → 화면 직접
+        # 추출해서 cross-check. items_l1과 합치고 stats도 합쳐 source_health에 박제.
+        try:
+            items_pw, stats_pw = collect_layer1_playwright(log)
+        except Exception as e:
+            log.warning(f"Playwright 수집 실패 (전체 스킵): {type(e).__name__}: {e}")
+            items_pw, stats_pw = [], {}
+
+        if items_pw or stats_pw:
+            rec = reconciler.reconcile(items_l1, items_pw)
+            log.info(
+                f"Reconciliation: API {rec['stats']['api_count']} · "
+                f"PW {rec['stats']['pw_count']} · "
+                f"matched {rec['stats']['matched_count']} · "
+                f"playwright_only {rec['stats']['playwright_only_count']} "
+                f"(API 누락 후보)"
+            )
+            items_l1 = rec["merged"]
+            # 두 stats를 합쳐 source_health에 박제. 키는 (PW) 접미사로 분리됨.
+            stats_l1 = {**stats_l1, **stats_pw}
+
+            # API 누락 후보 → govt 채널 즉시 알림 (dry-run 제외)
+            if rec["playwright_only"] and not args.dry_run:
+                alert_text = reconciler.format_alert_text(
+                    rec["playwright_only"], max_show=10
+                )
+                if alert_text:
+                    try:
+                        telegram_client.send_message(alert_text, channel="govt")
+                        log.info(
+                            f"API 누락 알림 발송: {rec['stats']['playwright_only_count']}건"
+                        )
+                    except Exception as e:
+                        log.warning(f"API 누락 알림 발송 실패: {e}")
 
     # Layer 2
     if args.skip_layer2:
