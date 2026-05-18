@@ -29,9 +29,13 @@ jobs:
             # heavylover-repurchase 디렉토리 확인
             ls -la /root/heavylover-repurchase/repurchase_analysis.py || echo "WARNING: 파일 없음"
 
-            # 새 cron 항목 추가 (서버 시간 기준 — 기존 cron과 동일 timezone)
-            (crontab -l 2>/dev/null; echo "45 8 * * * cd /root/heavylover-repurchase && python repurchase_analysis.py --shadow >> /var/log/repurchase_shadow.log 2>&1") | crontab -
-            (crontab -l 2>/dev/null; echo "55 8 * * * cd /root/heavylover-repurchase && python tools/compare_analysis.py >> /var/log/compare_analysis.log 2>&1") | crontab -
+            # 잘못 등록된 python (venv 미사용) 항목 제거
+            crontab -l | grep -v "repurchase_analysis.py --shadow" | grep -v "tools/compare_analysis.py" | crontab -
+
+            # venv/bin/python으로 재등록 (기존 cron과 동일 패턴)
+            VENV=/root/heavylover-repurchase/venv/bin/python
+            (crontab -l 2>/dev/null; echo "45 8 * * * cd /root/heavylover-repurchase && $VENV repurchase_analysis.py --shadow >> logs/shadow.log 2>&1") | crontab -
+            (crontab -l 2>/dev/null; echo "55 8 * * * cd /root/heavylover-repurchase && $VENV tools/compare_analysis.py >> logs/compare.log 2>&1") | crontab -
 
             echo "=== 수정 후 crontab ==="
             crontab -l
