@@ -471,11 +471,11 @@ def run_from_excel():
         if item_code:
             cafe24_orders_to_register[order_id]["item_codes"].add(item_code)
 
+    import time as _time
     for order_id, info in cafe24_orders_to_register.items():
         tracking = info["tracking"]
         excel_item_codes = sorted(info["item_codes"])
         try:
-            # API로 order_item_code 조회 (엑셀 item_code는 product code일 수 있어 신뢰 불가)
             item_codes = cafe24_client.get_order_item_codes(order_id)
             if not item_codes:
                 cafe24_fail.append(f"{order_id}: order_item_code 조회 실패")
@@ -487,33 +487,36 @@ def run_from_excel():
                     api_response_body="get_order_item_codes returned empty",
                 ))
                 continue
-            r = register_tracking_cafe24(order_id, item_codes, tracking, CAFE24_LOGEN)
             api_codes_str = ",".join(item_codes) if isinstance(item_codes, list) else str(item_codes)
-            if r.status_code in (200, 201):
-                cafe24_success += 1
-                results.append(TrackingResult(
-                    channel="cafe24", order_id=order_id, item_code=api_codes_str,
-                    tracking_no=tracking, status="sent",
-                    api_response_code=str(r.status_code),
-                    api_response_body=_truncate_body(r.text),
-                ))
-            elif r.status_code == 422 and "cannot change" in r.text:
-                # 이미 배송중 등록된 건 — 성공 카운트엔 포함하되 status는 conflict_existing로 박제
-                cafe24_success += 1
-                results.append(TrackingResult(
-                    channel="cafe24", order_id=order_id, item_code=api_codes_str,
-                    tracking_no=tracking, status="conflict_existing",
-                    api_response_code="422",
-                    api_response_body=_truncate_body(r.text),
-                ))
-            else:
-                cafe24_fail.append(f"{order_id}: {r.text[:80]}")
-                results.append(TrackingResult(
-                    channel="cafe24", order_id=order_id, item_code=api_codes_str,
-                    tracking_no=tracking, status="failed",
-                    api_response_code=str(r.status_code),
-                    api_response_body=_truncate_body(r.text),
-                ))
+            last_status = "failed"
+            last_code = ""
+            last_body = ""
+            for attempt in range(3):
+                r = register_tracking_cafe24(order_id, item_codes, tracking, CAFE24_LOGEN)
+                last_code = str(r.status_code)
+                last_body = _truncate_body(r.text)
+                if r.status_code in (200, 201):
+                    cafe24_success += 1
+                    last_status = "sent"
+                    break
+                elif r.status_code == 422 and "cannot change" in r.text:
+                    cafe24_success += 1
+                    last_status = "conflict_existing"
+                    break
+                elif r.status_code in (429, 503) and attempt < 2:
+                    _time.sleep(5)
+                    continue
+                else:
+                    if attempt < 2:
+                        _time.sleep(3)
+                    else:
+                        cafe24_fail.append(f"{order_id}: {r.text[:80]}")
+            results.append(TrackingResult(
+                channel="cafe24", order_id=order_id, item_code=api_codes_str,
+                tracking_no=tracking, status=last_status,
+                api_response_code=last_code,
+                api_response_body=last_body,
+            ))
         except Exception as e:
             cafe24_fail.append(f"{order_id}: {e}")
             results.append(TrackingResult(
@@ -604,7 +607,7 @@ def run_from_excel():
                         naver_fail.append(f"{product_order_id}: {msg}")
                         last_body = _truncate_body(msg)
                         break
-                elif "RATE_LIMIT" in r.text and attempt < 2:
+                elif ("RATE_LIMIT" in r.text or r.status_code in (429, 500, 502, 503, 504)) and attempt < 2:
                     _time.sleep(3)
                     continue
                 else:
