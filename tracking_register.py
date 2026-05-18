@@ -604,7 +604,12 @@ def run_from_excel():
                         if "RATE_LIMIT" in str(r.text) and attempt < 2:
                             _time.sleep(3)
                             continue
-                        naver_fail.append(f"{product_order_id}: {msg}")
+                        if "주문상태 및 클레임상태를 확인하세요" in msg:
+                            # 이미 발송 처리된 주문 (카페24의 422 conflict_existing과 동일)
+                            naver_success += 1
+                            last_status = "conflict_existing"
+                        else:
+                            naver_fail.append(f"{product_order_id}: {msg}")
                         last_body = _truncate_body(msg)
                         break
                 elif ("RATE_LIMIT" in r.text or r.status_code in (429, 500, 502, 503, 504)) and attempt < 2:

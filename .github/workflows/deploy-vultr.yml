@@ -41,9 +41,6 @@ jobs:
               git rev-parse --short HEAD
             done
             echo "=== 배포 완료: $(date '+%Y-%m-%d %H:%M:%S') ==="
-            echo "=== tracking 즉시 실행 ==="
-            cd /root/heavylover-automation
-            ./venv/bin/python -c "import tracking_register; tracking_register.run_from_excel()" 2>&1 || true
 
       - name: 텔레그램 알림
         if: always()
