@@ -67,8 +67,12 @@ def main():
         text = (msg.get("text") or "").strip().lower()
         if text == "/tracking":
             print(f"[{datetime.now():%H:%M:%S}] /tracking 수신 — 엑셀 등록 시작")
-            tracking_register.run_from_excel()
-            break  # 한 번 실행 후 중복 방지
+            success = tracking_register.run_from_excel()
+            if success is False:
+                # 실패 시 last_id 미저장 → 5분 후 cron에서 이 /tracking 재처리
+                print(f"[{datetime.now():%H:%M:%S}] run_from_excel 실패 — last_id 미저장, 재시도 대기")
+                return
+            break  # 성공 시 중복 방지
 
     last_id = updates[-1]["update_id"]
     _save_last_id(last_id)

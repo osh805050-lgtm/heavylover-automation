@@ -121,8 +121,13 @@ def find_today_excel():
            int(m.group(3)) == now.day
     )
 
-    today_files = p1 + p2
-    return today_files[-1] if today_files else None
+    # p1(일반 송장 파일) 우선 — p2(더다 발주 양식)는 송장번호가 없는 원본일 수 있음
+    # p1 + p2 후 [-1] 선택 금지: 더다 양식이 뒤에 붙으면 잘못된 파일 선택됨
+    if p1:
+        return p1[-1]
+    if p2:
+        return p2[-1]
+    return None
 
 
 def read_tracking_excel(path: Path):
@@ -398,12 +403,13 @@ def run_from_excel():
     if not excel_path:
         today = datetime.now().strftime("%Y%m%d")
         telegram_client.send_message(
-            f"⚠️ 오늘({today}) 송장 엑셀을 찾을 수 없습니다.\n"
-            f"OneDrive 바탕화면에 '일반_{today}.xls' 파일을 올린 후\n"
-            f"다음 11시 자동화에서 다시 시도해주세요.",
+            f"⚠️ 오늘({today}) 송장 파일을 아직 못 찾았습니다.\n"
+            f"더다에서 '일반_{today}.xls' 파일이 OneDrive 바탕화면에 올라오면\n"
+            f"5분 안에 자동으로 다시 확인합니다.\n"
+            f"(이미 올라왔는데 이 메시지가 나오면 /tracking 다시 보내주세요)",
             channel="ops",
         )
-        return
+        return False
 
     print(f"  파일: {excel_path.name}")
 
@@ -411,15 +417,14 @@ def run_from_excel():
     try:
         data = read_tracking_excel(excel_path)
     except TrackingParseError as e:
-        # 운영자가 액션 가능한 명확한 메시지
         telegram_client.send_message(
             f"⚠️ 엑셀 파싱 실패 — 자동 등록 중단\n{e}",
             channel="ops",
         )
-        return
+        return False
     except Exception as e:
         telegram_client.send_message(f"⚠️ 엑셀 읽기 실패: {e}", channel="ops")
-        return
+        return False
 
     cafe24_items = data["cafe24"]
     naver_items = data["naver"]
@@ -427,8 +432,13 @@ def run_from_excel():
     total_buyers = data["cafe24_buyers"] + data["naver_buyers"] + data["coupang_buyers"]
 
     if not cafe24_items and not naver_items and not coupang_items:
-        telegram_client.send_message("⚠️ 등록할 송장이 없습니다.", channel="ops")
-        return
+        telegram_client.send_message(
+            f"⚠️ 파일({data['filename']})에 송장번호가 없습니다.\n"
+            f"더다에서 송장번호가 채워진 파일인지 확인해주세요.\n"
+            f"올바른 파일이 올라오면 /tracking 다시 보내주세요.",
+            channel="ops",
+        )
+        return False
 
     # 3) 즉시 등록 시작 (재확인 단계 없음 — 이미 /tracking 받은 상태)
     telegram_client.send_message(
@@ -719,6 +729,7 @@ def run_from_excel():
 
     telegram_client.send_message(result_msg, channel="ops")
     print(result_msg)
+    return True
 
 
 def pluscl_to_cafe24(pluscl_code):
