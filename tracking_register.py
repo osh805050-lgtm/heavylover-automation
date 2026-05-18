@@ -121,13 +121,11 @@ def find_today_excel():
            int(m.group(3)) == now.day
     )
 
-    # p1(일반 송장 파일) 우선 — p2(더다 발주 양식)는 송장번호가 없는 원본일 수 있음
-    # p1 + p2 후 [-1] 선택 금지: 더다 양식이 뒤에 붙으면 잘못된 파일 선택됨
-    if p1:
-        return p1[-1]
-    if p2:
-        return p2[-1]
-    return None
+    today_files = p1 + p2
+    if not today_files:
+        return None
+    # 수정 시간(mtime) 기준 가장 최신 파일 선택 — 더다가 나중에 올린 파일이 송장 채워진 것
+    return max(today_files, key=lambda f: f.stat().st_mtime)
 
 
 def read_tracking_excel(path: Path):
