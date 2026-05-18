@@ -329,6 +329,64 @@ def fetch_gsp_pw():
     return items[:30]
 
 
+# ==================== 8. 소상공인24 (SPA) ====================
+def fetch_sbiz24_pw():
+    """소상공인24 — Vue.js SPA. requests로는 빈 HTML → Playwright로 렌더링 후 .c_pbancNm 추출.
+
+    탐색 결과 (2026-05-19):
+      - API: /api/pbanc/sbiz24PbancList (인증 필요 구조)
+      - DOM: tbody tr > .c_pbancNm 에 공고명 존재
+      - 공고별 고유 URL이 DOM에 노출되지 않으므로 대표 URL 사용
+    """
+    url = "https://www.sbiz24.kr/#/pbanc"
+    html, final_url = _fetch_with_playwright(
+        url,
+        wait_selector=".c_pbancNm",
+        wait_timeout_ms=20000,
+        total_timeout_ms=30000,
+        wait_until="networkidle",
+    )
+    if not html:
+        return []
+
+    soup = BeautifulSoup(html, "lxml")
+    items = []
+    seen = set()
+
+    for row in soup.select("tbody tr"):
+        title_td = row.select_one(".c_pbancNm")
+        if not title_td:
+            continue
+        title = _clean_text(title_td.get_text(" ", strip=True))
+        if not title or len(title) < 5:
+            continue
+        if not _is_announcement_text(title):
+            continue
+
+        # 접수기간 td에서 마감일 추출 — "YYYY.MM.DD ~ YYYY.MM.DD" 형태
+        deadline = None
+        for td in row.select("td"):
+            td_text = _clean_text(td.get_text(" ", strip=True))
+            if "~" in td_text and re.search(r"\d{4}", td_text):
+                deadline = _parse_date(td_text.split("~")[-1].strip())
+                break
+
+        if title in seen:
+            continue
+        seen.add(title)
+
+        items.append(_norm_item(
+            source="소상공인24",
+            title=title[:200],
+            url="https://www.sbiz24.kr/#/pbanc",
+            agency="소상공인시장진흥공단",
+            deadline=deadline,
+        ))
+
+    log.info(f"소상공인24(PW): {len(items)}건")
+    return items[:50]
+
+
 # ==================== 통합 ====================
 # stats 키는 "(PW)" 접미사를 붙여 기존 stats_l1과 분리 추적한다.
 # items의 source 필드는 그대로 (예: "경기테크노파크") — reconciler가 매칭 가능.
@@ -340,6 +398,7 @@ PLAYWRIGHT_SOURCES = [
     ("창업진흥원(PW)", fetch_kised_pw),
     ("중소벤처기업진흥공단(PW)", fetch_kosmes_pw),
     ("경기스타트업플랫폼(PW)", fetch_gsp_pw),
+    ("소상공인24(PW)", fetch_sbiz24_pw),
 ]
 
 

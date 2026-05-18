@@ -1,10 +1,9 @@
 name: 정부지원 레이더 일일 실행
 
-# 매일 KST 08:00 = UTC 전날 23:00 (정각 큐 집중 회피)
+# 자동 cron 해제 (2026-05-19): 미국 IP 차단으로 5개 사이트 0건 → 데스크톱 /govt-radar 슬래시 명령으로 전환
+# workflow_dispatch만 유지 = 데스크톱 못 켤 때 백업 경로
 on:
-  schedule:
-    - cron: "0 23 * * *"
-  workflow_dispatch:  # 수동 실행 가능
+  workflow_dispatch:
 
 permissions:
   contents: write  # 결과 JSON 커밋용

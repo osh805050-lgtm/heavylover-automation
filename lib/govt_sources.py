@@ -17,7 +17,6 @@
 
 import logging
 import re
-from datetime import datetime
 from urllib.parse import urljoin
 
 import requests
@@ -69,7 +68,7 @@ def _safe_get(url, **kwargs):
         return None
 
 
-def _fetch_with_playwright(url, wait_selector=None, wait_timeout_ms=10000, total_timeout_ms=25000):
+def _fetch_with_playwright(url, wait_selector=None, wait_timeout_ms=10000, total_timeout_ms=25000, wait_until="domcontentloaded"):
     """Playwright Python으로 JS 렌더링 후 HTML 반환 (codex fix E 반영).
 
     SPA·JS 동적 사이트(중기부 main, 농림부, sbiz24 등)용. requests로 빈 HTML
@@ -101,7 +100,7 @@ def _fetch_with_playwright(url, wait_selector=None, wait_timeout_ms=10000, total
                 )
                 page = context.new_page()
                 try:
-                    page.goto(url, wait_until="domcontentloaded", timeout=total_timeout_ms)
+                    page.goto(url, wait_until=wait_until, timeout=total_timeout_ms)
                     if wait_selector:
                         try:
                             page.wait_for_selector(wait_selector, timeout=wait_timeout_ms)
@@ -284,8 +283,8 @@ def fetch_sbiz24():
     url = "https://www.sbiz24.kr/#/pbanc"
     r = _safe_get(url)
     if not r:
-        # SPA라 직접 크롤링 어려움 — API 폴백 시도
-        api = "https://www.sbiz24.kr/api/pbanc/list"
+        # SPA라 직접 크롤링 어려움 — API 폴백 시도 (2026-05-19: 실제 엔드포인트 수정)
+        api = "https://www.sbiz24.kr/api/pbanc/sbiz24PbancList"
         r = _safe_get(api, params={"page": 1, "size": 50})
         if not r:
             return []

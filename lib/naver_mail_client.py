@@ -72,6 +72,7 @@ NOISE_SUBJECT_KEYWORDS = [
     "프로모션", "할인", "쿠폰",
     "빠른정산", "정산 안내",
     "(광고)",
+    "[정부지원 레이더]",  # 자기 발송 레이더 리포트가 IMAP으로 재파싱되는 것 방지
 ]
 
 
@@ -192,7 +193,6 @@ def _is_govt_mail(subject, sender, body):
     3. 노이즈가 아니고 키워드가 있으면 통과
     """
     sender_lower = sender.lower()
-    subject_lower = subject.lower()
 
     # 1. 신뢰 도메인은 무조건 통과 (단, ypa.or.kr이 directsend 경유해도 OK)
     if any(t.lower() in sender_lower for t in TRUSTED_SENDERS):

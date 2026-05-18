@@ -17,7 +17,7 @@
 - **블런트**: 듣기 좋은 말 < 근거·출처 있는 냉정한 분석.
 - **모르면 모른다.** 추측으로 빈칸 채우지 않음.
 - **문제 → 원인 → 해결** 구조.
-- **비전공자 설명**: 비유 + 실행 예시. 전문 용어는 풀어서.
+- **비전공자 설명 (강제)**: 전문 용어(API·cron·regex·gspread·quota·atomic·race condition·timeout·exception·webhook·OAuth·payload·schema 등) 사용 시 같은 문장 또는 직후 1줄에 **비유 또는 일상 단어 번역 동반 필수**. 동반 없이 전문 용어 단독 사용 금지. 응답·보고 모두 **표·요약·비유 우선**. 어려운 답변 ≥ 5줄이면 반드시 비유 1개 동반.
 - **응답 인용 규칙**: 내부 메타데이터(failures.md 번호 ㊵·patterns.md 섹션명·hook 파일 경로) 인용 금지. 사실 자체만. 예: "오늘만 5건이 외부 API 키 미확인" (O) / "failures.md ㊵㊴㊳ §외부API다루기 9번 위반" (X)
 - **한국어 기본.** 기술 용어만 영어 병기.
 - **병렬 처리**: 독립 작업(Read·Grep·SSH·API 호출 등)은 단일 메시지에 multiple tool 호출로 동시 실행. 순차 의존성 없으면 기다리지 않음.
@@ -206,6 +206,7 @@
 | 09:00 재구매 리포트 + 📊대시보드 3개(통합/카페24/SS) + 텔레그램 | ✅ 매일 — v6: 변동중 표시·시트 숨김·RuntimeError fail-fast |
 | 재구매 GAS 분석 v5.1 (수치 결함 10개 + 운영 결함 2개 수정) | ⚠️ 사용자 수동 붙여넣기 필요 (`scripts/gas/repurchase_v5_1.gs`). `setupDailyTrigger()` **미실행** — Apps Script에서 직접 실행해야 트리거 등록. 미등록 시 pipeline_meta에 gas row 없음 → `stale` 알림 매일 발생. |
 | **GitHub push → Vultr 자동 배포** (`.github/workflows/deploy-vultr.yml`) | ✅ `*.py` push 시 SSH→`git reset --hard origin/main`→텔레그램 알림. 콘솔 진입 불필요 |
+| **정부지원 레이더** (`/govt-radar` 슬래시 명령) | 🔄 수동 — 매주 월요일 오전 권장. GitHub Actions cron 해제(2026-05-19). 백업: `workflow_dispatch`. Playwright 8개(소상공인24 포함). |
 | 카페24 N10→N20 / SS 신규→발주확인 | 수동 (API 한계) |
 
 ### 위치 요약
