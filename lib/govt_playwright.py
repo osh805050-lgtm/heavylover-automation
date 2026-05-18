@@ -331,15 +331,9 @@ def fetch_gsp_pw():
 
 # ==================== 8. 소상공인24 (SPA) ====================
 def fetch_sbiz24_pw():
-    """소상공인24 — Vue.js SPA. requests로는 빈 HTML → Playwright로 렌더링 후 .c_pbancNm 추출.
-
-    탐색 결과 (2026-05-19):
-      - API: /api/pbanc/sbiz24PbancList (인증 필요 구조)
-      - DOM: tbody tr > .c_pbancNm 에 공고명 존재
-      - 공고별 고유 URL이 DOM에 노출되지 않으므로 대표 URL 사용
-    """
+    """소상공인24 — Vue.js SPA. requests로 빈 HTML → Playwright networkidle + .c_pbancNm 추출."""
     url = "https://www.sbiz24.kr/#/pbanc"
-    html, final_url = _fetch_with_playwright(
+    html, _ = _fetch_with_playwright(
         url,
         wait_selector=".c_pbancNm",
         wait_timeout_ms=20000,
@@ -358,12 +352,9 @@ def fetch_sbiz24_pw():
         if not title_td:
             continue
         title = _clean_text(title_td.get_text(" ", strip=True))
-        if not title or len(title) < 5:
-            continue
-        if not _is_announcement_text(title):
+        if not title or len(title) < 5 or not _is_announcement_text(title):
             continue
 
-        # 접수기간 td에서 마감일 추출 — "YYYY.MM.DD ~ YYYY.MM.DD" 형태
         deadline = None
         for td in row.select("td"):
             td_text = _clean_text(td.get_text(" ", strip=True))
@@ -374,7 +365,6 @@ def fetch_sbiz24_pw():
         if title in seen:
             continue
         seen.add(title)
-
         items.append(_norm_item(
             source="소상공인24",
             title=title[:200],
