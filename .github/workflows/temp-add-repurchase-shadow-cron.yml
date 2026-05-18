@@ -1,0 +1,37 @@
+name: "[TEMP] Repurchase Shadow Cron 등록"
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  add-cron:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 현재 crontab 확인 후 shadow/compare 항목 추가
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VULTR_HOST }}
+          username: ${{ secrets.VULTR_USER }}
+          key: ${{ secrets.VULTR_SSH_KEY }}
+          port: ${{ secrets.VULTR_PORT }}
+          script: |
+            set -e
+            echo "=== 현재 crontab ==="
+            crontab -l || echo "(crontab 없음)"
+
+            # 이미 등록됐으면 스킵
+            if crontab -l 2>/dev/null | grep -q "repurchase_analysis.py --shadow"; then
+              echo "=== 이미 등록됨 — 스킵 ==="
+              crontab -l
+              exit 0
+            fi
+
+            # heavylover-repurchase 디렉토리 확인
+            ls -la /root/heavylover-repurchase/repurchase_analysis.py || echo "WARNING: 파일 없음"
+
+            # 새 cron 항목 추가 (서버 시간 기준 — 기존 cron과 동일 timezone)
+            (crontab -l 2>/dev/null; echo "45 8 * * * cd /root/heavylover-repurchase && python repurchase_analysis.py --shadow >> /var/log/repurchase_shadow.log 2>&1") | crontab -
+            (crontab -l 2>/dev/null; echo "55 8 * * * cd /root/heavylover-repurchase && python tools/compare_analysis.py >> /var/log/compare_analysis.log 2>&1") | crontab -
+
+            echo "=== 수정 후 crontab ==="
+            crontab -l
