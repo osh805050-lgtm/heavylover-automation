@@ -19,20 +19,13 @@ jobs:
             echo "=== 현재 crontab ==="
             crontab -l || echo "(crontab 없음)"
 
-            # 이미 등록됐으면 스킵
-            if crontab -l 2>/dev/null | grep -q "repurchase_analysis.py --shadow"; then
-              echo "=== 이미 등록됨 — 스킵 ==="
-              crontab -l
-              exit 0
-            fi
-
             # heavylover-repurchase 디렉토리 확인
             ls -la /root/heavylover-repurchase/repurchase_analysis.py || echo "WARNING: 파일 없음"
 
-            # 잘못 등록된 python (venv 미사용) 항목 제거
+            # 기존 shadow/compare cron 항목 모두 제거 (python/venv 구분 없이)
             crontab -l | grep -v "repurchase_analysis.py --shadow" | grep -v "tools/compare_analysis.py" | crontab -
 
-            # venv/bin/python으로 재등록 (기존 cron과 동일 패턴)
+            # venv/bin/python으로 등록 (기존 cron과 동일 패턴)
             VENV=/root/heavylover-repurchase/venv/bin/python
             (crontab -l 2>/dev/null; echo "45 8 * * * cd /root/heavylover-repurchase && $VENV repurchase_analysis.py --shadow >> logs/shadow.log 2>&1") | crontab -
             (crontab -l 2>/dev/null; echo "55 8 * * * cd /root/heavylover-repurchase && $VENV tools/compare_analysis.py >> logs/compare.log 2>&1") | crontab -
