@@ -523,6 +523,12 @@ def _open_sheet():
     sheet_id = os.getenv("REPURCHASE_SHEET_ID", "")
     if not sheet_id:
         raise RuntimeError("REPURCHASE_SHEET_ID 미설정")
+    if not key_path or not Path(key_path).exists():
+        local = Path(__file__).parent / "gcp-service-account.json"
+        if local.exists():
+            key_path = str(local)
+        else:
+            raise RuntimeError(f"서비스 계정 키 없음: GOOGLE_SA_KEY_PATH={key_path!r} 또는 {local}")
     creds = Credentials.from_service_account_file(key_path, scopes=SCOPES)
     client = gspread.authorize(creds)
     return client.open_by_key(sheet_id)
