@@ -1,0 +1,49 @@
+name: temp-hide-py-tabs
+on:
+  workflow_dispatch:
+
+jobs:
+  hide:
+    runs-on: ubuntu-latest
+    steps:
+      - name: py_ 탭 숨김 처리
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VULTR_HOST }}
+          username: root
+          key: ${{ secrets.VULTR_SSH_KEY }}
+          script: |
+            cd /root/heavylover-repurchase
+            /root/heavylover-repurchase/venv/bin/python - <<'PYEOF'
+            import sys
+            sys.path.insert(0, '/root/heavylover-repurchase')
+            from dotenv import load_dotenv
+            load_dotenv('/root/heavylover-repurchase/.env', override=True)
+            from repurchase_analysis import _open_sheet
+
+            ss = _open_sheet()
+            all_ws = ss.worksheets()
+
+            py_tabs = [ws for ws in all_ws if ws.title.startswith('py_')]
+            print(f'py_ 탭 {len(py_tabs)}개 발견:')
+            for ws in py_tabs:
+                print(f'  - {ws.title} (현재 숨김:{ws.isSheetHidden})')
+
+            requests = []
+            hidden = []
+            for ws in py_tabs:
+                if not ws.isSheetHidden:
+                    requests.append({
+                        'updateSheetProperties': {
+                            'properties': {'sheetId': ws.id, 'hidden': True},
+                            'fields': 'hidden',
+                        }
+                    })
+                    hidden.append(ws.title)
+
+            if requests:
+                ss.batch_update({'requests': requests})
+                print(f'숨김 완료: {hidden}')
+            else:
+                print('이미 전부 숨김 처리됨')
+            PYEOF
