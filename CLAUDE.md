@@ -204,14 +204,14 @@
 | 04:00 카페24 OAuth 자동 갱신 | ✅ 매일 |
 | 08:30 시트 sync (카페24 + SS 5상태) | ✅ 매일 |
 | 09:00 재구매 리포트 + 📊대시보드 3개(통합/카페24/SS) + 텔레그램 | ✅ 매일 — v6: 변동중 표시·시트 숨김·RuntimeError fail-fast |
-| **재구매 Python 분석** (`repurchase_analysis.py`) | 🔄 **shadow 검증 중 (2026-05-20~)** — 08:45 `--shadow`로 `py_` 탭 병행 생성, 08:55 `compare_analysis.py`로 GAS vs Python 수치 자동 비교. `py_` 탭 19개 숨김 완료. 7일 연속 불일치 0건 → cut-over 진행. GAS 트리거는 유지 중. |
+| **재구매 Python 분석** (`repurchase_analysis.py`) | 🔄 **shadow 검증 중 (2026-05-20~)** — 08:45 `--shadow`로 `py_` 탭 병행 생성, 08:55 `compare_analysis.py`로 GAS vs Python 수치 자동 비교. `py_` 탭 19개 숨김 완료(**삭제 아님** — 승현님 확정). 7일 연속 불일치 0건 → cut-over: (1) `sheet_staleness.py` `"gas"`→`"analysis"` 2곳, (2) cron `--shadow` 제거, (3) GAS 트리거 삭제. GAS 트리거는 유지 중. |
 | **GitHub push → Vultr 자동 배포** (`.github/workflows/deploy-vultr.yml`) | ✅ `*.py` push 시 SSH→`git reset --hard origin/main`→텔레그램 알림. 콘솔 진입 불필요 |
 | **정부지원 레이더** (`/govt-radar` 슬래시 명령) | 🔄 수동 — 매주 월요일 오전 권장. GitHub Actions cron 해제(2026-05-19). 백업: `workflow_dispatch`. Playwright 8개(소상공인24 포함). |
 | 카페24 N10→N20 / SS 신규→발주확인 | 수동 (API 한계) |
 
 ### 위치 요약
 - 주문 자동화: Vultr (158.247.215.170, Ubuntu 22.04) `/root/heavylover-automation/`
-- 재구매 분석: Vultr `/root/heavylover-repurchase/` (별도 폴더, 충돌 방지)
+- 재구매 분석: Vultr `/root/heavylover-repurchase/` (별도 폴더, 충돌 방지) — `_open_sheet()` 작성 시 `sheets_sync.py` 폴백 패턴 복사 필수 (`GOOGLE_SA_KEY_PATH` 없으면 동일 폴더 `gcp-service-account.json` 자동 대체)
 - 택배사: 로젠 단일 — Cafe24 `0004` / 네이버 `KGB`
 - 작업: Windows + Git Bash/PowerShell. CLAUDE.md "가동 중" 표기 신뢰 금지 → `crontab -l` 실측 (patterns.md §자동화점검)
 
