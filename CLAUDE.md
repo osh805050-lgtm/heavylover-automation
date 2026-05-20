@@ -1,6 +1,6 @@
 # CLAUDE.md — HeavyLover 운영 컨텍스트
 
-**최종 업데이트**: 2026-05-18 (rev. 17) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
+**최종 업데이트**: 2026-05-20 (rev. 18) · **호칭**: 승현님 · **언어**: 한국어 · **사업주**: 비전공자
 
 > **외부 컨텍스트 우선 참조 규칙**: 정보 부족 시 추측 금지. 다음 위치를 먼저 Glob/Read 후 결정한다.
 > - 작업 종류별 회피 규칙: `docs/lessons/patterns.md`
@@ -204,7 +204,7 @@
 | 04:00 카페24 OAuth 자동 갱신 | ✅ 매일 |
 | 08:30 시트 sync (카페24 + SS 5상태) | ✅ 매일 |
 | 09:00 재구매 리포트 + 📊대시보드 3개(통합/카페24/SS) + 텔레그램 | ✅ 매일 — v6: 변동중 표시·시트 숨김·RuntimeError fail-fast |
-| 재구매 GAS 분석 v5.1 (수치 결함 10개 + 운영 결함 2개 수정) | ⚠️ 사용자 수동 붙여넣기 필요 (`scripts/gas/repurchase_v5_1.gs`). `setupDailyTrigger()` **미실행** — Apps Script에서 직접 실행해야 트리거 등록. 미등록 시 pipeline_meta에 gas row 없음 → `stale` 알림 매일 발생. |
+| **재구매 Python 분석** (`repurchase_analysis.py`) | 🔄 **shadow 검증 중 (2026-05-20~)** — 08:45 `--shadow`로 `py_` 탭 병행 생성, 08:55 `compare_analysis.py`로 GAS vs Python 수치 자동 비교. `py_` 탭 19개 숨김 완료. 7일 연속 불일치 0건 → cut-over 진행. GAS 트리거는 유지 중. |
 | **GitHub push → Vultr 자동 배포** (`.github/workflows/deploy-vultr.yml`) | ✅ `*.py` push 시 SSH→`git reset --hard origin/main`→텔레그램 알림. 콘솔 진입 불필요 |
 | **정부지원 레이더** (`/govt-radar` 슬래시 명령) | 🔄 수동 — 매주 월요일 오전 권장. GitHub Actions cron 해제(2026-05-19). 백업: `workflow_dispatch`. Playwright 8개(소상공인24 포함). |
 | 카페24 N10→N20 / SS 신규→발주확인 | 수동 (API 한계) |
