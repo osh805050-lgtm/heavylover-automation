@@ -421,21 +421,25 @@ def _extract_stage_flat(ws) -> list[dict]:
     if not completed_30:
         return []
 
+    # [2026-05-20] cumulative pooled — 분모 통일 (eligible → 첫구매자수 합).
+    # 이유: eligible mean은 분모가 매일 바뀌어 시계열 비교·박제 불가.
+    # pooled는 "최근 3개월 완결 코호트 누적 전환율" 단일 정의로 고정.
     last3_30 = completed_30[-3:]
-    avg30 = round(sum(r["30일_전환율"] or 0 for r in last3_30) / len(last3_30), 2)
-    base = sum(r["첫구매자수"] for r in last3_30)
+    base_30 = sum(r["첫구매자수"] for r in last3_30)
     conv30 = sum(r["30일_전환수"] for r in last3_30)
+    avg30 = round(conv30 / base_30 * 100, 2) if base_30 > 0 else 0
 
     result = [
-        {"단계": "1→2_30일", "기준고객수": base, "전환고객수": conv30, "전환율": avg30,
-         "해석": f"30일 빠른 전환, 최근 3개월({last3_30[0]['코호트월']}~{last3_30[-1]['코호트월']}) 평균"},
+        {"단계": "1→2_30일", "기준고객수": base_30, "전환고객수": conv30, "전환율": avg30,
+         "해석": f"30일 누적(완결 코호트), 최근 3개월({last3_30[0]['코호트월']}~{last3_30[-1]['코호트월']})"},
     ]
     if completed_60:
         last3_60 = completed_60[-3:]
-        avg60 = round(sum(r["60일_전환율"] or 0 for r in last3_60) / len(last3_60), 2)
+        base_60 = sum(r["첫구매자수"] for r in last3_60)
         conv60 = sum(r["60일_전환수"] for r in last3_60)
-        result.insert(0, {"단계": "1→2", "기준고객수": base, "전환고객수": conv60, "전환율": avg60,
-                          "해석": f"60일 누적, 최근 3개월({last3_60[0]['코호트월']}~{last3_60[-1]['코호트월']}) 평균"})
+        avg60 = round(conv60 / base_60 * 100, 2) if base_60 > 0 else 0
+        result.insert(0, {"단계": "1→2", "기준고객수": base_60, "전환고객수": conv60, "전환율": avg60,
+                          "해석": f"60일 누적(완결 코호트), 최근 3개월({last3_60[0]['코호트월']}~{last3_60[-1]['코호트월']})"})
     return result
 
 
@@ -1327,11 +1331,11 @@ def _build_action_points(conv_rate, m1_recent, p50_num, mom_pct, cohort_trend) -
         try:
             v = float(m1_recent)
             if v < 14:
-                points.append(f"🔴 첫 구매 후 한 달 안에 재구매하는 비율이 {v}%입니다. 목표(20%)에 크게 못 미칩니다. 구매 3일·10일·17일 후 리마인드 메일 검토 필요.")
+                points.append(f"🔴 첫 구매 후 한 달 안에 재구매하는 비율이 {v}%입니다 (M+1 코호트). 목표(20%)에 크게 못 미칩니다. 구매 3일·10일·17일 후 리마인드 메일 검토 필요.")
             elif v < 20:
-                points.append(f"🟡 첫 구매 후 한 달 안에 재구매하는 비율이 {v}%입니다. 목표(20%)에 조금 못 미칩니다. CRM 재구매 유도 메시지 강화를 검토하세요.")
+                points.append(f"🟡 첫 구매 후 한 달 안에 재구매하는 비율이 {v}%입니다 (M+1 코호트). 목표(20%)에 조금 못 미칩니다. CRM 재구매 유도 메시지 강화를 검토하세요.")
             else:
-                points.append(f"🟢 첫 구매 후 한 달 안에 재구매하는 비율이 {v}%로 목표(20%) 충족입니다.")
+                points.append(f"🟢 첫 구매 후 한 달 안에 재구매하는 비율이 {v}%로 목표(20%) 충족입니다 (M+1 코호트).")
         except (TypeError, ValueError):
             pass
 
@@ -1348,11 +1352,11 @@ def _build_action_points(conv_rate, m1_recent, p50_num, mom_pct, cohort_trend) -
                 except (TypeError, ValueError):
                     pass
             if v < 20:
-                points.append(f"🔴 첫 구매 후 60일 내 재구매율이 {v}%입니다{trend_str}. 상세페이지·구매 경험을 점검하세요.")
+                points.append(f"🔴 첫 구매 후 60일 내 재구매율이 {v}%입니다 (완결 코호트 누적){trend_str}. 상세페이지·구매 경험을 점검하세요.")
             elif v < 30:
-                points.append(f"🟡 첫 구매 후 60일 내 재구매율이 {v}%입니다{trend_str}. 개선 여지가 있습니다.")
+                points.append(f"🟡 첫 구매 후 60일 내 재구매율이 {v}%입니다 (완결 코호트 누적){trend_str}. 개선 여지가 있습니다.")
             else:
-                points.append(f"🟢 첫 구매 후 60일 내 재구매율이 {v}%입니다{trend_str}. 양호합니다.")
+                points.append(f"🟢 첫 구매 후 60일 내 재구매율이 {v}%입니다 (완결 코호트 누적){trend_str}. 양호합니다.")
         except (TypeError, ValueError):
             pass
 
